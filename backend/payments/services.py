@@ -21,6 +21,7 @@ from django.db import transaction
 
 from booking.models import Appointment, AppointmentStatus
 from core.exceptions import InvalidStateTransitionError, PaymentProviderError
+from payments.constants import STUCK_REFUND_THRESHOLD
 from payments.models import Payment, PaymentStatus
 from payments.providers.base import PaymentProvider
 from tenants.models import Salon
@@ -149,3 +150,47 @@ def initiate_refund(
         raise PaymentProviderError() from exc
 
     return payment
+
+
+def flag_stuck_refunds(*, salon: Salon, now: dt.datetime) -> int:
+    """
+    docs/DECISIONS.md § Stage 8.G decisions. Requires tenant context to
+    already be bound (core.tenancy.tenant_context) — this function does not
+    bind it itself, same convention as expire_overdue_appointments. Called
+    once per salon by payments.tasks.flag_stuck_refund_payments, which owns
+    the cross-salon loop and the tenant-context binding.
+
+    Candidate ids are found with an unlocked query, then each row is locked
+    and rechecked independently under its own transaction.atomic() — not one
+    lock over the whole batch — so a single row can't hold up or roll back
+    every other row in the same sweep. A row whose recheck finds it's no
+    longer REFUND_PENDING (a refund_succeeded webhook won the race between
+    the unlocked query and the lock) or is already flagged (an overlapping
+    sweep run) is silently skipped, not raised: same unattended-background-
+    cleanup reasoning as expire_overdue_appointments, and the skip is also
+    what makes a redelivered/overlapping run idempotent.
+
+    refund_initiated_at is NULL for a payment that never entered a refund,
+    or for a REFUND_PENDING row predating the Stage 8.G field migration —
+    __lte on NULL is never true in SQL, so those rows are never swept
+    (correct: there is no recorded stuck-since time to measure).
+    """
+    candidate_ids = Payment.objects.filter(
+        salon=salon,
+        status=PaymentStatus.REFUND_PENDING,
+        refund_initiated_at__lte=now - STUCK_REFUND_THRESHOLD,
+        flagged_for_review=False,
+    ).values_list("id", flat=True)
+
+    flagged_count = 0
+    for payment_id in candidate_ids:
+        with transaction.atomic():
+            payment = Payment.objects.select_for_update().get(salon=salon, pk=payment_id)
+            if payment.status != PaymentStatus.REFUND_PENDING:
+                continue
+            if payment.flagged_for_review:
+                continue
+            payment.flagged_for_review = True
+            payment.save(update_fields=["flagged_for_review"])
+            flagged_count += 1
+    return flagged_count
