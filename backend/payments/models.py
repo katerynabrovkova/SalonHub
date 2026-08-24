@@ -40,6 +40,14 @@ class Payment(TenantScopedModel, TimeStamped):
     # future background sweep (docs/DECISIONS.md § Stage 8 decisions). No
     # db_index yet — nothing filters on it until an admin view needs to.
     flagged_for_review = models.BooleanField(default=False)
+    # The instant this payment transitioned SUCCEEDED -> REFUND_PENDING,
+    # stamped once by initiate_refund and never moved afterward. null for
+    # every payment that never entered a refund — the honest "no refund"
+    # state, same null-vs-"" reasoning as Specialist.photo. This is the
+    # sweep's own clock for "how long stuck", deliberately not updated_at
+    # (auto_now moves on every save, untrustworthy for that measurement;
+    # docs/DECISIONS.md § Stage 8.G decisions).
+    refund_initiated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta(TenantScopedModel.Meta):
         abstract = False
