@@ -102,7 +102,9 @@ def initiate_payment(
     return payment, intent.provider_data, True
 
 
-def initiate_refund(*, payment_id: int, salon: Salon, provider: PaymentProvider) -> Payment:
+def initiate_refund(
+    *, payment_id: int, salon: Salon, provider: PaymentProvider, now: dt.datetime
+) -> Payment:
     """
     docs/DECISIONS.md § Stage 8.F decisions. Mirror-opposite order from
     `initiate_payment`: the status is written to `REFUND_PENDING` and
@@ -119,6 +121,13 @@ def initiate_refund(*, payment_id: int, salon: Salon, provider: PaymentProvider)
     already in flight or already done). Every other status — including
     `PROCESSING`, currently never assigned anywhere — is a 409, since none of
     them ever received money to refund.
+
+    `now` is stamped onto `refund_initiated_at` once, only at the real
+    `SUCCEEDED` -> `REFUND_PENDING` transition below — frozen thereafter.
+    The idempotent no-op paths above (`REFUND_PENDING`/`REFUNDED`) return
+    before touching it, deliberately: re-stamping on a duplicate call would
+    move the Stage 8.G sweep's clock every time a retry lands, defeating the
+    field's purpose (docs/DECISIONS.md § Stage 8.G decisions).
     """
     with transaction.atomic():
         payment = Payment.objects.select_for_update().get(salon=salon, pk=payment_id)
@@ -128,7 +137,8 @@ def initiate_refund(*, payment_id: int, salon: Salon, provider: PaymentProvider)
             raise InvalidStateTransitionError(details={"current_status": payment.status})
 
         payment.status = PaymentStatus.REFUND_PENDING
-        payment.save(update_fields=["status"])
+        payment.refund_initiated_at = now
+        payment.save(update_fields=["status", "refund_initiated_at"])
 
     try:
         provider.refund(

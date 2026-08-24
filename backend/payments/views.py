@@ -6,6 +6,7 @@ docs/DECISIONS.md § Stage 8 decisions, § Stage 8.E decisions).
 import logging
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -82,6 +83,11 @@ class PaymentWebhookView(APIView):
     provider_class: type[PaymentProvider] = MockPaymentProvider
 
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        # Single clock read for the whole request (our standing rule) — reused
+        # below as the `now=` passed to initiate_refund, so the refund's
+        # timestamp reflects when this webhook was handled, not a second,
+        # slightly-later read taken after the lock.
+        now = timezone.now()
         provider = self.provider_class()
 
         # Step 1: signature check, against the RAW body, before anything
@@ -213,6 +219,6 @@ class PaymentWebhookView(APIView):
                 ProcessedWebhookEvent.objects.create(provider_event_id=event_id)
 
             if should_initiate_refund:
-                initiate_refund(payment_id=payment_row.id, salon=salon, provider=provider)
+                initiate_refund(payment_id=payment_row.id, salon=salon, provider=provider, now=now)
 
         return Response(status=status.HTTP_200_OK)

@@ -10,7 +10,7 @@ lesson).
 
 Signature under test:
 
-    initiate_refund(*, payment_id, salon, provider) -> Payment
+    initiate_refund(*, payment_id, salon, provider, now) -> Payment
 
 `provider` is injected — no concrete provider implementation
 (`payments.providers.mock.MockPaymentProvider`) is used here, same
@@ -25,10 +25,12 @@ plus a write) — no monkeypatching. Every backing `Appointment` is
 `Appointment.status` (§ Stage 8.F decisions — refund eligibility is decided
 by the caller, not this service), so the appointment's own status is
 irrelevant here and `CONFIRMED` (the `make_appointment` default) is used
-only because it reads sensibly. No `now` parameter either: `Payment` has no
-refund-timestamp field, so there is nothing to inject a clock for. Every
-appointment/customer/specialist/service created here passes `salon=`
-explicitly (Stage 6 shell-seeding trap, per CLAUDE.md).
+only because it reads sensibly. `now` (§ Stage 8.G) is stamped onto
+`refund_initiated_at` only at the real `SUCCEEDED` -> `REFUND_PENDING`
+transition; every call site here passes the fixed `START` literal, never
+`timezone.now()`. Every appointment/customer/specialist/service created
+here passes `salon=` explicitly (Stage 6 shell-seeding trap, per
+CLAUDE.md).
 """
 
 import datetime as dt
@@ -46,6 +48,9 @@ from tests.conftest import make_appointment
 pytestmark = pytest.mark.django_db
 
 START = dt.datetime(2026, 8, 21, 10, 0, tzinfo=dt.UTC)
+# A known instant strictly before START, used only by the idempotent-no-op
+# test below to prove a duplicate call doesn't re-stamp refund_initiated_at.
+EARLIER = dt.datetime(2026, 8, 20, 9, 0, tzinfo=dt.UTC)
 
 
 @dataclass(frozen=True)
@@ -99,7 +104,9 @@ def _make_confirmed_appointment(salon, specialist, service, customer, *, start=S
     )
 
 
-def _make_payment(salon, appt, *, status, provider_reference_id="existing_ref"):
+def _make_payment(
+    salon, appt, *, status, provider_reference_id="existing_ref", refund_initiated_at=None
+):
     with tenant_context(salon.id):
         return Payment.objects.create(
             salon=salon,
@@ -108,6 +115,7 @@ def _make_payment(salon, appt, *, status, provider_reference_id="existing_ref"):
             currency=salon.currency,
             status=status,
             provider_reference_id=provider_reference_id,
+            refund_initiated_at=refund_initiated_at,
         )
 
 
@@ -122,12 +130,13 @@ def test_initiate_refund_happy_path_transitions_to_refund_pending(
     provider = _FakeProvider()
 
     with tenant_context(salon.id):
-        payment = initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        payment = initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert payment.status == PaymentStatus.REFUND_PENDING
     with tenant_context(salon.id):
         row = Payment.objects.get(pk=existing.pk)
     assert row.status == PaymentStatus.REFUND_PENDING
+    assert row.refund_initiated_at == START
 
 
 def test_initiate_refund_calls_provider_refund_exactly_once(salon, specialist, service, customer):
@@ -136,7 +145,7 @@ def test_initiate_refund_calls_provider_refund_exactly_once(salon, specialist, s
     provider = _FakeProvider()
 
     with tenant_context(salon.id):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert len(provider.calls) == 1
 
@@ -151,7 +160,7 @@ def test_initiate_refund_calls_provider_with_reference_id_and_appointment_refere
     provider = _FakeProvider()
 
     with tenant_context(salon.id):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert provider.calls == [{"provider_reference_id": "existing_ref", "reference": str(appt.id)}]
 
@@ -174,7 +183,7 @@ def test_initiate_refund_writes_refund_pending_before_calling_provider(
     provider = _AssertingProvider()
 
     with tenant_context(salon.id):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert seen["status_at_call_time"] == PaymentStatus.REFUND_PENDING
 
@@ -186,15 +195,20 @@ def test_initiate_refund_existing_refund_pending_is_returned_unchanged(
     salon, specialist, service, customer
 ):
     appt = _make_confirmed_appointment(salon, specialist, service, customer)
-    existing = _make_payment(salon, appt, status=PaymentStatus.REFUND_PENDING)
+    existing = _make_payment(
+        salon, appt, status=PaymentStatus.REFUND_PENDING, refund_initiated_at=EARLIER
+    )
     provider = _FakeProvider()
 
     with tenant_context(salon.id):
-        payment = initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        payment = initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert payment.pk == existing.pk
     assert payment.status == PaymentStatus.REFUND_PENDING
     assert provider.calls == []
+    with tenant_context(salon.id):
+        row = Payment.objects.get(pk=existing.pk)
+    assert row.refund_initiated_at == EARLIER
 
 
 def test_initiate_refund_existing_refunded_is_returned_unchanged(
@@ -205,7 +219,7 @@ def test_initiate_refund_existing_refunded_is_returned_unchanged(
     provider = _FakeProvider()
 
     with tenant_context(salon.id):
-        payment = initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        payment = initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert payment.pk == existing.pk
     assert payment.status == PaymentStatus.REFUNDED
@@ -221,7 +235,7 @@ def test_initiate_refund_rejects_a_pending_payment(salon, specialist, service, c
     provider = _FakeProvider()
 
     with tenant_context(salon.id), pytest.raises(InvalidStateTransitionError):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert provider.calls == []
     with tenant_context(salon.id):
@@ -235,7 +249,7 @@ def test_initiate_refund_rejects_a_failed_payment(salon, specialist, service, cu
     provider = _FakeProvider()
 
     with tenant_context(salon.id), pytest.raises(InvalidStateTransitionError):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert provider.calls == []
     with tenant_context(salon.id):
@@ -249,7 +263,7 @@ def test_initiate_refund_rejects_an_expired_payment(salon, specialist, service, 
     provider = _FakeProvider()
 
     with tenant_context(salon.id), pytest.raises(InvalidStateTransitionError):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert provider.calls == []
     with tenant_context(salon.id):
@@ -263,7 +277,7 @@ def test_initiate_refund_rejects_a_cancelled_payment(salon, specialist, service,
     provider = _FakeProvider()
 
     with tenant_context(salon.id), pytest.raises(InvalidStateTransitionError):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert provider.calls == []
     with tenant_context(salon.id):
@@ -279,7 +293,7 @@ def test_initiate_refund_invalid_state_error_carries_current_status_in_details(
     provider = _FakeProvider()
 
     with tenant_context(salon.id), pytest.raises(InvalidStateTransitionError) as exc_info:
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert exc_info.value.details == {"current_status": PaymentStatus.PENDING}
 
@@ -294,7 +308,7 @@ def test_initiate_refund_rejects_a_processing_payment(salon, specialist, service
     provider = _FakeProvider()
 
     with tenant_context(salon.id), pytest.raises(InvalidStateTransitionError):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     assert provider.calls == []
     with tenant_context(salon.id):
@@ -313,7 +327,7 @@ def test_initiate_refund_does_not_find_another_salons_payment(
     provider = _FakeProvider()
 
     with tenant_context(salon.id), pytest.raises(Payment.DoesNotExist):
-        initiate_refund(payment_id=existing.id, salon=other_salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=other_salon, provider=provider, now=START)
 
     assert provider.calls == []
 
@@ -322,7 +336,7 @@ def test_initiate_refund_nonexistent_payment_id_raises_bare_does_not_exist(salon
     provider = _FakeProvider()
 
     with tenant_context(salon.id), pytest.raises(Payment.DoesNotExist):
-        initiate_refund(payment_id=999_999_999, salon=salon, provider=provider)
+        initiate_refund(payment_id=999_999_999, salon=salon, provider=provider, now=START)
 
     assert provider.calls == []
 
@@ -338,7 +352,7 @@ def test_initiate_refund_provider_failure_raises_payment_provider_error(
     provider = _RaisingProvider(_Boom("network down"))
 
     with tenant_context(salon.id), pytest.raises(PaymentProviderError):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
 
 def test_initiate_refund_provider_failure_leaves_row_in_refund_pending(
@@ -349,7 +363,7 @@ def test_initiate_refund_provider_failure_leaves_row_in_refund_pending(
     provider = _RaisingProvider(_Boom("network down"))
 
     with tenant_context(salon.id), pytest.raises(PaymentProviderError):
-        initiate_refund(payment_id=existing.id, salon=salon, provider=provider)
+        initiate_refund(payment_id=existing.id, salon=salon, provider=provider, now=START)
 
     with tenant_context(salon.id):
         row = Payment.objects.get(pk=existing.pk)
