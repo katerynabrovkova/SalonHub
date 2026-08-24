@@ -2832,3 +2832,65 @@ Decided 2026-08-21, in discussion.
   from `cancelled_by` and timing; the EXPIRED-webhook case decides it itself
   (rule 3). `initiate_refund` receives an already-made refund decision and
   executes it.
+
+## Stage 8.G decisions (stuck-refund flagging sweep)
+
+Decided 2026-08-24, in discussion.
+
+Implementation specifics for the stuck-refund sweep whose policy (Variant B:
+flag-not-retry; 72h platform constant; the delayed-vs-double-refund risk
+asymmetry) was already decided in § Stage 8 decisions — this section does
+not restate that policy, only how it's built.
+
+- **The staleness clock is a dedicated `Payment.refund_initiated_at` field,
+  not `updated_at`.** `updated_at` (`auto_now`) is rewritten on every
+  `save()` — an untrustworthy clock for "how long has this been stuck", since
+  any unrelated field write on the row would silently reset it.
+  `refund_initiated_at` is stamped once, only at the real `SUCCEEDED` ->
+  `REFUND_PENDING` transition inside `initiate_refund`, and frozen
+  thereafter. This reverses § Stage 8.F's original "no `now` parameter"
+  decision — `now` was restored to `initiate_refund` because there is
+  finally a field to write it to.
+- **The stamp is written only on the real transition, never on the
+  idempotent no-op paths** (`initiate_refund` already `REFUND_PENDING` or
+  already `REFUNDED`) — re-stamping on a duplicate call would move the
+  clock every time a retry lands, defeating the field's purpose.
+- **Sweep mechanics mirror the § Stage 7.F expiry sweep:** an unlocked
+  candidate query (`status=REFUND_PENDING`,
+  `refund_initiated_at__lte=now - STUCK_REFUND_THRESHOLD`,
+  `flagged_for_review=False`), then each candidate is locked and rechecked
+  independently in its own `transaction.atomic()` + `select_for_update()` —
+  not one lock over the whole batch, so a single stuck row can't hold up or
+  roll back the rest of the sweep.
+- **Both conditions are rechecked under the lock — status still
+  `REFUND_PENDING` AND not already flagged — not just one.**
+  `status != REFUND_PENDING` catches a `refund_succeeded` webhook winning
+  the race between the unlocked query and the lock (the refund completed in
+  the meantime, so it was never actually stuck); `flagged_for_review`
+  catches an overlapping sweep run. The query filter and the under-lock
+  recheck are two independent layers: the recheck is what catches a change
+  landing *after* the unlocked query already ran, which the filter itself
+  cannot.
+- **A `NULL` `refund_initiated_at` is never swept.** `NULL` for a payment
+  that never entered a refund, and for any `REFUND_PENDING` row predating
+  this field's migration — `__lte` on `NULL` is never true in SQL. This is
+  correct, not a gap: there is no recorded stuck-since time to measure
+  those rows against.
+- **`STUCK_REFUND_THRESHOLD = 72h` is a platform constant in
+  `payments/constants.py`**, per the § Stage 8 decision that refund
+  settlement time is uniform across salons, not a per-salon lever. The
+  `@shared_task` runs every 30 minutes via `beat_schedule`: a 72h threshold
+  needs no finer granularity, and 30 minutes still catches a newly-stuck
+  refund within the same hour it crosses the threshold.
+- **Deviation from the original § Stage 8 wording, recorded deliberately:**
+  that entry said the stuck flag comes "plus a warning-level log." The
+  Stage 8.G implementation writes only the flag plus a per-salon info-level
+  *summary* log (count flagged per salon) — it does not emit a per-row
+  warning for each individual stuck payment. Reason: the flag itself is
+  the persistent, queryable Stage 8 signal
+  (`Payment.objects.filter(flagged_for_review=True)` is the exact list);
+  any *active* per-row signal — a warning log or a human notification — is
+  deferred to Stage 9, consistent with the already-established split that
+  Stage 8 emits the raw signal and Stage 9 turns it into a notification.
+  The "plus a log" from the original entry is therefore an intentional
+  Stage 9 concern, not a dropped requirement.
