@@ -2663,8 +2663,11 @@ Decided 2026-08-21, in discussion.
   established here — no prior convention existed), not in the body: the
   signature is computed over the raw request body, so it must live outside
   the data it signs.
-- **Payment lookup is `Payment.objects.get(provider_reference_id=...)`
-  directly, then `salon` from that `Payment`.** This differs from the 8.C
+- **Payment lookup is `Payment.unscoped_objects.get(provider_reference_id=...)`,
+  not the tenant-scoped `.objects` manager** — no tenant is bound yet at
+  lookup time, since the webhook arrives before the salon is known;
+  `salon` is then derived from the resolved `Payment` and a `tenant_context`
+  is entered for the transition. This differs from the 8.C
   outbound call, where `provider_reference_id` did not exist yet and
   `str(appointment.id)` was sent as `reference` instead — here, an inbound
   webhook carries the provider's own key, which by this point already sits
@@ -2672,15 +2675,26 @@ Decided 2026-08-21, in discussion.
   `provider_reference_id` is indexed but not unique; each `start_payment`
   generates a fresh `uuid4` hex, so a collision cannot occur in practice.
   Revisit making it unique at the database level later.
+  A lookup miss (no `Payment` with that `provider_reference_id`) logs a
+  `logger.warning` (including the `provider_reference_id`) and returns 404.
+  Open decision: revisit to 200 if a real acquirer retry-storms on 4xx — a
+  404 is chosen now to surface the desync loudly (valid signature but
+  unknown payment = us/provider out of sync), the same "desync = loud"
+  stance as the impossible-transition warning below; a real provider's
+  retry policy may later make 200 the safer choice.
 - **Event types handled: `payment_succeeded`, `payment_failed`,
   `refund_succeeded`.** Any other `event_type` → 200, ignored, no action.
 - **Status codes: 200 for everything accepted and processed, including
   ignored event types, duplicate events (idempotency), and events landing
-  on an already-`EXPIRED` appointment.** 4xx is reserved for an invalid
-  signature or a broken/unparseable body; 5xx only for our own failure.
-  Duplicates and ignored types return 200 rather than an error because
-  providers retry on non-200 — erroring on an already-processed duplicate
-  would make the provider hammer the endpoint again.
+  on an already-`EXPIRED` appointment.** Specific codes are pinned, not a
+  generic "4xx" bucket: `401` for an invalid signature (sender
+  authentication, not a format problem — distinct from a malformed body);
+  `400` for a malformed/unparseable body or a missing required field;
+  `404` for an unknown `provider_reference_id` (see the Payment lookup
+  bullet above); `5xx` only for our own failure. Duplicates and ignored
+  types return 200 rather than an error because providers retry on
+  non-200 — erroring on an already-processed duplicate would make the
+  provider hammer the endpoint again.
 - **Signature verification is the first step in the view, run against the
   raw `request.body` bytes, not `request.data`, before the serializer
   parses anything.** The mock verification stub returns `True`
@@ -2720,6 +2734,18 @@ Decided 2026-08-21, in discussion.
     branch lives in the handler itself, not a separate service, the same
     as `payment_succeeded` above; also written inside the same `atomic()`
     plus ledger write.
+- **An impossible transition still returns 200, but logs a
+  `logger.warning`.** Under the lock, a status already at the event's
+  target or further along the chain (e.g. `payment_succeeded` arriving
+  when the `Payment` is already `SUCCEEDED`, `REFUND_PENDING`, or
+  `REFUNDED`) is an expected duplicate/race and is a silent 200. A status
+  the transition can never legally come from (e.g. `refund_succeeded` on
+  a `SUCCEEDED` row, `payment_failed` on a `SUCCEEDED`/`REFUNDED` row)
+  logs a warning naming the event, the `provider_reference_id`, and the
+  current status — but still returns 200 and still writes the
+  `ProcessedWebhookEvent` row, since a webhook must not 4xx a duplicate.
+  This mirrors the 8.F allowlist-vs-duplicate split, except the anomaly
+  logs instead of raising 409.
 - **Scope of 8.E is reactive only.** The handler responds to provider
   events; it does not initiate payments (§ Stage 8.C/8.D) and does not
   compute refund eligibility itself. The only thing it initiates is the
