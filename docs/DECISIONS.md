@@ -3078,6 +3078,91 @@ implementation lands.
     no-enumeration rule guards against below. Flag any disagreement
     before this is implemented.
 
+- **Completing the Login-contract entry: email verification and password
+  reset endpoints also move under the salon prefix,
+  `/api/v1/salons/<slug>/...`** — not just login and registration. This
+  fills the gap the original Login-contract entry (above) explicitly left
+  open ("did not name verification/reset"); it supersedes nothing already
+  written and is a completing decision, not a reversal.
+  - **Reasoning:** consistency — one tenant-resolution mechanism for the
+    entire product surface, using the existing, already-tested
+    `TenantResolutionMiddleware` (salon resolved from the URL path), rather
+    than a second, parallel mechanism where salon travels inside the token
+    payload and the view resolves it via `unscoped_objects`. This is the
+    same "salon comes from the URL, not from an alternate channel"
+    reasoning the Login-contract entry already used for login/registration,
+    applied uniformly rather than carved out as an exception for these two
+    endpoints.
+  - **Consequence:** the verification-token payload only needs
+    `{account_id, email}` — salon is known from the URL the emailed link
+    points at, not embedded in the token itself (this resolves open
+    question 2(b) from the Stage 3-R implementation recon in the direction
+    of the URL-carries-salon shape, not the token-carries-salon shape).
+    `accounts/tasks.py`'s `send_verification_email` and
+    `send_password_reset_email` must build salon-aware links (e.g.
+    `{FRONTEND_URL}/salons/<slug>/verify-email#token=...`) instead of
+    today's salon-less links. This ripples into the not-yet-built
+    frontend's route shape, but nothing exists yet on that side to break.
+
+- **Known risk, recorded now so it isn't lost before 3-R.E implements JWT
+  wiring — `USER_ID_FIELD` / cross-model token collision.** SimpleJWT's
+  `USER_ID_FIELD` setting defaults to plain `"id"` — a bare, model-agnostic
+  integer PK. `User` and `Account` are separate tables with independent
+  auto-increment sequences, both starting at 1, so a `User` row and an
+  `Account` row can legitimately share the same `id`. An `Account`-issued
+  token carries `user_id = <that id>`. If an `Account`-aware authentication
+  class and the stock `User`-aware `JWTAuthentication` were ever *both*
+  active on the same endpoint's authentication stack, an `Account` token's
+  `user_id` claim could numerically collide with an unrelated `User`'s
+  `pk`, and whichever authentication class runs first would **silently
+  authenticate as the wrong identity** — a real security hazard, not a
+  hypothetical edge case, given both sequences start at 1.
+  - **Mitigation requirement for 3-R.E (not resolved now, recorded as a
+    hard requirement on that sub-step):** either (a) strict
+    endpoint/authentication-class separation — `Account`-token views never
+    share an authentication stack with `User`-token views — or (b) an
+    explicit token-type claim, checked before the `pk` lookup, so a
+    mismatched token type is rejected before it ever reaches a model
+    lookup. **3-R.E must not ship without one of these.**
+
+- **Confirmation, not a decision needing debate: the Stage 3-R
+  implementation recon read the actual installed source in this
+  environment (Django 5.2.17, `djangorestframework-simplejwt==5.5.1`,
+  confirmed via the running `backend` container, not the host `.venv`) to
+  resolve open questions 2(c) and 2(d).** Findings:
+  - **SimpleJWT is retargetable to `Account`, not hand-built from
+    scratch.** The core `Token`/`AccessToken`/`RefreshToken` classes and
+    `Token.for_user()` are pure duck-typing (`getattr(user,
+    api_settings.USER_ID_FIELD)`, no `isinstance` check, no
+    `get_user_model()` call). Three integration points *are* hardcoded to
+    `get_user_model()` and need explicit, sanctioned overrides rather than
+    reuse-as-is: a custom `TokenObtainSerializer.validate()` (login —
+    the stock version calls Django's `authenticate()`, tied to
+    `AUTH_USER_MODEL`), a custom `JWTAuthentication.get_user()`
+    (request-time auth — the stock version does `self.user_model =
+    get_user_model()` in `__init__`; overriding `get_user()` is already
+    the library's own sanctioned extension point, demonstrated by its own
+    shipped `JWTStatelessUserAuthentication` subclass), and a custom
+    `TokenRefreshSerializer.validate()` (refresh — same
+    `get_user_model()` pattern). Logout/blacklist
+    (`BlacklistMixin.blacklist()`) degrades gracefully rather than
+    failing hard: an unresolvable `user_id` just stores `user=None` on
+    the blacklist/outstanding-token row.
+  - **`PasswordResetTokenGenerator` works duck-typed against `Account`
+    with no replacement needed.** Its `_make_hash_value()` reads
+    `user.pk`, `user.password`, `user.last_login`, and
+    `user.get_email_field_name()` — the file imports neither
+    `AbstractBaseUser` nor `get_user_model()` anywhere, so there is no
+    `AUTH_USER_MODEL` coupling to work around, contrary to what was
+    flagged as an open, unverified risk in the earlier design-discussion
+    turn.
+  - **Field-shape basis for 3-R.A, established by this recon:** `Account`
+    must carry `id` (free), `password`, `email`, `is_active`, and a
+    nullable `last_login`, plus a trivial `get_email_field_name()` method
+    returning `"email"`. `last_login` in particular is a requirement
+    surfaced *by this recon* — not something that would have been
+    obviously included otherwise.
+
 - **No-enumeration, tightened to isolation-driven wording: a per-salon
   registration or password-reset-request endpoint must never reveal that
   a given email exists in *any* salon — not only "this one."** This is
