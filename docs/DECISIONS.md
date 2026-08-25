@@ -48,6 +48,19 @@ sync if the order ever changes.
 22. Productionization — Docker, CI/CD, README
 23. Production-readiness audit (fresh session)
 
+**Stage 3-R (per-salon identity revision, decided 2026-08-25 — see §
+Stage 3-R decisions and § Stage 3-R reversals, near the end of this
+file)** is inserted as a revision block, out of chronological order, the
+same way Stage 11.5 was inserted without renumbering every existing
+`Stage N` reference. It reopens closed Stage 3 identity work and must
+land — model, migration, auth views, and the `docs/ARCHITECTURE.md`
+follow-up rewrites its entries list — before Stage 9 (Celery +
+notifications) resumes, since Stage 9's own work (the verification-email
+trigger, the guest-token response-body reversal) depends on the final
+client/admin identity shape, not the one that was on disk when Stage 9
+was first scoped. Stage numbers 4–23 above are not renumbered by this
+insertion.
+
 ## Open questions
 
 Not yet decided — recorded here so they surface before the stages that depend
@@ -2894,3 +2907,512 @@ not restate that policy, only how it's built.
   Stage 8 emits the raw signal and Stage 9 turns it into a notification.
   The "plus a log" from the original entry is therefore an intentional
   Stage 9 concern, not a dropped requirement.
+
+## Stage 3-R decisions (per-salon identity revision — client AND staff)
+
+Decided 2026-08-25, in discussion, before implementation, per CLAUDE.md's
+design-first workflow. This is a revision block reopening closed Stage 3
+identity decisions — not a new numbered stage in the main sequence.
+Inserted here, out of chronological order, the same way Stage 11.5 was
+inserted without renumbering every existing `Stage N` reference elsewhere
+in this file, `docs/ARCHITECTURE.md`, and code comments (§ Agreed stage
+order). No model, migration, or view code exists yet for this revision;
+this entry and the paired reversal entries below (§ Stage 3-R reversals)
+are the paper record the implementation stage is built against. Nothing
+in `docs/ARCHITECTURE.md` is rewritten by this entry — see the follow-up
+list at the end of this section for what needs updating once
+implementation lands.
+
+- **Principle: one site = one salon, full product-level isolation, no
+  exceptions at the product surface.** Every human *login* — client,
+  staff, admin, owner — is scoped to exactly one salon. The same person
+  operating at two salons on this platform holds two entirely separate
+  accounts, with two separate logins, and neither account can observe
+  that the other exists or that both run on the same platform. No
+  endpoint anywhere may check or reveal existence across salons, even
+  incidentally (see "No-enumeration," below, and its paired reversal
+  entry). This supersedes every prior identity decision that assumed a
+  platform-wide `User` — see § Stage 3-R reversals below for each one,
+  individually.
+
+- **Model shape: two models, not one — `Customer` survives unchanged in
+  kind; `Account` is new.** `Customer` is **not** merged into, replaced
+  by, or dropped in favor of a new unified identity model.
+  - **`Customer` remains the per-salon record of "who visited this
+    salon"** — guest or registered, exactly as it is today: `salon`,
+    `name`, `email`, `phone`, scoped by the existing
+    `unique(salon, email)` constraint, unchanged. A guest with no account
+    at all stays fully representable as a bare `Customer` row, with
+    nothing else attached — this is not new, it is today's shape,
+    preserved.
+  - **`Account` is a new, separate, per-salon model holding login
+    credentials** (password, verification state, `role`), also scoped by
+    its own `unique(salon, email)`. `Account` is created only when a
+    person actually registers — a guest never gets one. When a `Customer`
+    registers, their `Account` gains a link to their existing `Customer`
+    row at that same salon (mirroring today's `Customer.user` FK, just
+    inverted in which model does the linking — the exact FK direction is
+    implementation-stage detail, not fixed here).
+  - In short: **`Customer` = who visited. `Account` = who has a login.**
+    A `Customer` row can exist with no `Account` (guest) or with a linked
+    `Account` (registered). An `Account` always has exactly one linked
+    `Customer` at its salon once that link is made — `Appointment`
+    keeps referencing `Customer`, never `Account`, unchanged from the
+    standing rule that `Appointment` always references `Customer`, never
+    `User`, directly.
+  - `role` (see below) lives on `Account`, not on `Customer` — a `role`
+    is meaningless for a bare guest `Customer` with no login at all.
+
+- **Guest booking flow is unchanged by this revision.** The existing
+  signed-token flow — book, pay the deposit, cancel, and (per the
+  Reviews rule below) leave a review, all via the emailed
+  `GuestAccessToken` link, with **no account of any kind required** — is
+  untouched. That flow was always built entirely on `Customer` +
+  `GuestAccessToken` and never touched `User` (`docs/ARCHITECTURE.md`
+  § 3, § Stage 3 sub-step 3 decisions). Since `Customer` survives exactly
+  as-is (previous bullet) and `Account` is purely additive — created only
+  on registration, never required for booking — nothing in this
+  revision changes any part of that flow. Recorded explicitly so it is
+  not mistaken for in-scope of the identity redesign.
+
+- **Email uniqueness: `unique(salon, email)` on `Account`.** This is new
+  for `Account` (the login/credential model) and is what the isolation
+  principle requires for it — `Customer`'s own `unique(salon, email)`
+  already exists today and is **not** being changed by this entry; it is
+  a separate, pre-existing constraint on a separate model, left as-is.
+
+- **The existing `accounts.User` / `AUTH_USER_MODEL` is reversed as the
+  client/staff/admin login identity — it is not deleted.** It continues
+  to exist exactly as today and continues to serve Django's own
+  `/admin/` login for platform operators (`is_staff`/`is_superuser`).
+  What changes is only that it stops being used to create *login*
+  identities for product accounts going forward — no future
+  registration flow creates `Account` rows on it. `Customer` was never
+  on `User` in the first place except via the now-superseded nullable
+  `Customer.user` FK (see § Stage 3-R reversals). See "deliberate
+  exception," below, for why this one cross-tenant identity is kept.
+
+- **Roles for v1, on `Account`: `client` and `admin`.** `admin` is the
+  single staff/back-office access level for v1 — finer-grained staff
+  roles (e.g. owner vs. manager) are explicitly deferred, not designed
+  now (see Deferred, below). An `admin` has back-office access for their
+  one salon **and** the exclusive right to assign or change roles for
+  other `Account`s within that same salon. `client` role on an `Account`
+  means "a registered login, linked to a `Customer` at this salon, able
+  to view their own booking history" — no back-office access.
+
+- **Roles are never self-assigned.** A newly created `Account` gets
+  exactly the `client` role, unconditionally, with no request parameter
+  or self-service path capable of granting anything more. Elevating an
+  `Account` to `admin` can only be performed by an existing `admin` of
+  that same salon. This is an authorization-boundary rule, not just a
+  default value — permission logic must enforce it as a hard boundary
+  (no code path may grant `admin` except "an existing admin acted"), not
+  merely default new rows to `client` and hope nothing else sets the
+  field.
+
+- **Role switching is not role acquisition.** An `Account` holding both
+  roles (see Dual role, below) moves between an admin mode and a client
+  mode at will — that is a UI/session-context distinction, not a
+  privilege grant. An `Account` that has never been granted `admin` by
+  an existing admin has no admin mode to switch into; there is no
+  default, implicit, or inferred admin capability. A bare `Customer` with
+  no `Account` at all (a guest) has no mode of any kind to switch
+  into — nothing to switch from. Permission logic must keep "which roles
+  does this `Account` actually hold" and "which mode is this session
+  currently acting in" as two separate checks — the first is the
+  security boundary, the second is presentation.
+
+- **Dual role within one salon is one `Account`, not two.** A person who
+  is both `admin` and `client` of the *same* salon (the textbook case: a
+  stylist who books her own treatment at her own salon) holds a single
+  `Account` row with both roles. Concretely, under the two-model shape
+  above: her `Account` carries `admin`; her booking activity uses her
+  linked `Customer` row at that same salon, exactly like any other
+  registered client's booking does. This does **not** require a second
+  `Account` and does **not** require relaxing `unique(salon, email)` on
+  either `Account` or `Customer` — the uniqueness constraints govern the
+  *login* and the *visitor record* respectively, not the *role*, so one
+  `Account` legitimately carrying two roles is not a uniqueness
+  violation on either model. Chosen over a two-account shape (a separate
+  login for her admin work and her own bookings) because one `Account`
+  naturally carries more capability without inventing a bridge between
+  two otherwise-separate login tables for what is, in the real world,
+  one person.
+
+- **`SalonStaff` is removed outright, not kept as a thin wrapper.** Its
+  only structural purpose — bridging one `User` to many salons via
+  `unique(user, salon)` — is exactly the capability the isolation
+  principle removes: once a login is intrinsically scoped to one salon,
+  a join table has nothing left to bridge. `role` moves onto `Account`
+  directly as a plain field, carrying forward `SalonStaff`'s original
+  "keep the value space open for a second role later, no shape migration
+  needed" reasoning unchanged (see § Stage 3-R reversals, "SalonStaff
+  join + `unique(user, salon)`," for the full account of what's
+  preserved vs. what's superseded).
+
+- **Login contract: client and admin login move under the salon URL
+  prefix, `/api/v1/salons/<slug>/...`**, reusing the existing, already
+  tested path-prefix tenant-resolution middleware rather than inventing a
+  new resolution mechanism. Login authenticates against `Account`; a
+  successful client login's session reaches that person's booking
+  history through their linked `Customer` row, not through any data
+  stored on `Account` itself. This reverses the prior "auth is
+  platform-level, outside the salon prefix" placement (§ Stage 3-R
+  reversals, "ARCHITECTURE §13") for the product login surface
+  specifically — Django's own `/admin/` is untouched (see "deliberate
+  exception," below).
+  - **RECOMMENDED, pending confirmation — not yet a settled part of this
+    entry:** one shared per-salon login endpoint (e.g.
+    `/api/v1/salons/<slug>/auth/login/`) serving both `client` and
+    `admin`, with role read from the single matched `Account` row and
+    reflected in the resulting session/JWT — rather than sibling
+    endpoints split by role. Reasoning: under the two-model shape above,
+    `client` and `admin` are both rows in the *same* `Account` table,
+    not two different tables — splitting the login endpoint by role
+    would require deciding which table to check first (or checking
+    both) for no benefit. A shared endpoint also avoids a response-shape
+    difference between a "client login" and an "admin login" endpoint
+    that could itself leak whether a given email belongs to an admin at
+    that salon — a narrower instance of the enumeration problem the
+    no-enumeration rule guards against below. Flag any disagreement
+    before this is implemented.
+
+- **No-enumeration, tightened to isolation-driven wording: a per-salon
+  registration or password-reset-request endpoint must never reveal that
+  a given email exists in *any* salon — not only "this one."** This is
+  not merely "scope the existing anti-enumeration check to one salon" —
+  it is a stronger requirement the isolation principle itself demands:
+  no code path may check a submitted email against any salon other than
+  the one the request is scoped to, for *any* purpose, including a
+  well-intentioned one (e.g., a "friendlier" error suggesting the email
+  is already registered elsewhere on the platform). Doing so would leak
+  cross-salon existence even while technically returning an identical
+  response shape. The check itself — not just the response — must never
+  reach outside the requesting salon. See § Stage 3-R reversals,
+  "no-enumeration response shape," for how this supersedes the original
+  entry's global-namespace framing.
+
+- **Deliberate exception (the only one): the platform-operator Django
+  admin (`/admin/`, `is_superuser`) stays cross-tenant.** The platform
+  owner sees all salons through it, for support and billing — unchanged
+  from today's `core.admin.SalonScopedAdmin`, already on record as *"a
+  deliberate, blanket cross-tenant tool for platform operators, not a
+  per-salon back office"* (§ Stage 3 sub-step 4 decisions). "Full
+  isolation, no exceptions" in the principle above governs the **product
+  surface** — what one salon's `Account`/`Customer` data and API
+  responses can observe about another salon — and does not reach the
+  ops/superuser layer. Recorded explicitly, in the same entry as the
+  principle itself, so "no exceptions" is never later misread as
+  abolishing platform-operator access.
+
+- **First-admin provisioning: platform-owner-initiated, direction only.**
+  The chicken-and-egg problem (a brand-new salon's first admin has no
+  existing admin at that salon to grant their role) is resolved by the
+  platform owner, via the superuser Django admin: the owner creates the
+  salon and its first `Account` with `admin` role directly. That first
+  admin then assigns roles within their own salon going forward, same as
+  any other admin. This is the intended direction, not a mechanism — see
+  Deferred, below, for what's explicitly not decided yet.
+
+- **Reviews come from any `Customer` with a `COMPLETED` booking via the
+  existing guest-token link, never from `Account`/login status.**
+  Consistent with, not exceptional to, the "guest booking flow is
+  unchanged" bullet above — review submission (Stage 11, not yet built)
+  will use the same `Customer` + `GuestAccessToken` mechanism the rest of
+  the booking lifecycle already uses, with no dependency on whether that
+  `Customer` has a linked `Account`. This retires the *previously
+  stated* rule that review submission requires "an authenticated
+  `User`-linked `Customer`" (§ Identity, quoted in full under § Stage
+  3-R reversals, "ARCHITECTURE §4") — recorded here since Stage 11
+  hasn't started and there is nothing in code to reverse, only the
+  stated business rule.
+
+- **Deferred — recorded as known-open, not resolved by this entry:**
+  - Finer-grained staff roles beyond the single `admin` level for v1
+    (e.g. an owner/manager distinction, delegation nuance). `role` is
+    kept as an open-ended field specifically so this can be added later
+    without a shape migration, mirroring the same reasoning `SalonStaff`
+    originally used for its own `role` field.
+  - The exact technical mechanism of first-admin provisioning (a Django
+    admin action, a management command, an invite-link flow, or
+    something else) — only the direction (platform-owner-initiated) is
+    decided here.
+  - The exact FK direction and field shape linking `Account` to
+    `Customer` — stated in principle above ("linked when a `Customer`
+    registers"), not fixed at the schema level here.
+
+**`docs/ARCHITECTURE.md` follow-ups (not written by this entry):**
+
+- § 2 (entity table): rewrite `User`, `SalonStaff` entries; add
+  `Account`; update `Customer`'s entry to note its optional link to
+  `Account`.
+- § 3 (authentication architecture): rewrite "Registered users,"
+  "Guests," "Guest → registered linking," and "Salon staff" subsections.
+- § 4 (authorization): rewrite the role list and permission-class
+  descriptions to reflect `Account`/`Customer`/role instead of
+  `User`+`SalonStaff`/`Customer`.
+- § 13 (API surface): rewrite the auth endpoint list; remove
+  `/api/v1/me/...`.
+
+## Stage 3-R reversals (per-salon identity revision)
+
+Decided 2026-08-25, alongside § Stage 3-R decisions above. Each entry
+below preserves the *original* reasoning for the record, states what
+replaces it, and states why — per the standing rule that a reversal is a
+new dated entry, never a backdated edit to the original.
+
+### Reversal: § Identity — one-`Customer`-table with a nullable `User` FK
+
+Original text, quoted in full:
+> Guest booking is allowed. There is **one `Customer` table for the whole
+> platform**, scoped to a salon (`salon` FK), with `name`, `email`,
+> `phone`, and a **nullable** FK to `User`.
+> - Guest = `Customer` with `user=NULL`.
+> - Registered = `Customer` with `user` set.
+>
+> ...
+>
+> - **One `User` may be linked to multiple `Customer` rows** — one per
+>   salon, since a platform-wide user account can be a customer at more
+>   than one tenant.
+
+Original reasoning preserved: `Customer` correctly represents per-salon
+booking identity, and the guest-vs.-registered distinction (a `Customer`
+row that may or may not have real login credentials behind it) remains
+exactly right — this reversal does **not** touch that. `Customer` itself
+is not reversed, dropped, or restructured; it survives unchanged (§
+Stage 3-R decisions, "Model shape").
+
+What replaces it and why: only the *target* of the registered-vs.-guest
+distinction changes. "Registered = `Customer` with `user` set" is
+superseded by "registered = `Customer` with a linked `Account`" — the
+new, separate, per-salon `Account` model (§ Stage 3-R decisions) takes
+over the role `User` used to play here, scoped to one salon instead of
+platform-wide. "One `User` may be linked to multiple `Customer` rows —
+one per salon" is fully retired, not narrowed: under full isolation,
+an `Account` is linked to exactly one `Customer`, at its own one salon,
+full stop — there is no cross-salon linking relationship left to
+represent, because the platform-wide login it depended on no longer
+exists for product accounts.
+
+### Reversal: § Identity — guest→`User` cross-salon merge
+
+Original text, quoted in full:
+> **Linking a guest `Customer` to a new `User` account happens only after
+> email verification.** Never link by phone number — phone numbers are
+> not a reliable identity signal (reassigned, unverified, shared).
+
+And, from `docs/ARCHITECTURE.md` § 3 (implementation of the above):
+> On verification, every `Customer` row across all salons whose email
+> exactly matches the verified `User`'s email is linked (`Customer.user`
+> set).
+
+Original reasoning preserved: "never link by phone, only by a verified
+strong signal" was and remains sound judgment about identity-signal
+reliability — that part of the reasoning is not what's wrong, and it
+carries forward directly into what replaces this entry, below.
+
+What replaces it and why: the *cross-salon* reach of this mechanism
+(`link_guest_customers`, scanning every salon's `Customer` rows for a
+matching email) is removed outright — its premise, "the same verified
+email across salons is safely the same person, auto-link them," is
+exactly what full isolation reverses. What replaces it is a **same-salon**
+analogue, made concrete by the `Customer`/`Account` split (§ Stage 3-R
+decisions): when a person registers at a salon they've already visited
+as a guest, matching their new `Account` to their existing, same-salon
+`Customer` row by verified email — never by phone — is exactly the
+reconciliation this original entry described, just correctly bounded to
+one salon instead of scanning every salon on the platform. The judgment
+about *which signal* to trust is unchanged; only the *scope* it's allowed
+to search is what's reversed.
+
+### Reversal: `User.username` dropped / global `email` as `USERNAME_FIELD` (§ Stage 3 decisions)
+
+Original text (summarized; full entry runs long in the source file):
+`username` was dropped from `User`, `email` was made unique and set as
+`USERNAME_FIELD`, with a custom `UserManager` — recorded as having been
+implemented first and written up after the fact, later approved by the
+user with the process gap producing CLAUDE.md's standing "raise
+model/manager/migration changes before implementing" rule.
+
+Original reasoning preserved: "email, not username, is the login
+identity" remains correct and is not reversed — that judgment holds for
+`Account` exactly as it held for `User`.
+
+What replaces it and why: what's superseded is only the *scope* of the
+uniqueness — global → `unique(salon, email)` on the new `Account` model
+(§ Stage 3-R decisions) — driven directly by the full-isolation
+principle, not by any reconsideration of email-vs-username. `User`
+itself keeps its own global-unique `email` unchanged, since it continues
+to serve only the platform-operator login (§ Stage 3-R decisions,
+"deliberate exception"), where global uniqueness is still correct — this
+reversal applies to the *product* login surface only. Worth noting for
+the record: this reversal is itself being raised and recorded *before*
+any model/migration work happens, the discipline the original entry's
+process failure produced.
+
+### Reversal: no-enumeration response shape (§ Stage 3 decisions)
+
+Original text, quoted in full:
+> **Registration and password-reset-request never reveal whether an
+> email exists.** Both return an identical response (status, body)
+> regardless of whether the email is already registered...
+
+Original reasoning preserved: the anti-enumeration requirement itself is
+not reversed — a registration or reset-request response must still never
+reveal existence.
+
+What replaces it and why: the entry's framing assumed one global email
+space, one global "does it exist" question, answered identically either
+way. That framing is superseded — existence is now a per-salon question,
+and per § Stage 3-R decisions ("No-enumeration, tightened to
+isolation-driven wording"), the requirement is stronger than a
+same-response-shape guarantee: the *check itself* must never reach
+outside the requesting salon, for any reason, not just the response
+returned to the caller. A per-salon registration endpoint that happened
+to check email existence against other salons — even if it still
+returned an identical-looking response — would violate isolation despite
+technically satisfying the original entry's letter. This reversal closes
+that gap explicitly.
+
+### Reversal: email-verification token subject (§ Stage 3 decisions)
+
+Original text, quoted in full:
+> **Email verification token: stateless, not single-use, payload includes
+> the target email.** `TimestampSigner`-signed `{"user_id", "email"}`,
+> 48h expiry (`EMAIL_VERIFICATION_TIMEOUT`). Verifying is idempotent...
+> Including the target email in the signed payload, checked against the
+> user's *current* `email` at verify time, means a future "change email"
+> feature gets automatic invalidation of old tokens for free.
+
+Original reasoning preserved: the stateless/signed/idempotent shape, and
+"embed the target email so a changed email auto-invalidates old tokens,"
+both remain sound design choices.
+
+What replaces it and why: the token's subject (`user_id`, naming the
+global `User` table) is superseded — a client's verification token now
+needs to reference the per-salon `Account` row instead, and since
+`Account`'s own uniqueness is `(salon, email)` rather than a bare global
+email, the payload likely needs a salon reference too for the token to
+stay unambiguous. The exact new payload shape is implementation-stage
+detail, not fixed by this entry.
+
+### Reversal: password-reset generator (§ Stage 3 decisions)
+
+Original text, quoted in full:
+> **Password reset uses Django's built-in `PasswordResetTokenGenerator`**,
+> not a hand-rolled signer — it's already self-invalidating on password
+> change (the hash it produces incorporates the current password hash),
+> which is exactly the single-use property this token needs...
+
+Original reasoning preserved: "self-invalidating on password change, no
+separate revocation step needed" remains exactly the right property to
+want for a reset token.
+
+What replaces it and why: `PasswordResetTokenGenerator` is built around
+`AUTH_USER_MODEL`-shaped instances. Since `Account` (not `User`) now
+holds client/admin credentials, whether this specific Django class still
+applies cleanly to an `Account` row is an open technical question, not
+yet verified (flagged, not resolved, in the prior paper design
+discussion). Recorded here as a known follow-up for whichever stage
+implements this — this entry reverses the *applicability*, not the
+underlying property being sought.
+
+### Reversal: `docs/ARCHITECTURE.md` § 3 — staff shares the platform-wide login
+
+Original text, quoted in full:
+> **Salon staff.** Same `User`/JWT login as registered customers;
+> authorization is layered on top via `SalonStaff` (§ 4), not a separate
+> auth mechanism.
+
+Original reasoning preserved: the underlying goal — don't invent a
+second, redundant auth mechanism for staff — is not reversed; if
+anything it's honored more directly now.
+
+What replaces it and why: staff/admin no longer shares a *platform-wide*
+login with clients — both now live on the same *per-salon* `Account`
+model instead, distinguished by `role`, rather than by using a shared
+global identity plus a separate authorization join. "Not a separate auth
+mechanism" goes from being true because staff and clients shared `User`,
+to being true because staff and clients are rows in the same `Account`
+table now. **Needs an `ARCHITECTURE.md` § 3 rewrite** (follow-up, not
+done here).
+
+### Reversal: `docs/ARCHITECTURE.md` § 4 — the "Customer" role definition
+
+Original text, quoted in full:
+> **Customer** (authenticated `User` with a linked `Customer` in the
+> target salon) — everything Guest can do, plus: view booking history,
+> leave reviews, cross-salon account management (`/api/v1/me/...`).
+
+Note on naming: this "Customer" is the *role tier's name* in § 4's role
+list — a pre-existing naming coincidence with the `Customer` *model*,
+not a statement that the model is going away. `Customer` the model
+survives (§ Stage 3-R decisions, "Model shape"); only this role tier's
+description and one of its named capabilities are wrong now.
+
+Original reasoning preserved: the *tier* itself — "an authenticated
+person, above guest, below staff, tied to their booking relationship
+with a salon" — remains a real, needed role; only its description and a
+named capability are wrong now.
+
+What replaces it and why: two things in this sentence are superseded.
+(1) "authenticated `User` with a linked `Customer`" no longer describes
+the mechanism — it becomes "an `Account` with `role=client`, linked to a
+`Customer`, at one salon." (2) "cross-salon account management
+(`/api/v1/me/...`)" directly contradicts full isolation and is retired
+along with it — see the `ARCHITECTURE.md` § 13 reversal, next. (3)
+"leave reviews" as a capability gated on account status is separately
+superseded by the Reviews rule (§ Stage 3-R decisions) — recorded there,
+not re-litigated here. **Needs an `ARCHITECTURE.md` § 4 rewrite**
+(follow-up, not done here).
+
+### Reversal: `docs/ARCHITECTURE.md` § 13 — auth endpoints outside the salon prefix
+
+Original text, quoted in full:
+> A small set of endpoints are platform-level, outside any salon prefix,
+> because they aren't salon-scoped: `/api/v1/auth/...` (User
+> login/registration) and `/api/v1/me/...` (a User's linked Customers
+> across salons).
+
+Original reasoning preserved: the *principle* stated here — the URL shape
+should reflect what is and isn't salon-scoped — is not reversed; it's
+exactly what's being honored by relocating auth now that auth *is*
+salon-scoped.
+
+What replaces it and why: `/api/v1/auth/...` for client/admin
+login/registration moves under `/api/v1/salons/<slug>/...` (§ Stage 3-R
+decisions, "Login contract"), since it's now salon-scoped by
+construction. `/api/v1/me/...` is removed entirely, not relocated — there
+is no cross-salon account view for an `Account` that only ever belongs
+to one salon, consistent with the § 4 reversal above. **Needs an
+`ARCHITECTURE.md` § 13 rewrite** (follow-up, not done here).
+
+### Reversal: `SalonStaff` join + `unique(user, salon)`
+
+Original text, quoted in full (`docs/ARCHITECTURE.md` § 2):
+> **SalonStaff** — join of `User` × `Salon` with a `role`. A back-office
+> login.
+
+And (§ Business rules):
+> **One `SalonStaff` role for v1.** The `role` field is kept on the model
+> so a second role can be added later without a shape migration — only
+> the field's value space grows.
+
+And the model's own constraint: `models.UniqueConstraint(fields=["user",
+"salon"], name="salonstaff_user_salon_uniq")`.
+
+Original reasoning preserved: "keep `role` as an open field with room to
+grow, not a hardcoded single value" is exactly right and is carried
+forward unchanged onto `Account`.
+
+What replaces it and why: `SalonStaff` as a join table is removed
+outright (§ Stage 3-R decisions, "SalonStaff resolution") — its
+structural purpose, bridging one `user` to many salons via the composite
+`unique(user, salon)` constraint, is exactly the capability the isolation
+principle removes. Once staff identity is intrinsically single-salon, a
+join table has nothing left to bridge; `role` becomes a plain field on
+`Account`. **Needs an `ARCHITECTURE.md` § 2 rewrite** (entity table entry
+for `SalonStaff`, and to add `Account` alongside `Customer`) and a § 4
+rewrite (permission-class description) (follow-ups, not done here).
