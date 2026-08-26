@@ -1,11 +1,12 @@
 from typing import ClassVar
 
 from django.conf import settings
-from django.contrib.auth.base_user import BaseUserManager
+from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
-from core.models import TenantScopedModel, TimeStamped
+from core.models import TenantScopedManager, TenantScopedModel, TimeStamped
+from tenants.models import Salon
 
 
 class UserManager(BaseUserManager["User"]):
@@ -128,3 +129,93 @@ class Customer(TenantScopedModel, TimeStamped):
 
     def __str__(self) -> str:
         return f"{self.name} @ {self.salon}"
+
+
+class AccountRole(models.TextChoices):
+    CLIENT = "client", "Client"
+    ADMIN = "admin", "Admin"
+
+
+class AccountManager(TenantScopedManager["Account"], BaseUserManager["Account"]):
+    """
+    Deliberately BOTH TenantScopedManager and BaseUserManager, not just the
+    latter: TenantScopedManager.get_queryset() (first in MRO, so it wins) is
+    what makes `Account.objects` raise without a bound tenant context and
+    filter to it when bound, same as every other TenantScopedModel — a bare
+    BaseUserManager subclass would silently replace that with the plain,
+    unfiltered models.Manager.get_queryset() instead. BaseUserManager
+    contributes normalize_email (docs/DECISIONS.md § Stage 3-R decisions,
+    "Account model, settled shape").
+    """
+
+    def create_account(
+        self,
+        *,
+        salon: Salon,
+        email: str,
+        password: str | None = None,
+        role: str = AccountRole.CLIENT,
+        customer: "Customer | None" = None,
+        **extra_fields: object,
+    ) -> "Account":
+        # password defaults to None (not left required-with-no-default) so
+        # an omitted argument reaches this check and raises ValueError,
+        # rather than failing at the call boundary with TypeError. salon has
+        # no default: provisioning into no salon at all is a caller bug the
+        # type system should catch immediately, not a runtime validation
+        # outcome.
+        if not password:
+            raise ValueError("Account.objects.create_account() requires a non-empty password.")
+        # Full lowercase — local part AND domain — not BaseUserManager's
+        # stock domain-only normalize_email: "Alice@x.com" and "alice@x.com"
+        # must collide at (salon, email) per the settled isolation decision.
+        email = self.normalize_email(email).lower()
+        account = self.model(salon=salon, email=email, role=role, customer=customer, **extra_fields)
+        account.set_password(password)
+        account.save(using=self._db)
+        return account
+
+
+class Account(AbstractBaseUser, TenantScopedModel, TimeStamped):
+    """
+    Per-salon login credential (docs/DECISIONS.md § Stage 3-R decisions,
+    "Account model, settled shape"). AbstractBaseUser, not the full
+    AbstractUser: password hashing and last_login are reused from Django's
+    vetted machinery, but is_staff/is_superuser/groups/permissions stay on
+    `User` — the deliberate cross-tenant `/admin/` exception, not something
+    Account needs.
+    """
+
+    email = models.EmailField()
+    role = models.CharField(max_length=32, choices=AccountRole.choices, default=AccountRole.CLIENT)
+    is_active = models.BooleanField(default=True)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+    customer = models.OneToOneField(
+        Customer, null=True, blank=True, on_delete=models.SET_NULL, related_name="account"
+    )
+
+    USERNAME_FIELD = "email"
+
+    # django-stubs types TenantScopedModel.objects/unscoped_objects as class
+    # variables of their declared manager types; redeclaring both here with
+    # AccountManager/plain Manager instances reads as an instance-variable
+    # override of a base-class variable to mypy. Same known friction as
+    # `User.objects = UserManager()` above — not a real type error.
+    objects = AccountManager()  # type: ignore[misc]
+    # Account is the first TenantScopedModel subclass in this codebase to
+    # declare its own `objects` — redeclaring unscoped_objects here too,
+    # rather than leaving it to inherit implicitly from TenantScopedModel,
+    # keeps the first-declared-manager-is-default rule (core/models.py)
+    # explicit on THIS class instead of resting on untested cross-abstract-
+    # base inheritance behavior.
+    unscoped_objects = models.Manager()  # type: ignore[misc]  # noqa: DJ012
+
+    class Meta(TenantScopedModel.Meta):
+        abstract = False
+        constraints = [
+            *TenantScopedModel.Meta.constraints,
+            models.UniqueConstraint(fields=["salon", "email"], name="account_salon_email_uniq"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.email} @ {self.salon} ({self.role})"
