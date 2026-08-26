@@ -3200,6 +3200,123 @@ implementation lands.
   any other admin. This is the intended direction, not a mechanism — see
   Deferred, below, for what's explicitly not decided yet.
 
+- **Account model, settled shape (2026-08-26) — supersedes the "Deferred"
+  items on FK direction/shape below; this entry decides them.**
+
+  Link to `Customer`: `Account` holds the FK, as a nullable
+  `OneToOneField`, `on_delete=SET_NULL`.
+  ```python
+  customer = models.OneToOneField(
+      Customer, null=True, blank=True, on_delete=models.SET_NULL, related_name="account"
+  )
+  ```
+  - Direction (on `Account`, not `Customer`): a guest is a bare
+    `Customer` with no `Account` row at all — not a `Customer` carrying
+    a null "account" field. The common case (guests, the majority of
+    `Customer` rows) stores nothing extra; the link exists only on the
+    rarer `Account` rows that actually have one. This also lets an
+    admin-only `Account` express "I may have no `Customer`" as an
+    explicit nullable field on the table that actually needs it, rather
+    than as an absence on the other table.
+  - `OneToOneField`, not a plain `ForeignKey`: per the per-salon design
+    and the already-decided "dual role = one `Account`, not two," a
+    `Customer` can never legitimately have more than one `Account` at
+    its salon. `OneToOneField` makes that invariant correct-by-
+    construction — DB-enforced — rather than a convention nothing
+    checks.
+  - `null=True`: required, not a bootstrapping convenience. An admin
+    provisioned with no prior visit history has `customer=null` (see
+    admin-provisioning below) — this is a standing shape, not a
+    transient state during setup.
+  - `on_delete=models.SET_NULL`, not `PROTECT`: a `Customer` is a visit
+    record; an `Account` is a login the person created deliberately and
+    owns. Deleting a visit record must never delete the person's login
+    — the `Account` survives with `customer` set to null. There is
+    currently no delete path for `Customer` anywhere in the codebase, so
+    this is defensive/forward-looking, not enabling visit deletion now.
+    `SET_NULL` over `PROTECT` because the login belongs to the person,
+    not to the visit record — unlike `Review.appointment` (`PROTECT`),
+    where protecting the historical record itself is the point.
+
+  Base class and field shape (feeds 3-R.A):
+  - `Account` subclasses `AbstractBaseUser`, `TenantScopedModel`,
+    `TimeStamped` — **not** full `AbstractUser`. `AbstractBaseUser`
+    gives Django's proven password hashing (`set_password`/
+    `check_password`) and `last_login` without pulling in
+    `is_staff`/`is_superuser`/`groups`/permissions — that admin/
+    superuser machinery stays on `User`, the deliberate `/admin/`
+    exception recorded above. Hand-rolling password hashing on a plain
+    `models.Model` would be strictly less safe than reusing Django's
+    vetted machinery; the full `AbstractUser` permission surface is
+    machinery `Account` doesn't need and shouldn't carry.
+  - From `TenantScopedModel`/`TimeStamped`, `Account` inherits and must
+    **not** redeclare: `id`, the `salon` FK (`CASCADE` — a deleted salon
+    takes its `Account` rows with it, matching `SalonStaff`'s existing
+    behavior today), `created_at`/`updated_at`, the
+    `objects`/`unscoped_objects` manager pair, and the `(id, salon)`
+    uniqueness constraint.
+  - New fields `Account` declares:
+    - `email` (`EmailField`, no own `unique=True`) — uniqueness is the
+      `(salon, email)` constraint, same pattern as `Customer.email`
+      today.
+    - `password` — via `AbstractBaseUser` (hashed, not redeclared).
+    - `role` (`CharField`, choices `client`/`admin`, default `client`).
+      Today's `SalonStaffRole` has only `admin`; this *adds* `client`
+      alongside it, it doesn't inherit a richer existing value space.
+      Default `client` is the self-service-registration guard — see
+      admin-provisioning below for the sanctioned exception to that
+      default.
+    - `is_active` (`BooleanField`, default `True`) — needed so a
+      deactivated `Account` cannot authenticate; SimpleJWT reads this
+      field by name.
+    - `last_login` (nullable `DateTimeField`) — via `AbstractBaseUser`;
+      surfaced as required by the `PasswordResetTokenGenerator` recon
+      (§ confirmation above), not redeclared.
+    - `email_verified_at` (nullable `DateTimeField`, null = unverified)
+      — mirrors today's `User.email_verified_at`; the verification flow
+      (3-R.D) depends on it.
+    - `USERNAME_FIELD = "email"`.
+    - A `(salon, email)` `UniqueConstraint` in `Meta` (e.g.
+      `account_salon_email_uniq`), mirroring `Customer`'s
+      `customer_salon_email_uniq`, added alongside the inherited
+      `(id, salon)` constraint via `*TenantScopedModel.Meta.constraints`.
+
+  Admin-account provisioning: two paths, clarifying the first-admin-
+  provisioning entry above. Both are privileged-actor-driven; role is
+  never self-assigned, consistent with the roles-are-never-self-assigned
+  rule already recorded.
+  1. Existing client elevated to admin. A person already holding an
+     `Account` with `role=client` at this salon is granted admin by an
+     existing admin of that same salon. This *adds* the admin role to
+     their existing `Account` — it does not create a second one. Same
+     case as "dual role = one `Account`, not two": one login, both
+     roles, switching modes.
+  2. Person with no prior history provisioned directly as admin.
+     Someone never a client here — hired, walked in — has no `Account`
+     and no `Customer`. A privileged actor creates an `Account` directly
+     with `role=admin`, `customer=null`. Two sub-cases, differing only
+     in who acts: the salon's *first* admin (salon empty, no existing
+     admin to grant the role) is created by the platform owner via the
+     superuser Django admin (the first-admin-provisioning direction
+     already recorded above); subsequent staff hired into an already-
+     established salon are created by an existing admin of that salon
+     through the product back office.
+
+  This pins, in addition to `customer` nullability above: `role`
+  defaulting to `client` applies to self-service public registration
+  only — it is the self-assignment guard for that one path, not an
+  absolute rule. A privileged actor creating or elevating an `Account`
+  through a back-office path sets `role` explicitly, including directly
+  to `admin`; that explicit set is the sanctioned exception the guard is
+  built to allow, not a violation of it.
+
+  Explicitly deferred, not designed here: the concrete mechanism of
+  admin provisioning — which endpoint, which admin-panel action, which
+  back-office UI, how a salon admin creates or elevates another account.
+  This entry fixes only that the *model* permits these shapes (`Account`
+  with `customer=null` and `role=admin`, created by a privileged actor);
+  the how belongs to 3-R.D/3-R.E or a later admin-panel stage.
+
 - **Reviews come from any `Customer` with a `COMPLETED` booking via the
   existing guest-token link, never from `Account`/login status.**
   Consistent with, not exceptional to, the "guest booking flow is
@@ -3223,9 +3340,6 @@ implementation lands.
     admin action, a management command, an invite-link flow, or
     something else) — only the direction (platform-owner-initiated) is
     decided here.
-  - The exact FK direction and field shape linking `Account` to
-    `Customer` — stated in principle above ("linked when a `Customer`
-    registers"), not fixed at the schema level here.
 
 **`docs/ARCHITECTURE.md` follow-ups (not written by this entry):**
 
