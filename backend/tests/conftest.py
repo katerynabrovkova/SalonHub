@@ -4,7 +4,7 @@ import pytest
 from django.core.cache import cache
 from django.utils import timezone
 
-from accounts.models import Customer
+from accounts.models import Account, AccountRole, Customer
 from booking.constants import SLOT_HOLD_DURATION
 from booking.models import Appointment, AppointmentStatus
 from catalog.models import Service, ServiceCategory
@@ -76,6 +76,31 @@ def customer(salon):
     with tenant_context(salon.id):
         return Customer.objects.create(
             salon=salon, name="Alice", email="alice@example.com", phone="+10000000000"
+        )
+
+
+@pytest.fixture
+def admin_account(salon):
+    """A per-salon back-office login: an Account with role=admin at `salon`
+    (docs/DECISIONS.md § Stage 3-R decisions). Replaces the pre-3-R
+    User + SalonStaff pairing that IsSalonStaff used to check."""
+    with tenant_context(salon.id):
+        return Account.objects.create_account(
+            salon=salon,
+            email="admin@example.com",
+            password="a-strong-passw0rd!",
+            role=AccountRole.ADMIN,
+        )
+
+
+@pytest.fixture
+def other_salon_admin_account(other_salon):
+    with tenant_context(other_salon.id):
+        return Account.objects.create_account(
+            salon=other_salon,
+            email="other-admin@example.com",
+            password="a-strong-passw0rd!",
+            role=AccountRole.ADMIN,
         )
 
 

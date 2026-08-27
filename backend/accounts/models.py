@@ -63,9 +63,8 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
 
     # Nullable: unset means unverified. Before verification a user can log
-    # in, but cannot complete guest->account merge or access SalonStaff-gated
-    # endpoints even with a real SalonStaff row (docs/ARCHITECTURE.md § 3,
-    # docs/DECISIONS.md § Stage 3 decisions).
+    # in but cannot complete the guest->account merge (docs/ARCHITECTURE.md
+    # § 3, docs/DECISIONS.md § Stage 3 decisions).
     email_verified_at = models.DateTimeField(null=True, blank=True)
 
     USERNAME_FIELD = "email"
@@ -78,29 +77,6 @@ class User(AbstractUser):
     # above — a known, standard friction point with a custom-email-login
     # manager, not a real type error.
     objects = UserManager()  # type: ignore[assignment, misc]
-
-
-class SalonStaffRole(models.TextChoices):
-    ADMIN = "admin", "Admin"
-
-
-class SalonStaff(TenantScopedModel, TimeStamped):
-    """A back-office login: User x Salon with a role (docs/ARCHITECTURE.md § 4)."""
-
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    role = models.CharField(
-        max_length=32, choices=SalonStaffRole.choices, default=SalonStaffRole.ADMIN
-    )
-
-    class Meta(TenantScopedModel.Meta):
-        abstract = False
-        constraints = [
-            *TenantScopedModel.Meta.constraints,
-            models.UniqueConstraint(fields=["user", "salon"], name="salonstaff_user_salon_uniq"),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.user} @ {self.salon} ({self.role})"
 
 
 class Customer(TenantScopedModel, TimeStamped):

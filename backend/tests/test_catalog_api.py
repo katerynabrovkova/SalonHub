@@ -7,7 +7,6 @@ import pytest
 from django.db import IntegrityError
 from rest_framework.test import APIClient
 
-from accounts.models import SalonStaff, SalonStaffRole, User
 from catalog.models import Service, ServiceCategory
 from catalog.serializers import ServiceCategorySerializer
 from core.exceptions import exception_handler
@@ -19,22 +18,6 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def client() -> APIClient:
     return APIClient()
-
-
-@pytest.fixture
-def staff_user(salon) -> User:
-    user = User.objects.create_user(email="staff@example.com", password="a-strong-passw0rd!")
-    with tenant_context(salon.id):
-        SalonStaff.objects.create(salon=salon, user=user, role=SalonStaffRole.ADMIN)
-    return user
-
-
-@pytest.fixture
-def other_salon_staff_user(other_salon) -> User:
-    user = User.objects.create_user(email="other-staff@example.com", password="a-strong-passw0rd!")
-    with tenant_context(other_salon.id):
-        SalonStaff.objects.create(salon=other_salon, user=user, role=SalonStaffRole.ADMIN)
-    return user
 
 
 def _category_list_url(salon) -> str:
@@ -95,12 +78,12 @@ def test_guest_cannot_create_a_service(client, salon, service_category):
 
 
 def test_cross_salon_staff_include_inactive_gets_ordinary_public_result(
-    client, salon, other_salon, other_salon_staff_user, service_category
+    client, salon, other_salon, other_salon_admin_account, service_category
 ):
     with tenant_context(salon.id):
         ServiceCategory.objects.filter(pk=service_category.pk).update(is_active=False)
 
-    client.force_authenticate(user=other_salon_staff_user)
+    client.force_authenticate(user=other_salon_admin_account)
     response = client.get(_category_list_url(salon) + "?include_inactive=true")
 
     assert response.status_code == 200
@@ -111,9 +94,9 @@ def test_cross_salon_staff_include_inactive_gets_ordinary_public_result(
 
 
 def test_soft_deleted_service_hidden_from_public_but_row_persists(
-    client, salon, staff_user, service
+    client, salon, admin_account, service
 ):
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     delete_response = client.delete(_service_detail_url(salon, service))
     assert delete_response.status_code == 204
 
@@ -127,9 +110,9 @@ def test_soft_deleted_service_hidden_from_public_but_row_persists(
 
 
 def test_deleting_category_with_active_services_returns_409(
-    client, salon, staff_user, service_category, service
+    client, salon, admin_account, service_category, service
 ):
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     response = client.delete(_category_detail_url(salon, service_category))
 
     assert response.status_code == 409
@@ -139,8 +122,8 @@ def test_deleting_category_with_active_services_returns_409(
     assert service_category.is_active is True
 
 
-def test_deactivate_then_reactivate_round_trip(client, salon, staff_user, service_category):
-    client.force_authenticate(user=staff_user)
+def test_deactivate_then_reactivate_round_trip(client, salon, admin_account, service_category):
+    client.force_authenticate(user=admin_account)
 
     delete_response = client.delete(_category_detail_url(salon, service_category))
     assert delete_response.status_code == 204
@@ -162,9 +145,9 @@ def test_deactivate_then_reactivate_round_trip(client, salon, staff_user, servic
 
 
 def test_duplicate_category_name_returns_400_via_validate_name(
-    client, salon, staff_user, service_category
+    client, salon, admin_account, service_category
 ):
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     response = client.post(_category_list_url(salon), {"name": service_category.name})
 
     assert response.status_code == 400
@@ -174,7 +157,7 @@ def test_duplicate_category_name_returns_400_via_validate_name(
 
 
 def test_race_that_slips_past_validate_name_still_returns_structured_400(
-    client, salon, staff_user, service_category, monkeypatch
+    client, salon, admin_account, service_category, monkeypatch
 ):
     """
     validate_name is check-then-write and can't close a real concurrent
@@ -185,7 +168,7 @@ def test_race_that_slips_past_validate_name_still_returns_structured_400(
     validate_name — is what produces the 400.
     """
     monkeypatch.setattr(ServiceCategorySerializer, "validate_name", lambda self, value: value)
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
 
     response = client.post(_category_list_url(salon), {"name": service_category.name})
 
@@ -212,12 +195,12 @@ def test_unique_violation_is_translated_to_a_structured_400_not_a_500():
 
 
 def test_posting_a_category_id_from_another_salon_returns_400(
-    client, salon, other_salon, staff_user
+    client, salon, other_salon, admin_account
 ):
     with tenant_context(other_salon.id):
         foreign_category = ServiceCategory.objects.create(salon=other_salon, name="Foreign")
 
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     response = client.post(
         _service_list_url(salon),
         {
@@ -232,8 +215,8 @@ def test_posting_a_category_id_from_another_salon_returns_400(
     assert "category_id" in response.data["error"]["details"]
 
 
-def test_client_supplied_salon_in_body_is_ignored(client, salon, other_salon, staff_user):
-    client.force_authenticate(user=staff_user)
+def test_client_supplied_salon_in_body_is_ignored(client, salon, other_salon, admin_account):
+    client.force_authenticate(user=admin_account)
     response = client.post(_category_list_url(salon), {"name": "New Cat", "salon": other_salon.id})
 
     assert response.status_code == 201

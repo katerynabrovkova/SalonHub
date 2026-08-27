@@ -10,7 +10,7 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
-from accounts.models import Customer, SalonStaff
+from accounts.models import Account, AccountRole, Customer
 from booking.guest_tokens import validate_guest_token
 from booking.models import Appointment
 from core.tenancy import get_current_salon_id
@@ -19,22 +19,36 @@ from core.tenancy import get_current_salon_id
 def IsSalonStaff(*roles: str) -> type[BasePermission]:
     """
     Factory: `permission_classes = [IsSalonStaff()]` for any staff role, or
-    `[IsSalonStaff(SalonStaffRole.ADMIN)]` to restrict to specific roles.
-    Checks a SalonStaff row exists for request.user in the currently bound
-    tenant (docs/ARCHITECTURE.md § 4).
+    `[IsSalonStaff(AccountRole.ADMIN)]` to restrict to specific roles.
+
+    Checks the authenticated principal is an `Account` carrying a staff role
+    for the currently bound tenant (docs/ARCHITECTURE.md § 4, docs/DECISIONS.md
+    § Stage 3-R decisions). Empty `roles` means "any staff role" — for v1 that
+    set is exactly `{admin}`, NOT "any Account role": `client` is a role now
+    and a client is not staff.
+
+    The `isinstance(..., Account)` check is load-bearing, not a type nicety:
+    it is the token-type guard required before any pk lookup, so an
+    `Account` token's `user_id` can never be resolved against an unrelated
+    `User` row with the same integer pk (docs/DECISIONS.md § Stage 3-R
+    decisions, "USER_ID_FIELD / cross-model token collision"). Until 3-R.E
+    wires Account-based JWT auth, `request.user` is always a `User` in
+    production, so every real request is denied here — an agreed, expected
+    interim consequence (same decisions entry).
     """
 
     class _IsSalonStaff(BasePermission):
         def has_permission(self, request: Request, view: APIView) -> bool:
-            if not (request.user and request.user.is_authenticated):
+            account = request.user
+            if not (account and account.is_authenticated):
+                return False
+            if not isinstance(account, Account):
                 return False
             salon_id = get_current_salon_id()
             if salon_id is None:
                 return False
-            qs = SalonStaff.objects.filter(user=request.user)
-            if roles:
-                qs = qs.filter(role__in=roles)
-            return qs.exists()
+            target_roles = roles or (AccountRole.ADMIN,)
+            return Account.objects.filter(pk=account.pk, role__in=target_roles).exists()
 
     return _IsSalonStaff
 

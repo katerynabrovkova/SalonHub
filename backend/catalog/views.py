@@ -28,9 +28,9 @@ class _CatalogViewMixin:
 
     include_inactive=true only takes effect for a request that's staff of
     the *current* URL's salon — reuses IsSalonStaff's own has_permission
-    check (rather than duplicating the SalonStaff lookup query) so staff of
-    a different salon passing include_inactive=true against this salon's
-    endpoint silently falls back to the ordinary public (active-only)
+    check (rather than duplicating the Account admin-role lookup query) so
+    staff of a different salon passing include_inactive=true against this
+    salon's endpoint silently falls back to the ordinary public (active-only)
     result: not an error, not elevated access (docs/DECISIONS.md § Stage 4
     decisions "Catalog read semantics").
     """

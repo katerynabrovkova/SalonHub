@@ -158,8 +158,11 @@ across all salons whose email exactly matches the verified `User`'s email is lin
 (`Customer.user` set). This is why email match is exact, not fuzzy: it's the only
 signal trusted enough to attach a guest's booking history to an account.
 
-**Salon staff.** Same `User`/JWT login as registered customers; authorization is
-layered on top via `SalonStaff` (§ 4), not a separate auth mechanism.
+**Salon staff.** A per-salon `Account` (§ 4) carrying `role = admin`; back-office
+authorization is that role, not a separate auth mechanism. (`SalonStaff`, the former
+`User` × `Salon` join, was removed in Stage 3-R.B — see `docs/DECISIONS.md` § Stage 3-R.
+The full § 2 / § 3 / § 4 rewrite for the `Account`/`Customer` split is a tracked
+follow-up; this subsection and § 4 below carry the corrected shape in the meantime.)
 
 ## 4. Authorization: roles, permission classes, reach
 
@@ -170,18 +173,21 @@ Roles:
 - **Customer** (authenticated `User` with a linked `Customer` in the target salon) —
   everything Guest can do, plus: view booking history, leave reviews, cross-salon
   account management (`/api/v1/me/...`).
-- **SalonStaff** (role on the `SalonStaff` join, scoped to one salon) — back-office
-  reach for that salon only: catalog, specialists, schedules, appointments, clients,
-  reviews, notifications. **One role for v1**; the `role` field is kept on the model
-  specifically so a second, more restricted role can be added later without a shape
-  migration (`docs/DECISIONS.md` § Business rules).
+- **Salon admin** (a per-salon `Account` with `role = admin`) — back-office reach for
+  that one salon only: catalog, specialists, schedules, appointments, clients,
+  reviews, notifications. **One staff role for v1**; `Account.role` is kept open-ended
+  so a second, more restricted role can be added later without a shape migration
+  (`docs/DECISIONS.md` § Stage 3-R decisions).
 - **Platform superuser** (Django `is_superuser`, not tenant-scoped) — Django admin
   only, for operational access across all salons. Not part of the product UX.
 
 Permission classes (DRF, added when the API lands):
 
-- `IsSalonStaff(*roles)` — checks a `SalonStaff` row exists for `request.user` and
-  the resolved tenant (§ 5), optionally restricted to specific roles.
+- `IsSalonStaff(*roles)` — checks `request.user` is an `Account` carrying a staff role
+  for the resolved tenant (§ 5); empty `*roles` means the staff-role set (`{admin}` for
+  v1), or pass explicit roles to narrow it. The `isinstance` check against `Account` is
+  also the token-type guard for the `USER_ID_FIELD` cross-model collision
+  (`docs/DECISIONS.md` § Stage 3-R decisions).
 - `IsAuthenticatedCustomer` — checks `request.user` is authenticated and has a
   `Customer` row in the resolved tenant (§ 5).
 - `IsOwnCustomer` — object-level check that the acting `Customer` (from the JWT or

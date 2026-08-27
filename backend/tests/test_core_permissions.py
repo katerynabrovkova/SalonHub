@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
 
-from accounts.models import SalonStaff, SalonStaffRole, User
+from accounts.models import Account, AccountRole, User
 from booking.guest_tokens import issue_guest_token
 from core.permissions import IsAuthenticatedCustomer, IsOwnCustomer, IsSalonStaff
 from core.tenancy import tenant_context
@@ -37,29 +37,21 @@ class _NoPermissionClassProbeView(APIView):
         return Response({"ok": True})
 
 
-@pytest.fixture
-def staff_user(salon) -> User:
-    user = User.objects.create_user(email="staff@example.com", password="a-strong-passw0rd!")
-    with tenant_context(salon.id):
-        SalonStaff.objects.create(salon=salon, user=user, role=SalonStaffRole.ADMIN)
-    return user
-
-
 # --- IsSalonStaff (unit-level) ---------------------------------------------
 
 
-def test_is_salon_staff_allows_staff_of_the_current_salon(salon, staff_user):
+def test_is_salon_staff_allows_staff_of_the_current_salon(salon, admin_account):
     request = factory.get("/")
-    request.user = staff_user
+    request.user = admin_account
     permission = IsSalonStaff()()
 
     with tenant_context(salon.id):
         assert permission.has_permission(request, _StaffOnlyProbeView()) is True
 
 
-def test_is_salon_staff_denies_staff_of_a_different_salon(salon, other_salon, staff_user):
+def test_is_salon_staff_denies_staff_of_a_different_salon(salon, other_salon, admin_account):
     request = factory.get("/")
-    request.user = staff_user
+    request.user = admin_account
     permission = IsSalonStaff()()
 
     with tenant_context(other_salon.id):
@@ -75,10 +67,43 @@ def test_is_salon_staff_denies_an_anonymous_request(salon):
         assert permission.has_permission(request, _StaffOnlyProbeView()) is False
 
 
-def test_is_salon_staff_restricted_to_a_role_excludes_other_roles(salon, staff_user):
+def test_is_salon_staff_restricted_to_a_role_excludes_other_roles(salon, admin_account):
     permission = IsSalonStaff("some_other_role")()
     request = factory.get("/")
-    request.user = staff_user
+    request.user = admin_account
+
+    with tenant_context(salon.id):
+        assert permission.has_permission(request, _StaffOnlyProbeView()) is False
+
+
+def test_is_salon_staff_denies_a_user_principal(salon):
+    """request.user is a platform `User`, not an `Account` (the pre-3-R.E
+    state: JWT auth still issues User tokens). IsSalonStaff must reject it
+    outright rather than fall through to a pk lookup — this is the
+    USER_ID_FIELD cross-model collision mitigation recorded in
+    docs/DECISIONS.md § Stage 3-R decisions, not just a type nicety."""
+    user = User.objects.create_user(email="staff@example.com", password="a-strong-passw0rd!")
+    request = factory.get("/")
+    request.user = user
+    permission = IsSalonStaff()()
+
+    with tenant_context(salon.id):
+        assert permission.has_permission(request, _StaffOnlyProbeView()) is False
+
+
+def test_is_salon_staff_denies_an_account_without_a_staff_role(salon):
+    """An Account with role=client is a registered login, not back-office
+    access (docs/DECISIONS.md § Stage 3-R decisions)."""
+    with tenant_context(salon.id):
+        client_account = Account.objects.create_account(
+            salon=salon,
+            email="client@example.com",
+            password="a-strong-passw0rd!",
+            role=AccountRole.CLIENT,
+        )
+    request = factory.get("/")
+    request.user = client_account
+    permission = IsSalonStaff()()
 
     with tenant_context(salon.id):
         assert permission.has_permission(request, _StaffOnlyProbeView()) is False
@@ -182,7 +207,7 @@ def test_a_view_with_no_permission_class_still_requires_auth():
 
 
 def test_staff_of_salon_a_gets_403_hitting_a_staff_only_view_bound_to_salon_b(
-    salon, other_salon, staff_user
+    salon, other_salon, admin_account
 ):
     """
     Same check as the unit-level test above, but through DRF's real
@@ -190,7 +215,7 @@ def test_staff_of_salon_a_gets_403_hitting_a_staff_only_view_bound_to_salon_b(
     direct has_permission() call.
     """
     request = factory.get("/")
-    force_authenticate(request, user=staff_user)
+    force_authenticate(request, user=admin_account)
 
     with tenant_context(other_salon.id):
         response = _StaffOnlyProbeView.as_view()(request)

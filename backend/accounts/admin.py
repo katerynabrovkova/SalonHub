@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.http import HttpRequest
 
-from accounts.models import Customer, SalonStaff, User
+from accounts.models import Customer, User
 from core.admin import SalonScopedAdmin
 
 
@@ -36,12 +36,6 @@ class UserAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
-
-
-@admin.register(SalonStaff)
-class SalonStaffAdmin(SalonScopedAdmin):
-    list_display = ("salon", "user", "role")
-    list_filter = (*SalonScopedAdmin.list_filter, "role")
 
 
 @admin.register(Customer)

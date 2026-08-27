@@ -3615,3 +3615,67 @@ join table has nothing left to bridge; `role` becomes a plain field on
 `Account`. **Needs an `ARCHITECTURE.md` § 2 rewrite** (entity table entry
 for `SalonStaff`, and to add `Account` alongside `Customer`) and a § 4
 rewrite (permission-class description) (follow-ups, not done here).
+
+## Stage 3-R.B + 3-R.C implementation (SalonStaff removed, `IsSalonStaff` repointed onto `Account`)
+
+Decided and implemented 2026-08-27, in one red→green commit. This entry
+records what the § Stage 3-R decisions ("SalonStaff resolution") and
+§ Stage 3-R reversals ("SalonStaff join") entries above committed to — it
+does not reopen them.
+
+- **`SalonStaff` and `SalonStaffRole` deleted from `accounts/models.py`;
+  migration `accounts/0005_delete_salonstaff.py` (single `DeleteModel`
+  operation).** The `salonstaff_user_salon_uniq` and
+  `accounts_salonstaff_id_salon_uniq` constraints and both FKs go with it.
+  `SalonStaffAdmin` and its registration removed from `accounts/admin.py`.
+  No `Account` admin registration added here — that is 3-R.D.
+
+- **`IsSalonStaff(*roles)` now checks the authenticated principal is an
+  `Account` with a staff role for the bound tenant**, replacing
+  `SalonStaff.objects.filter(user=request.user)`. Factory signature and the
+  `IsSalonStaff()()` call form used by `catalog/views.py` and
+  `specialists/views.py` are unchanged, so those views needed no edits
+  (only a stale comment fix in `catalog/views.py`).
+  - **`isinstance(request.user, Account)` is a hard guard, evaluated before
+    the pk lookup.** This is option (b) of the mitigation required by
+    "Known risk — `USER_ID_FIELD` / cross-model token collision" above:
+    an explicit token-type check so an `Account` token's `user_id` can
+    never resolve against an unrelated `User` row sharing that integer pk.
+    Writing it now is work 3-R.E needs regardless, not throwaway.
+  - **Empty `*roles` means the staff-role set, `{admin}` for v1 — not "any
+    `Account` row".** Under `SalonStaff` every row was staff; now `client`
+    is also an `Account.role`, and a client is not staff, so the no-arg
+    default resolves to `role__in=(AccountRole.ADMIN,)`.
+  - Cross-salon denial stays enforced by the tenant-scoped `Account.objects`
+    manager (a row from another salon can't match `pk` under the bound
+    context), consistent with "the manager is the first line of defense".
+
+- **Agreed, expected interim consequence: the catalog and specialist write
+  endpoints (`POST`/`PUT`/`PATCH`/`DELETE`) return 403 in production from
+  this commit until 3-R.E.** Before 3-R.E wires Account-based JWT auth,
+  `request.user` is always a `User` (or `AnonymousUser`), so the
+  `isinstance` guard denies every real request. This is accepted, not a
+  regression to fix, because: (a) the old `User`+`SalonStaff` staff path is
+  deleted by this commit regardless of whether 3-R.C is bundled with it;
+  (b) there is also no `Account` login (3-R.E) and no `Account` provisioning
+  (3-R.D) yet, so there is no real admin `Account` to authenticate anyway;
+  (c) the demo salon is pre-launch. The alternatives were rejected: a
+  `User → Customer → Account` bridge re-couples the two identities this
+  revision separates and is structurally blind to `customer=NULL` admins;
+  an `email`-match bridge breaks the no-cross-salon-enumeration boundary;
+  landing 3-R.B alone leaves `IsSalonStaff` a deny-all stub to rewrite at
+  3-R.E anyway.
+
+- **Test fixtures consolidated.** The three duplicated `staff_user` /
+  `other_salon_staff_user` fixtures (`test_core_permissions.py`,
+  `test_catalog_api.py`, `test_specialist_api.py`) are replaced by
+  `admin_account` / `other_salon_admin_account` in `tests/conftest.py` —
+  renamed because a fixture returning an `Account` should not be called
+  `*_user`. `salon` / `other_salon` / `customer` were deliberately left in
+  place (a separate later cleanup, not folded in here).
+
+- **`ARCHITECTURE.md` § 3 "Salon staff" and § 4 `IsSalonStaff` bullet
+  corrected in this commit** (they named `SalonStaff` as a live mechanism
+  this commit deletes). The full § 2 / § 3 / § 4 rewrite for the
+  `Account`/`Customer` split remains the tracked follow-up from the § Stage
+  3-R decisions entry.

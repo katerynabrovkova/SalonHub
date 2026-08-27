@@ -8,7 +8,7 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from accounts.models import Customer, SalonStaff, SalonStaffRole, User
+from accounts.models import Account, AccountRole, Customer
 from booking.models import AppointmentStatus
 from core.tenancy import tenant_context
 from tests.conftest import make_appointment
@@ -19,22 +19,6 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def client() -> APIClient:
     return APIClient()
-
-
-@pytest.fixture
-def staff_user(salon) -> User:
-    user = User.objects.create_user(email="staff@example.com", password="a-strong-passw0rd!")
-    with tenant_context(salon.id):
-        SalonStaff.objects.create(salon=salon, user=user, role=SalonStaffRole.ADMIN)
-    return user
-
-
-@pytest.fixture
-def other_salon_staff_user(other_salon) -> User:
-    user = User.objects.create_user(email="other-staff@example.com", password="a-strong-passw0rd!")
-    with tenant_context(other_salon.id):
-        SalonStaff.objects.create(salon=other_salon, user=user, role=SalonStaffRole.ADMIN)
-    return user
 
 
 @pytest.fixture
@@ -76,8 +60,8 @@ def test_guest_cannot_create_a_specialist(client, salon):
     assert response.status_code == 401
 
 
-def test_client_supplied_salon_in_body_is_ignored(client, salon, other_salon, staff_user):
-    client.force_authenticate(user=staff_user)
+def test_client_supplied_salon_in_body_is_ignored(client, salon, other_salon, admin_account):
+    client.force_authenticate(user=admin_account)
     response = client.post(
         _specialist_list_url(salon), {"name": "New Specialist", "salon": other_salon.id}
     )
@@ -90,9 +74,9 @@ def test_client_supplied_salon_in_body_is_ignored(client, salon, other_salon, st
 
 
 def test_staff_can_see_inactive_specialist_via_include_inactive(
-    client, salon, staff_user, deactivated_specialist
+    client, salon, admin_account, deactivated_specialist
 ):
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     response = client.get(_specialist_list_url(salon) + "?include_inactive=true")
 
     assert response.status_code == 200
@@ -111,16 +95,22 @@ def test_anonymous_include_inactive_true_has_no_effect(client, salon, deactivate
 def test_authenticated_customer_include_inactive_true_has_no_effect(
     client, salon, deactivated_specialist
 ):
-    """The other leak path: an authenticated but non-staff user (a customer)
-    passing include_inactive=true must not get elevated visibility either —
-    IsSalonStaff's SalonStaff lookup, not just is_authenticated, is what gates
-    this."""
-    user = User.objects.create_user(email="a-customer@example.com", password="a-strong-passw0rd!")
+    """The other leak path: an authenticated but non-staff principal (an
+    Account with role=client) passing include_inactive=true must not get
+    elevated visibility either — IsSalonStaff's Account admin-role lookup,
+    not just is_authenticated, is what gates this."""
     with tenant_context(salon.id):
-        Customer.objects.create(
-            salon=salon, user=user, name="Bob", email="bob@example.com", phone="+10000000001"
+        customer = Customer.objects.create(
+            salon=salon, name="Bob", email="bob@example.com", phone="+10000000001"
         )
-    client.force_authenticate(user=user)
+        client_account = Account.objects.create_account(
+            salon=salon,
+            email="bob@example.com",
+            password="a-strong-passw0rd!",
+            role=AccountRole.CLIENT,
+            customer=customer,
+        )
+    client.force_authenticate(user=client_account)
 
     response = client.get(_specialist_list_url(salon) + "?include_inactive=true")
 
@@ -129,9 +119,9 @@ def test_authenticated_customer_include_inactive_true_has_no_effect(
 
 
 def test_cross_salon_staff_include_inactive_gets_ordinary_public_result(
-    client, salon, other_salon_staff_user, deactivated_specialist
+    client, salon, other_salon_admin_account, deactivated_specialist
 ):
-    client.force_authenticate(user=other_salon_staff_user)
+    client.force_authenticate(user=other_salon_admin_account)
     response = client.get(_specialist_list_url(salon) + "?include_inactive=true")
 
     assert response.status_code == 200
@@ -142,7 +132,7 @@ def test_cross_salon_staff_include_inactive_gets_ordinary_public_result(
 
 
 def test_deactivating_specialist_with_confirmed_future_appointment_returns_409_with_ids(
-    client, salon, staff_user, specialist, customer, service
+    client, salon, admin_account, specialist, customer, service
 ):
     start = timezone.now() + dt.timedelta(days=1)
     appointment = make_appointment(
@@ -154,7 +144,7 @@ def test_deactivating_specialist_with_confirmed_future_appointment_returns_409_w
         status=AppointmentStatus.CONFIRMED,
     )
 
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     response = client.delete(_specialist_detail_url(salon, specialist))
 
     assert response.status_code == 409
@@ -168,7 +158,7 @@ def test_deactivating_specialist_with_confirmed_future_appointment_returns_409_w
 
 
 def test_deactivating_specialist_with_pending_payment_future_appointment_returns_409(
-    client, salon, staff_user, specialist, customer, service
+    client, salon, admin_account, specialist, customer, service
 ):
     """
     The easy-to-get-wrong case: a PENDING_PAYMENT appointment hasn't been
@@ -186,7 +176,7 @@ def test_deactivating_specialist_with_pending_payment_future_appointment_returns
         status=AppointmentStatus.PENDING_PAYMENT,
     )
 
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     response = client.delete(_specialist_detail_url(salon, specialist))
 
     assert response.status_code == 409
@@ -194,7 +184,7 @@ def test_deactivating_specialist_with_pending_payment_future_appointment_returns
 
 
 def test_deactivating_specialist_with_only_cancelled_or_past_appointments_succeeds(
-    client, salon, staff_user, specialist, customer, service
+    client, salon, admin_account, specialist, customer, service
 ):
     future_but_cancelled_start = timezone.now() + dt.timedelta(days=1)
     make_appointment(
@@ -215,7 +205,7 @@ def test_deactivating_specialist_with_only_cancelled_or_past_appointments_succee
         status=AppointmentStatus.CONFIRMED,
     )
 
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     response = client.delete(_specialist_detail_url(salon, specialist))
 
     assert response.status_code == 204
@@ -225,7 +215,7 @@ def test_deactivating_specialist_with_only_cancelled_or_past_appointments_succee
 
 
 def test_deactivating_specialist_with_appointment_in_progress_returns_409(
-    client, salon, staff_user, specialist, customer, service
+    client, salon, admin_account, specialist, customer, service
 ):
     """Started 10 minutes ago, ends in 50 (service.duration_minutes=60): the
     specialist has a live commitment right now, not just a future one."""
@@ -239,15 +229,15 @@ def test_deactivating_specialist_with_appointment_in_progress_returns_409(
         status=AppointmentStatus.CONFIRMED,
     )
 
-    client.force_authenticate(user=staff_user)
+    client.force_authenticate(user=admin_account)
     response = client.delete(_specialist_detail_url(salon, specialist))
 
     assert response.status_code == 409
     assert response.data["error"]["code"] == "specialist_has_future_appointments"
 
 
-def test_deactivate_then_reactivate_round_trip(client, salon, staff_user, specialist):
-    client.force_authenticate(user=staff_user)
+def test_deactivate_then_reactivate_round_trip(client, salon, admin_account, specialist):
+    client.force_authenticate(user=admin_account)
 
     delete_response = client.delete(_specialist_detail_url(salon, specialist))
     assert delete_response.status_code == 204
