@@ -3679,3 +3679,91 @@ does not reopen them.
   this commit deletes). The full § 2 / § 3 / § 4 rewrite for the
   `Account`/`Customer` split remains the tracked follow-up from the § Stage
   3-R decisions entry.
+
+## Stage 3-R.D.1 — first-admin provisioning (`Account` in Django admin)
+
+Decided and implemented 2026-08-27, in one red→green commit. First of the
+five 3-R.D sub-steps (D.1 admin provisioning → D.2 retire the `User`-based
+product auth surface → D.3 client registration → D.4 email verification +
+guest→`Account` merge → D.5 password reset); **login/refresh/logout stay
+on `User` until 3-R.E**. This entry implements the "first-admin
+provisioning: platform-owner-initiated" direction from § Stage 3-R
+decisions and the `role=admin` / `customer=null` shape it sanctioned.
+
+- **Mechanism: Django `/admin/` only.** `AccountAdmin` is registered on
+  the standard admin site; the platform owner (superuser) creates a
+  salon's first `Account` with `role=admin` there. **No
+  `createsuperuser`-analogue management command** — first-admin creation
+  is a rare manual superadmin action on an empty salon, and there is no
+  second caller for such a command yet; add one later only if automation
+  is actually needed. This closes the "exact technical mechanism of
+  first-admin provisioning" item left deferred in § Stage 3-R decisions
+  (Django admin, not an admin action / invite-link flow / command).
+
+- **`AccountAdmin(SalonScopedAdmin)`, not plain `ModelAdmin`.**
+  `Account.objects` (`AccountManager`) raises `TenantContextMissingError`
+  with no tenant bound, which every `/admin/` request is; `SalonScopedAdmin`
+  already routes the changelist (`get_queryset`) and FK dropdowns
+  (`formfield_for_foreignkey`) through `unscoped_objects`. A plain
+  `ModelAdmin` would 500 on the changelist. `add` is left enabled (the
+  opposite of `UserAdmin`) — creating the first admin here is the point.
+
+- **Password handling — the security core.** A bespoke add form
+  (`AccountAdminAddForm`) mirrors `django.contrib.auth.forms.UserCreationForm`:
+  `password1` / `password2` are declared form fields, deliberately **not**
+  in `Meta.fields`, so `ModelForm.construct_instance` never writes a raw
+  value onto `Account.password`; the only assignment is `set_password()`
+  in `form.save()`. The change form lists `password` in
+  `readonly_fields` (same as this repo's `UserAdmin`), so no admin path —
+  including a hand-crafted POST smuggling a `password` field — can
+  overwrite a stored hash with a literal. Both are locked by tests
+  (`test_account_admin.py`, the add-hash and change-smuggle guards).
+
+- **Deliberately not routed through `AccountManager.create_account`,**
+  even though that is "the pinned creation path" for the manager. The
+  admin add lifecycle needs `save(commit=False)` semantics and
+  instance/pk propagation into `LogEntry` and the post-add redirect;
+  Django's own `UserAdmin` hashes in the form, not the manager. This
+  leaves **two** `Account`-creation paths (`create_account` and the admin
+  form) that must stay in parity — the parity that matters (full-lowercase
+  email via `clean_email`, `validate_password` on `password1`,
+  `set_password`, non-empty password) is replicated explicitly in the
+  form and pinned by tests.
+
+- **`customer` is a declared `ModelChoiceField(queryset=Customer.unscoped_objects.all())`,
+  not a `Meta.fields` entry.** As a `Meta.fields` entry the `ModelForm`
+  metaclass would build it from `Customer._default_manager` (tenant-scoped)
+  at class-definition time and raise — the same root cause
+  `SalonScopedAdmin.formfield_for_foreignkey` handles for admin-built
+  forms, which does not reach a standalone `ModelForm` subclass. It is
+  persisted explicitly in `save()`. A no-history first admin leaves it
+  blank → `customer=null`.
+
+- **`_TenantBoundModelForm` base (add form + change form).** Model
+  constraint validation in `_post_clean` (`Account`'s `(salon, email)`
+  `UniqueConstraint`) goes through the tenant-scoped `_default_manager`
+  and would raise inside a tenant-less admin request. The base binds
+  `tenant_context` from the submitted (or existing) `salon` for the
+  duration of `_post_clean`, so the form-level uniqueness check runs
+  correctly scoped. The DB constraint remains the real guarantee.
+
+- **No migration.** `Account` already exists as a model + table
+  (`accounts/0004_account.py`); admin registration and a form are not
+  model changes. `makemigrations --check --dry-run` reports "No changes
+  detected".
+
+- **No admin password-change view** (`auth.admin.UserAdmin`'s
+  `<id>/password/`). Operator-side password rotation is out of D.1 scope;
+  self-service reset lands in D.5. Small documented gap: to change an
+  admin `Account`'s password before D.5, a superuser deletes and
+  recreates it.
+
+- **`superuser` test fixture** moved from `test_admin_tenant_scoping.py`
+  into `tests/conftest.py` (a genuine second caller — `test_account_admin.py`
+  needs it too; a stable 2-line fixture, so duplication would create the
+  sync risk the earlier conftest caution was about).
+
+- **`ARCHITECTURE.md` § 2 `Account` entity-table row is NOT added here** —
+  left to the tracked full § 2 rewrite from § Stage 3-R decisions, so the
+  row lands with the `User` / `SalonStaff` / `Customer` rewrites in one
+  coherent pass rather than piecemeal.

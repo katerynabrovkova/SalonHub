@@ -11,7 +11,6 @@ import pytest
 from django.contrib import admin
 from django.test import RequestFactory
 
-from accounts.models import User
 from booking.admin import AppointmentAdmin
 from booking.guest_tokens import issue_guest_token
 from booking.models import Appointment
@@ -22,11 +21,6 @@ from tests.conftest import make_appointment
 pytestmark = pytest.mark.django_db
 
 factory = RequestFactory()
-
-
-@pytest.fixture
-def superuser() -> User:
-    return User.objects.create_superuser(email="admin@example.com", password="a-strong-passw0rd!")
 
 
 def test_admin_changelist_reaches_across_tenants(client, superuser, salon, other_salon):

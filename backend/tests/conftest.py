@@ -4,7 +4,7 @@ import pytest
 from django.core.cache import cache
 from django.utils import timezone
 
-from accounts.models import Account, AccountRole, Customer
+from accounts.models import Account, AccountRole, Customer, User
 from booking.constants import SLOT_HOLD_DURATION
 from booking.models import Appointment, AppointmentStatus
 from catalog.models import Service, ServiceCategory
@@ -102,6 +102,16 @@ def other_salon_admin_account(other_salon):
             password="a-strong-passw0rd!",
             role=AccountRole.ADMIN,
         )
+
+
+@pytest.fixture
+def superuser(db):
+    """Platform-operator Django `/admin/` login (is_staff/is_superuser). The
+    cross-tenant exception (docs/DECISIONS.md § Stage 3-R decisions,
+    "deliberate exception") — distinct from a per-salon `admin_account`."""
+    return User.objects.create_superuser(
+        email="superuser@example.com", password="a-strong-passw0rd!"
+    )
 
 
 def make_working_hours(
