@@ -151,7 +151,10 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
     # Rates and reasoning recorded in docs/DECISIONS.md § Stage 3 decisions.
     # guest_token is predeclared for the Stage 3 sub-step that adds the
-    # endpoint it applies to; unused until then.
+    # endpoint it applies to. password_reset / resend_verification are
+    # dormant from Stage 3-R.D.2 (the User-based endpoints that used them
+    # were removed) until 3-R.D.4 / 3-R.D.5 re-mount them under the salon
+    # prefix — kept as the same lines rather than deleted-and-re-added.
     "DEFAULT_THROTTLE_RATES": {
         "login": "5/min",
         "password_reset": "3/hour",
@@ -190,10 +193,7 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@bella-beauty-sa
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 
 # Django's own token generator (used for password reset) reads this directly.
-# Short relative to email verification's 48h: a live reset token is the
-# highest-value credential in this scheme and is normally acted on within
-# minutes of being requested (docs/DECISIONS.md § Stage 3 decisions).
+# Short: a live reset token is the highest-value credential in this scheme
+# and is normally acted on within minutes of being requested
+# (docs/DECISIONS.md § Stage 3 decisions).
 PASSWORD_RESET_TIMEOUT = 60 * 60  # 1 hour
-
-# Email verification token expiry (accounts.tokens), read by that module.
-EMAIL_VERIFICATION_TIMEOUT = 60 * 60 * 48  # 48 hours

@@ -3767,3 +3767,90 @@ decisions and the `role=admin` / `customer=null` shape it sanctioned.
   left to the tracked full § 2 rewrite from § Stage 3-R decisions, so the
   row lands with the `User` / `SalonStaff` / `Customer` rewrites in one
   coherent pass rather than piecemeal.
+
+## Stage 3-R.D.2 — retire the `User`-based product-auth surface
+
+Decided and implemented 2026-08-27. Second of the five 3-R.D sub-steps
+(D.1 admin provisioning → **D.2 retire the old surface** → D.3 client
+registration → D.4 email verification + guest→`Account` merge → D.5
+password reset). Login / refresh / logout stay on `User` at
+`/api/v1/auth/` until 3-R.E.
+
+- **What was deleted.** The flat
+  `/api/v1/auth/{register, verify-email, resend-verification,
+  password-reset, password-reset/confirm}` endpoints and everything behind
+  them: `RegisterView` / `VerifyEmailView` / `ResendVerificationView` /
+  `PasswordResetRequestView` / `PasswordResetConfirmView` and their
+  serializers; `accounts/tokens.py` (whole file — the stateless
+  email-verification token, § Stage 3 decisions and its § Stage 3-R
+  reversal, "email-verification token subject"); `accounts/tasks.py`
+  (whole file — `send_verification_email` / `send_account_exists_email` /
+  `send_password_reset_email`); `accounts/services.py`'s
+  `link_guest_customers` (the cross-salon guest→`User` merge — § Stage 3-R
+  reversals, "guest→`User` cross-salon merge"); the
+  `EMAIL_VERIFICATION_TIMEOUT` setting (its only reader was
+  `accounts/tokens.py`). Five parametrized 404 guards
+  (`tests/test_auth_surface_removed.py`) pin the removal so the endpoints
+  can't be silently remounted.
+
+- **What was kept.** `LoginView` / `RefreshView` / `LogoutView` at
+  `/api/v1/auth/` — unchanged, still authenticating against
+  `AUTH_USER_MODEL`. § Stage 3-R decisions ("Login contract") moves these
+  under `/api/v1/salons/<slug>/auth/` against `Account` in 3-R.E, not
+  here. `accounts/services.py`'s `get_or_create_guest_customer` — fully
+  intact; it is booking-flow infrastructure (`booking/services.py`) and
+  never touched `User`. `PASSWORD_RESET_TIMEOUT` (a Django built-in read
+  by `default_token_generator`) and the `password_reset` /
+  `resend_verification` throttle rates kept in place, dormant, since
+  3-R.D.4 / D.5 re-mount their endpoints as the literally-same config —
+  deleting and re-adding would be churn with no gain, and it matches the
+  existing `guest_token` predeclared-unused precedent in the same file.
+
+- **The accepted gap.** From this commit until D.3 / D.4 / D.5 land, the
+  product has no registration, email verification, or password reset at
+  all. Accepted knowingly, on the same rationale as the 3-R.B + 3-R.C 403
+  gap: login is already non-functional against `Account` until 3-R.E, and
+  the demo salon is pre-launch. A clean cut here keeps D.3–D.5 as pure
+  greenfield adds under the salon prefix with no "remove old X" churn in
+  their diffs — the shared `tokens.py` / email-task retarget cannot
+  straddle a "registration" and a "verification" commit without one
+  breaking the other.
+
+- **3-R.E debt (a): `IsAuthenticatedCustomer` / `IsOwnCustomer` still
+  resolve `request.user` as a platform `User`** and query
+  `Customer.objects.filter(user=request.user)` (`core/permissions.py`).
+  JWT auth is unchanged (`DEFAULT_AUTHENTICATION_CLASSES` still targets
+  `AUTH_USER_MODEL`). Repointing these onto an authenticated `Account`
+  principal is 3-R.E work — deferred, not fixed here. Current behavior is
+  pinned by `tests/test_core_permissions.py`
+  (`test_is_authenticated_customer_*`, `test_is_own_customer_*`).
+
+- **3-R.E debt (b): the `Customer.user` FK (`accounts/models.py`) is a
+  separate reversal item, not folded into D or E.** Removing it requires,
+  in order: the debt-(a) permission repoint; `link_guest_customers` gone
+  (done in this commit); `CustomerAdmin.list_display` updated
+  (`accounts/admin.py` — still lists `"user"`); and a `RemoveField`
+  migration, which per CLAUDE.md needs its own explicit decision point
+  raised and approved *before* the model change is written. Recorded here
+  so it is not lost or silently absorbed into another sub-step.
+
+- **Also now vestigial — Stage 9, not touched here.**
+  `NotificationTrigger.EMAIL_VERIFICATION`, `Notification.user` (a second
+  `AUTH_USER_MODEL` FK), and the `notification_exactly_one_recipient`
+  check constraint (`notifications/models.py`) exist for the guest→`User`
+  verification-email design this commit removes; no code ever dispatched
+  an `EMAIL_VERIFICATION` `Notification` (the deleted tasks used
+  `send_mail` directly). Reconcile when Stage 9 (Celery + notifications)
+  resumes.
+
+- **Docstrings corrected in this commit** (they named removed endpoints
+  as live mechanisms): `accounts/views.py` and `accounts/serializers.py`
+  and `accounts/services.py` module docstrings; the `UserAdmin` docstring
+  in `accounts/admin.py`; `tenants/middleware.py` (dropped the
+  `/api/v1/me/...` mention — never built, retired by § Stage 3-R
+  reversals, "ARCHITECTURE §13"). `backend/http-client/auth.http` is left
+  as-is: a dev request-scratch file, not product code; its stale blocks
+  will 404 and refresh naturally in 3-R.D.3.
+
+- **No migration.** No model was touched (`makemigrations --check
+  --dry-run` reports "No changes detected").

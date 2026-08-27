@@ -15,8 +15,9 @@ class UserAdmin(admin.ModelAdmin):
     """
     Bespoke, not django.contrib.auth.admin.UserAdmin — that base class's
     stock forms/fieldsets assume a `username` field, which this project's
-    User doesn't have (docs/DECISIONS.md § Stage 3 decisions). Accounts are
-    created via /api/v1/auth/register/ or `createsuperuser`, never here:
+    User doesn't have (docs/DECISIONS.md § Stage 3 decisions). Platform
+    `User` accounts are created via `createsuperuser` or the Django shell,
+    never here (`/api/v1/auth/register/` was removed in Stage 3-R.D.2):
     add is disabled, and `password` is read-only rather than editable —
     Django's default form widget for a plain CharField would let an
     operator overwrite it with a literal string instead of hashing it, a

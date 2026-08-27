@@ -21,9 +21,9 @@ class TenantResolutionMiddleware:
     """
     Binds the current tenant for the duration of a request whose path
     matches `/api/v1/salons/<slug>/...`. Paths outside that prefix (health
-    check, Django admin, `/api/v1/auth/...`, `/api/v1/me/...`) pass through
-    with no tenant bound — those views must never touch tenant-scoped models
-    without deliberately choosing a salon first.
+    check, Django admin, `/api/v1/auth/...`) pass through with no tenant
+    bound — those views must never touch tenant-scoped models without
+    deliberately choosing a salon first.
 
     An unknown or inactive slug returns 404, not 403: the slug is part of the
     URL path, not a credential, so a nonexistent salon is a routing miss, and
