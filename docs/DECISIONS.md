@@ -3964,3 +3964,98 @@ decisions (registration under `/api/v1/salons/<slug>/auth/`) and the
   passed before implementation and still passes after — it exercises the
   middleware's unknown-slug 404, which predates D.3. Kept as a
   wiring-regression guard.
+
+## Stage 3-R.D.4 — email verification + guest→`Account` same-salon link
+
+Decided 2026-08-28. Fourth of the five 3-R.D sub-steps (D.1 admin
+provisioning → D.2 retire the old surface → D.3 client registration → **D.4
+email verification + guest→`Account` link** → D.5 password reset).
+Implements the verification half of the "Login contract" direction (§ Stage
+3-R decisions — email verification moves under
+`/api/v1/salons/<slug>/auth/`) and the same-salon replacement mandated by
+the "Reversal: § Identity — guest→`User` cross-salon merge" entry. Login /
+refresh / logout stay on `User` at `/api/v1/auth/` until 3-R.E.
+
+- **What is added.** `POST /api/v1/salons/<slug>/auth/verify-email/`
+  (`VerifyEmailView`, `permission_classes = [AllowAny]`), a second route in
+  `accounts/salon_urls.py` (`app_name = "salon_auth"`), which
+  `config/urls.py` already includes ahead of
+  booking/catalog/specialists/scheduling so its `auth/` tails resolve
+  first. `TenantResolutionMiddleware` binds tenant context and 404s an
+  unknown slug before the view runs — **no middleware change**, same as
+  D.3. **No migration**: `email_verified_at` and `Account.customer` both
+  already exist (§ Stage 3-R decisions, "Account model, settled shape");
+  D.4 touches no model.
+
+- **Resend-verification is out of scope here.** D.2's forward-reference
+  ("3-R.D.4 / D.5 re-mount their endpoints") is narrowed: verify-email
+  lands in D.4; resend-verification moves to Stage 3-R.D.5, alongside
+  password reset, as the two share the register-style token-issuing
+  shape (generate token → send email → throttle → joe-job posture)
+  rather than the token-consuming verify path.
+
+- **POST, not GET.** Verification mutates state — it stamps
+  `email_verified_at` and may set `Account.customer`. A side-effect-free
+  GET could be fired by link prefetchers, mail-scanner proxies, or a
+  browser preloading the URL — verifying an address (and claiming guest
+  history) with no deliberate user action. The token travels in the
+  request body, not the URL.
+
+- **Success is `204 No Content`, empty body.** Nothing to return — the
+  client knows which address it submitted, and the account is not
+  authenticated here (login is 3-R.E).
+
+- **Verification is a filtered update, idempotent.**
+  `Account.objects.filter(pk=<account_id>, email_verified_at__isnull=True)
+  .update(email_verified_at=now)`. A repeat verify with the same
+  still-valid token selects zero rows and leaves the original timestamp
+  intact — a safe no-op, not a re-stamp. `<account_id>` comes from
+  `read_account_verification_token` (§ Stage 3-R.D.3), never from the URL
+  or the body.
+
+- **Same-salon guest link, inside the same `transaction.atomic()` as the
+  verification update.** After stamping, if `account.customer is None`
+  **and** a `Customer` with `email == account.email` exists in the bound
+  salon (`Customer.objects.filter(email=account.email)` — tenant-scoped,
+  so the lookup is single-salon by construction), set `account.customer`
+  to that row and save. Match by verified email only — **never by phone**
+  (phone is not a reliable identity signal: reassigned, unverified,
+  shared). Do nothing when `account.customer` is already set, or when no
+  matching guest `Customer` exists. There is no cross-salon variant: an
+  `Account` links to exactly one `Customer`, at its own one salon — the
+  platform-wide `link_guest_customers` loop removed in D.2 is not replaced
+  with anything that reaches past the bound tenant.
+
+- **The link happens only after email confirmation, never at
+  registration.** Matching a guest `Customer` by an *unconfirmed* email
+  would let anyone claim a stranger's guest history — past appointments,
+  contact details — just by registering with their address. Confirmation
+  proves the registrant controls the mailbox; only proven ownership grants
+  the history. This is the judgment the original § Identity entry made
+  ("linking … happens only after email verification") carried forward to
+  the `Customer` / `Account` split.
+
+- **All failures collapse to one neutral response.** The view catches both
+  `signing.SignatureExpired` and `signing.BadSignature` from
+  `read_account_verification_token` and raises the existing
+  `InvalidOrExpiredTokenError` (`core/exceptions.py` — 400,
+  `code="invalid_or_expired_token"`). Expired, tampered,
+  issued-for-another-salon, and unknown-account are indistinguishable from
+  outside: the endpoint reveals neither whether an account exists nor
+  whether it belongs to this salon. Same collapse pattern as
+  `booking/guest_tokens`' `validate_guest_token`.
+
+- **`now` is an explicit parameter.** `timezone.now()` is called once, in
+  the view, and passed into the verification/link routine — the system
+  clock is I/O, kept at the edge, same rule as `create_guest_appointment`
+  / `cancel_appointment` (§ Stage 6.F / 6.I / 7.C-bis decisions) and D.3's
+  registration path.
+
+- **Untouched debt (restated, not resolved here).** `Customer.user`
+  (`accounts/models.py`) still points at the platform `User` model — its
+  removal or repointing onto an `Account` principal is 3-R.E debt (b), a
+  separate `RemoveField` / `AlterField` migration needing its own decision
+  point (§ Stage 3-R.D.2). D.4 sets `Account.customer` (the OneToOne
+  declared on `Account`), a different relation, and leaves `Customer.user`
+  alone. The login / refresh / logout relocation under the salon prefix
+  against `Account` remains 3-R.E.
