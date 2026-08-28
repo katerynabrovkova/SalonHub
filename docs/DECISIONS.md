@@ -3854,3 +3854,113 @@ password reset). Login / refresh / logout stay on `User` at
 
 - **No migration.** No model was touched (`makemigrations --check
   --dry-run` reports "No changes detected").
+
+## Stage 3-R.D.3 — client registration against `Account`
+
+Decided and implemented 2026-08-28, in one red→green commit. Third of the
+five 3-R.D sub-steps (D.1 admin provisioning → D.2 retire the old surface →
+**D.3 client registration** → D.4 email verification + guest→`Account`
+merge → D.5 password reset); the first greenfield add under the salon
+prefix. Login / refresh / logout stay on `User` at `/api/v1/auth/` until
+3-R.E. This implements the "Login contract" direction from § Stage 3-R
+decisions (registration under `/api/v1/salons/<slug>/auth/`) and the
+"no-enumeration, tightened to isolation-driven wording" reversal.
+
+- **What was added.** `POST /api/v1/salons/<slug>/auth/register/`
+  (`RegisterView`, `accounts/salon_urls.py` — a new include at
+  `/api/v1/salons/<slug:slug>/` in `config/urls.py`, `app_name =
+  "salon_auth"` since `accounts.urls` already owns "accounts");
+  `RegisterSerializer` (`accounts/serializers.py` — email format + password
+  strength only); `accounts/tokens.py` rebuilt salon-aware;
+  `accounts/tasks.py` rebuilt with a single `send_verification_email` task;
+  a `register` throttle rate. Creates a `role=client`, `is_active=True`,
+  `email_verified_at=None` `Account` scoped to the URL's salon and fires
+  one verification email.
+
+- **Salon resolution mirrors `booking.views.GuestBookingCreateView`
+  exactly.** Plain `APIView`, `permission_classes = [AllowAny]`, and
+  `salon = get_object_or_404(Salon, pk=get_current_salon_id())` — the
+  `TenantResolutionMiddleware` has already bound the context (and 404'd an
+  unknown slug) before the view runs. **The middleware needed zero
+  change**: its regex `^/api/v1/salons/(?P<slug>[^/]+)/` anchors only the
+  prefix. No model was touched, so **no migration** (`makemigrations
+  --check --dry-run` reports "No changes detected").
+
+- **No-enumeration holds on two independent levels, each pinned by its own
+  test.** (1) *Cross-salon*: the duplicate check is
+  `Account.objects.filter(email=email).first()` against the **tenant-scoped
+  manager** (`core/models.py`), which physically cannot see another salon's
+  rows — `test_same_email_registers_independently_at_two_salons` (same
+  address, two salons, two rows, distinct `salon_id`, both `202`). (2)
+  *Within-salon*: the response is an **identical empty-body `202`** whether
+  the email is new or already registered here — a returning address gets no
+  second row and **no further email** —
+  `test_duplicate_email_same_salon_returns_identical_202_and_creates_no_second_row`
+  (asserts status *and* body equal to the new-email response, and
+  `len(mail.outbox)` unchanged by the second call). The manager gives the
+  first level, not the second; the second is the view's identical return.
+  `test_weak_password_is_rejected_400_with_no_account_and_no_email` pins
+  the third angle: the *only* `400` this endpoint returns is field
+  format / password strength, never an existence signal.
+
+- **The duplicate path sends nothing.** The pre-3-R.D.2 `User` flow sent a
+  `send_account_exists_email` ("you already have an account, log in or
+  reset"). Not rebuilt here: there is no `Account` login until 3-R.E, so
+  such an email would point the recipient at an action they cannot take —
+  worse than silence. The "account exists" notice returns in 3-R.D.4 / E
+  once there is a login to link it to. The database
+  `account_salon_email_uniq` constraint plus
+  `core.exceptions.exception_handler`'s `UniqueViolation → 400
+  code="unique_violation"` branch stays **only** as the check-then-create
+  race backstop, never the normal-path duplicate response.
+
+- **`register` throttle rate: `3/hour`, matching `password_reset` /
+  `resend_verification`.** Registration triggers a third-party email send
+  on our bill — the same rationale that set those two rates (§ Stage 3
+  decisions). This **tightens** the old `User` `RegisterView`, which had no
+  `throttle_scope` at all. Added to `DEFAULT_THROTTLE_RATES` in
+  `config/settings/base.py` next to the dormant siblings.
+
+- **Deviation — verification-token max-age is a module constant, not a
+  setting.** `accounts/tokens.ACCOUNT_VERIFICATION_TOKEN_MAX_AGE = 60 * 60
+  * 48`. The pre-D.2 flow read `settings.EMAIL_VERIFICATION_TIMEOUT`
+  (deleted with the old surface). Rebuilt following the newer
+  `booking/guest_tokens.GUEST_TOKEN_VALIDITY` precedent — "a fixed security
+  parameter, not a salon-configurable business lever".
+  `PASSWORD_RESET_TIMEOUT` stays a setting only because Django's own
+  generator reads it directly; our `TimestampSigner` has no such
+  constraint.
+
+- **Deviation — the Celery task takes primitives, not an id to re-load.**
+  `send_verification_email(recipient_email, token, salon_slug)`. The
+  pre-D.2 task did `User.objects.get(pk=user_id)` and generated the token
+  itself. Rebuilt so the **view** (tenant context bound) generates the
+  token and passes the three JSON-serializable values it already holds —
+  the worker (no tenant context) never re-derives `email` or the slug
+  through `unscoped_objects`. `accounts/tasks.py` now imports no model.
+
+- **Token shape: `{account_id, email}`, salon NOT in the payload.** The
+  emailed link carries the slug
+  (`{FRONTEND_URL}/salons/<slug>/verify-email#token=...`), so the D.4
+  verify endpoint runs under the salon prefix with tenant context bound.
+  `read_account_verification_token` resolves the account through the
+  tenant-scoped `Account.objects` on top of that — a token minted in one
+  salon and replayed against another salon's verify URL fails the lookup
+  (`test_token_minted_for_another_salon_is_not_readable_here`). It also
+  rejects a token whose email no longer matches the account's current
+  email (`test_token_for_a_changed_email_is_rejected`), matching the
+  deleted module's behaviour.
+
+- **Scope boundary — no verify endpoint here.** D.3 creates the unverified
+  `Account`, generates the token, sends the email. The endpoint that
+  *consumes* the token (setting `email_verified_at`, linking the same-salon
+  `Customer`) is D.4. `accounts/tokens.py` is unit-tested for the
+  generate/read round-trip and every failure path
+  (`tests/test_account_verification_token.py`, 5 tests) even though nothing
+  in product consumes it yet — same as `booking/guest_tokens` was tested a
+  sub-step before its endpoint existed.
+
+- **`tests/test_account_registration.py::test_unknown_salon_slug_returns_404`**
+  passed before implementation and still passes after — it exercises the
+  middleware's unknown-slug 404, which predates D.3. Kept as a
+  wiring-regression guard.

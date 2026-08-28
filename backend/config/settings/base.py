@@ -149,14 +149,17 @@ REST_FRAMEWORK = {
     # (docs/ARCHITECTURE.md § 13, core/pagination.py).
     "DEFAULT_PAGINATION_CLASS": "core.pagination.DefaultPagination",
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
-    # Rates and reasoning recorded in docs/DECISIONS.md § Stage 3 decisions.
-    # guest_token is predeclared for the Stage 3 sub-step that adds the
-    # endpoint it applies to. password_reset / resend_verification are
-    # dormant from Stage 3-R.D.2 (the User-based endpoints that used them
-    # were removed) until 3-R.D.4 / 3-R.D.5 re-mount them under the salon
-    # prefix — kept as the same lines rather than deleted-and-re-added.
+    # Rates and reasoning recorded in docs/DECISIONS.md § Stage 3 decisions
+    # (register: § Stage 3-R.D.3). guest_token is predeclared for the Stage 3
+    # sub-step that adds the endpoint it applies to. password_reset /
+    # resend_verification are dormant from Stage 3-R.D.2 (the User-based
+    # endpoints that used them were removed) until 3-R.D.4 / 3-R.D.5 re-mount
+    # them under the salon prefix — kept as the same lines rather than
+    # deleted-and-re-added. register matches those two: it also triggers a
+    # third-party email send on our bill.
     "DEFAULT_THROTTLE_RATES": {
         "login": "5/min",
+        "register": "3/hour",
         "password_reset": "3/hour",
         "resend_verification": "3/hour",
         "guest_token": "20/min",
