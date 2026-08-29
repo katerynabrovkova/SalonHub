@@ -4059,3 +4059,126 @@ refresh / logout stay on `User` at `/api/v1/auth/` until 3-R.E.
   declared on `Account`), a different relation, and leaves `Customer.user`
   alone. The login / refresh / logout relocation under the salon prefix
   against `Account` remains 3-R.E.
+
+## Stage 3-R.D.5 — password reset + resend-verification
+
+Decided 2026-08-29. Fifth and last of the five 3-R.D sub-steps (D.1 admin
+provisioning → D.2 retire the old surface → D.3 client registration → D.4
+email verification + guest→`Account` link → **D.5 password reset +
+resend-verification**). Docs-first: this entry lands before the code — when
+the implementation commit follows, its header stays "Decided 2026-08-29",
+not backdated or relabelled "and implemented". D.5 closes the 3-R.D
+sub-stage; 3-R.E (login / refresh / logout relocated under the salon prefix
+against `Account`) is next. Login / refresh / logout stay on `User` at
+`/api/v1/auth/` until then.
+
+- **What is added.** Three routes under `/api/v1/salons/<slug>/auth/`, all
+  `permission_classes = [AllowAny]`, appended to `accounts/salon_urls.py`
+  (`app_name = "salon_auth"`), which `config/urls.py` already includes
+  ahead of booking/catalog/specialists/scheduling so its `auth/` tails
+  resolve first: `POST auth/password-reset/`, `POST
+  auth/password-reset/confirm/`, `POST auth/resend-verification/`.
+  `TenantResolutionMiddleware` binds tenant context and 404s an unknown
+  slug before the view runs — **no middleware change**, same as D.3 / D.4.
+
+- **No settings change.** The `password_reset` and `resend_verification`
+  throttle rates (both `3/hour`) have sat dormant in
+  `DEFAULT_THROTTLE_RATES` since D.2 kept them rather than
+  delete-and-re-add; D.5 is the sub-step that mounts the endpoints keyed to
+  them. `PASSWORD_RESET_TIMEOUT` (`60 * 60`, 1 hour) is likewise already
+  set — Django's `PasswordResetTokenGenerator` reads it directly.
+
+- **No migration.** `Account` already duck-types against
+  `PasswordResetTokenGenerator` with no field changes: its
+  `_make_hash_value()` reads `pk`, `password`, `last_login`, and the
+  inherited `email` (via `get_email_field_name()`), all present on
+  `Account` — `AbstractBaseUser` contributes `password` and the nullable
+  `last_login`, the latter surfaced as a requirement by the § confirmation
+  recon. This resolves the "whether this specific Django class still
+  applies cleanly to an `Account` row" question the "Reversal:
+  password-reset generator" entry left open: it applies unchanged.
+
+- **Endpoint 1 — `POST auth/password-reset/` (reset-request).** Body
+  `{"email"}`. `throttle_scope = "password_reset"` (3/hour), register-style.
+  Token-issuing. No-enumeration: an identical empty `202` whether or not an
+  `Account` with that email exists in the bound salon.
+  `send_password_reset_email` is enqueued **only** when an account is
+  found, but the response is byte-identical on both branches — it reveals
+  neither account existence nor cross-salon membership (the lookup runs
+  through the tenant-scoped `Account.objects`, single-salon by
+  construction). Same posture as D.3 register.
+
+- **Endpoint 2 — `POST auth/password-reset/confirm/` (reset-confirm).**
+  Body `{"uid", "token", "new_password"}`. Token-consuming, **no
+  throttle** — the generator token is a keyed hash, not brute-forceable in
+  the one-hour window. `uid` is the base64-encoded `Account` pk, carried
+  **separately** from `token` because `PasswordResetTokenGenerator` does
+  not embed the pk in its token — unlike the verify-email `TimestampSigner`
+  payload, which carries `account_id` inside the signed blob. The two
+  tokens have different natures; the two-part `uid` + `token` shape here is
+  a consequence of that, not an inconsistency with D.4. Flow: decode `uid`
+  → load `Account` (tenant-scoped) →
+  `PasswordResetTokenGenerator().check_token(account, token)` →
+  `validate_password(new_password, user=account)` →
+  `account.set_password(new_password)` +
+  `account.save(update_fields=["password"])`. Success is empty `204`.
+
+- **Reset-confirm token failures collapse to one neutral `400`.** Bad
+  base64, a `uid` naming no account in the bound salon, and a tampered or
+  expired `token` are all indistinguishable from outside: every one raises
+  the existing `InvalidOrExpiredTokenError` (`core/exceptions.py` — 400,
+  `code="invalid_or_expired_token"`). Same collapse as D.4 verify-email and
+  `booking/guest_tokens`' `validate_guest_token`. A `validate_password`
+  rejection is a separate field-level `400` (password strength), not part
+  of this collapse and not an existence signal — the same carve-out D.3
+  register makes for a weak registration password.
+
+- **A used reset link dies on its own.**
+  `PasswordResetTokenGenerator`'s hash incorporates the current password
+  hash, so the moment `set_password` runs, the token that authorised it
+  stops verifying — no explicit revocation step, no stored single-use
+  record. This is the property § Stage 3 decisions chose the generator
+  for, now confirmed to carry over to `Account`.
+
+- **Endpoint 3 — `POST auth/resend-verification/` (resend).** Body
+  `{"email"}`. `throttle_scope = "resend_verification"` (3/hour),
+  register-style. Token-issuing; reuses `generate_account_verification_token`
+  and `send_verification_email` (`accounts/tokens.py` / `accounts/tasks.py`)
+  as-is — built in D.3, consumed in D.4, and the resend path adds no new
+  token machinery. No-enumeration: an identical empty `202` regardless of
+  outcome. When an `Account` is found **and** is still unverified
+  (`email_verified_at IS NULL`) → mint a fresh verification token and send.
+  When the account is already verified → **send nothing**, still empty
+  `202`. The silent no-op on an already-verified address is deliberate: it
+  denies a joe-job attacker the ability to flood a stranger's inbox with
+  confirmation mail for an address that is already confirmed, and it keeps
+  verified-state from leaking through a delivery or timing difference. This
+  is the resend half of D.2's forward-reference, narrowed by D.4 from
+  "D.4 / D.5" to D.5 alongside password reset — both are register-style
+  token-issuing shapes (generate → send → throttle → joe-job posture).
+
+- **Response bodies are empty throughout** — `202` for the two
+  token-issuing endpoints, `204` for reset-confirm — consistent with D.3
+  register (`202`) and D.4 verify-email (`204`). The backend returns the
+  fact; the "check your inbox" copy, its localisation, and the view around
+  it are the frontend's job.
+
+- **`send_password_reset_email` is rebuilt salon-aware.** The D.2-deleted
+  flat version emailed a salon-less `{FRONTEND_URL}/reset-password#...`
+  link and re-loaded the `User` by id inside the worker. The rebuild
+  follows `send_verification_email`'s D.3 shape: the **view** (tenant
+  context bound) calls `timezone.now()`, generates the token, and reads the
+  slug, then hands the task plain primitives — recipient address, `uid`,
+  `token`, salon slug — so the worker re-derives nothing through
+  `unscoped_objects` and imports no model. The link it builds is
+  `{FRONTEND_URL}/salons/<slug>/reset-password#uid=...&token=...` (URL
+  fragment, never query string — § Stage 3 decisions, guest-token
+  transport, applied to every emailed token).
+
+- **Untouched debt (restated, not resolved here).** `Customer.user`
+  (`accounts/models.py`) still points at the platform `User` model —
+  repointing it onto an `Account` principal is 3-R.E debt (b), its own
+  `RemoveField` / `AlterField` migration needing its own decision point
+  (§ Stage 3-R.D.2). The login / refresh / logout relocation under the
+  salon prefix against `Account` remains 3-R.E — the next stage once D.5
+  lands.
