@@ -23,10 +23,13 @@ decisions).
 
 import datetime as dt
 
+from django.contrib.auth.tokens import default_token_generator
 from django.core import signing
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -38,8 +41,14 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from accounts.models import Account, Customer
-from accounts.serializers import LogoutSerializer, RegisterSerializer
-from accounts.tasks import send_verification_email
+from accounts.serializers import (
+    LogoutSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+    RegisterSerializer,
+    ResendVerificationSerializer,
+)
+from accounts.tasks import send_password_reset_email, send_verification_email
 from accounts.tokens import generate_account_verification_token, read_account_verification_token
 from core.exceptions import InvalidOrExpiredTokenError
 from core.tenancy import get_current_salon_id
@@ -141,6 +150,104 @@ class VerifyEmailView(APIView):
             raise InvalidOrExpiredTokenError() from exc
         _verify_and_link(account_id=account_id, salon=salon, now=now)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PasswordResetRequestView(APIView):
+    """
+    Start a password reset (docs/DECISIONS.md § Stage 3-R.D.5). Public write
+    (AllowAny). No-enumeration: an identical empty ``202`` whether or not an
+    ``Account`` with the submitted email exists in the bound salon — the
+    reset email is enqueued only when one does, and the lookup runs through
+    the tenant-scoped ``Account.objects`` so it can never observe another
+    salon's rows. Throttled at the ``password_reset`` scope (a third-party
+    email send on our bill, same rationale as ``register``).
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        salon = get_object_or_404(Salon, pk=get_current_salon_id())
+        account = Account.objects.filter(email=serializer.validated_data["email"]).first()
+        if account is not None:
+            uid = urlsafe_base64_encode(force_bytes(account.pk))
+            token = default_token_generator.make_token(account)
+            send_password_reset_email.delay(account.email, uid, token, salon.slug)
+
+        return Response(status=status.HTTP_202_ACCEPTED)
+
+
+class PasswordResetConfirmView(APIView):
+    """
+    Complete a password reset from the ``uid`` + ``token`` in the emailed
+    link (docs/DECISIONS.md § Stage 3-R.D.5). Public write (AllowAny), no
+    throttle — the generator token is a keyed hash, not brute-forceable in
+    the one-hour window.
+
+    ``uid`` (the base64-encoded ``Account`` pk) is carried separately from
+    ``token`` because Django's ``PasswordResetTokenGenerator`` does not
+    embed the pk in its token, unlike D.4's ``TimestampSigner`` payload.
+    Every uid/token failure — malformed base64, a pk naming no account in
+    this salon, a tampered or expired token — collapses to one neutral
+    ``InvalidOrExpiredTokenError`` (400), the same posture as
+    ``VerifyEmailView``. A weak ``new_password`` is a separate field-level
+    ``400`` raised by the serializer, never this collapse. Success is
+    ``204 No Content`` — the account is not logged in here (login is 3-R.E).
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            account_pk = force_str(urlsafe_base64_decode(serializer.validated_data["uid"]))
+            account = Account.objects.get(pk=account_pk)
+        except (TypeError, ValueError, OverflowError, Account.DoesNotExist) as exc:
+            raise InvalidOrExpiredTokenError() from exc
+
+        if not default_token_generator.check_token(account, serializer.validated_data["token"]):
+            raise InvalidOrExpiredTokenError()
+
+        with transaction.atomic():
+            account.set_password(serializer.validated_data["new_password"])
+            account.save(update_fields=["password"])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ResendVerificationView(APIView):
+    """
+    Re-send the email-verification link (docs/DECISIONS.md § Stage 3-R.D.5).
+    Public write (AllowAny). Reuses D.3/D.4's token helper and Celery task
+    unchanged. No-enumeration: an identical empty ``202`` regardless of
+    outcome. A fresh token is minted and sent only when the account exists
+    in the bound salon *and* is still unverified — an already-verified
+    address is a deliberate silent no-op (no mail), both to deny joe-job
+    inbox flooding and to keep verified-state from leaking. Throttled at the
+    ``resend_verification`` scope.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "resend_verification"
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        serializer = ResendVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        salon = get_object_or_404(Salon, pk=get_current_salon_id())
+        account = Account.objects.filter(email=serializer.validated_data["email"]).first()
+        if account is not None and account.email_verified_at is None:
+            token = generate_account_verification_token(account)
+            send_verification_email.delay(account.email, token, salon.slug)
+
+        return Response(status=status.HTTP_202_ACCEPTED)
 
 
 class LoginView(TokenObtainPairView):
