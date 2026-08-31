@@ -4211,6 +4211,16 @@ retarget that every 3-R.D entry deferred ("login / refresh / logout stay on
   "wrong password" — no-enumeration, same posture as D.3 register and D.5
   reset-request, extended to the login failure path.
 
+- **Logout success returns HTTP 205 Reset Content.** This is not new to
+  E — the flat `LogoutView` already returned `205`
+  (`status.HTTP_205_RESET_CONTENT`) and E preserves it verbatim on the
+  relocated salon-scoped route. Recording it now because it was never
+  written down as a decision in Stage 3 or any 3-R.D entry (verified by
+  grep), and E is the point where logout is reimplemented on the `Account`
+  path — so the inherited client-visible status code is surfaced and
+  pinned here rather than left implicit and vulnerable to silent change
+  during the retarget.
+
 - **Known-risk mitigation: cross-model token collision, resolved at the
   authentication layer.** `User` and `Account` have independent `id`
   sequences, both starting at 1, and `USER_ID_FIELD` defaults to plain
