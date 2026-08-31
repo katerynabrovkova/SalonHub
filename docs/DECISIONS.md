@@ -4182,3 +4182,61 @@ against `Account`) is next. Login / refresh / logout stay on `User` at
   (§ Stage 3-R.D.2). The login / refresh / logout relocation under the
   salon prefix against `Account` remains 3-R.E — the next stage once D.5
   lands.
+
+## Stage 3-R.E — login / refresh / logout retargeted to Account
+
+Decided 2026-08-31. Docs-first: this entry lands before the code — when the
+implementation commit follows, its header stays "Decided 2026-08-31", not
+backdated or relabelled "and implemented". Closes the `User` → `Account` JWT
+retarget that every 3-R.D entry deferred ("login / refresh / logout stay on
+`User` at `/api/v1/auth/` until 3-R.E").
+
+- **URL surface.** Three new routes under `/api/v1/salons/<slug>/auth/`,
+  alongside D.3–D.5's routes in `accounts/salon_urls.py`: `POST
+  auth/login/`, `POST auth/refresh/`, `POST auth/logout/`. The flat
+  `/api/v1/auth/login/`, `/api/v1/auth/refresh/`, `/api/v1/auth/logout/`
+  endpoints are **removed**, not relocated-and-kept: after E, `User` no
+  longer authenticates via JWT at all — `User` authenticates only through
+  the session-based Django `/admin/`, which is unchanged. The flat JWT
+  login served `User` tokens and now serves nobody, so deleting it is the
+  correct outcome, not a compatibility gap.
+
+- **Login request shape.** Body is `{"email", "password"}` only. The salon
+  is resolved from the path slug (tenant context, same as every other
+  salon-prefixed endpoint) and never from the request body — a client
+  cannot select a different salon than the one it's calling into.
+
+- **Login failure response.** `401` with a neutral detail message,
+  byte-identical whether the cause is "no such email in this salon" or
+  "wrong password" — no-enumeration, same posture as D.3 register and D.5
+  reset-request, extended to the login failure path.
+
+- **Known-risk mitigation: cross-model token collision, resolved at the
+  authentication layer.** `User` and `Account` have independent `id`
+  sequences, both starting at 1, and `USER_ID_FIELD` defaults to plain
+  `"id"` (docs/DECISIONS.md § Stage 3-R decisions, "Known risk...
+  `USER_ID_FIELD` / cross-model token collision"). Tokens issued by the
+  `Account` login carry an explicit claim, `"identity_model": "account"`.
+  `JWTAuthentication.get_user()` verifies this claim **before** any pk
+  lookup and rejects any token lacking the correct claim — including a
+  still-valid legacy `User`-issued token minted before E ships. The pk
+  lookup this override performs always resolves against `Account`, never
+  `User`. This is option (b) of the two-option mitigation that entry
+  mandated ("3-R.E must not ship without one of these"), now applied at
+  the authentication layer itself, one level below where the down payment
+  landed: 3-R.C's `IsSalonStaff` `isinstance(request.user, Account)` guard
+  (docs/DECISIONS.md § Stage 3-R.C decisions) checked the same option
+  after JWT auth had already run; this entry closes the gap at the source,
+  so no unrelated authenticated principal reaches a view's permission
+  check without the claim already having been verified.
+
+- **Explicitly out of scope for E, deferred to a later 3-R sub-step.**
+  `IsAuthenticatedCustomer` / `IsOwnCustomer` (`core/permissions.py`) still
+  resolve the acting principal as a platform `User` and query
+  `Customer.objects.filter(user=request.user)` — this is "3-R.E debt (a)"
+  as recorded in the D.2 entry, and E does not resolve it: retargeting
+  these two permission classes onto an authenticated `Account` principal
+  is later 3-R work. The `Customer.user` FK's `RemoveField` ("3-R.E debt
+  (b)") is likewise untouched by E — it remains its own decision point
+  per § Stage 3-R.D.2, not folded in here. Recording the boundary now so
+  it reads as intentional scope, not an oversight discovered later.
