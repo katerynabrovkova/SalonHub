@@ -1,11 +1,12 @@
 """
 Salon-prefixed auth routes (docs/DECISIONS.md § Stage 3-R.D.3, § Stage
-3-R.D.4). Included at ``/api/v1/salons/<slug>/`` alongside the domain apps;
-distinct app_name because ``accounts.urls`` (flat ``/api/v1/auth/``) already
-owns "accounts".
+3-R.D.4, § Stage 3-R.E). Included at ``/api/v1/salons/<slug>/`` alongside
+the domain apps. This is now the only auth surface — the flat
+``/api/v1/auth/`` prefix (``accounts.urls``) was removed in 3-R.E, so
+``app_name = "salon_auth"`` no longer needs to stay distinct from anything.
 
-Registration, email-verification, password-reset and resend-verification;
-login/refresh/logout relocate here in 3-R.E.
+Registration, email-verification, password-reset and resend-verification
+(3-R.D); login, refresh and logout against ``Account`` (3-R.E).
 """
 
 from django.urls import path
@@ -32,4 +33,7 @@ urlpatterns = [
         views.ResendVerificationView.as_view(),
         name="resend-verification",
     ),
+    path("auth/login/", views.LoginView.as_view(), name="login"),
+    path("auth/refresh/", views.RefreshView.as_view(), name="refresh"),
+    path("auth/logout/", views.LogoutView.as_view(), name="logout"),
 ]

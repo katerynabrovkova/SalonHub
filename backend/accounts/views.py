@@ -1,11 +1,15 @@
 """
 Auth views (docs/ARCHITECTURE.md § 3, § 13).
 
-`LoginView`/`RefreshView`/`LogoutView` are wired under `/api/v1/auth/`
-(accounts/urls.py) and still authenticate against `AUTH_USER_MODEL`; they
-move under `/api/v1/salons/<slug>/auth/` against `Account` in 3-R.E. The
-`User`-based registration, email-verification and password-reset endpoints
-were removed in Stage 3-R.D.2 (docs/DECISIONS.md).
+`LoginView`/`RefreshView`/`LogoutView` are wired under
+`/api/v1/salons/<slug>/auth/` (accounts/salon_urls.py) and authenticate
+against `Account`, tenant-scoped to the salon bound from the URL slug
+(Stage 3-R.E, docs/DECISIONS.md). The flat `/api/v1/auth/` surface —
+including the pre-E `User`-based login/refresh/logout — is gone: after E,
+`User` no longer authenticates via JWT at all, only through the
+session-based Django `/admin/`. The `User`-based registration,
+email-verification and password-reset endpoints were removed earlier, in
+Stage 3-R.D.2 (docs/DECISIONS.md).
 
 `RegisterView` (Stage 3-R.D.3) is the first `Account`-based replacement: it
 is wired under the salon prefix (accounts/salon_urls.py,
@@ -42,6 +46,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from accounts.models import Account, Customer
 from accounts.serializers import (
+    AccountTokenObtainPairSerializer,
+    AccountTokenRefreshSerializer,
     LogoutSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
@@ -259,14 +265,16 @@ class LoginView(TokenObtainPairView):
     permission_classes = (AllowAny,)  # type: ignore[assignment]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "login"
+    serializer_class = AccountTokenObtainPairSerializer
 
 
 class RefreshView(TokenRefreshView):
     permission_classes = (AllowAny,)  # type: ignore[assignment]
+    serializer_class = AccountTokenRefreshSerializer
 
 
 class LogoutView(APIView):
-    def post(self, request: Request) -> Response:
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
         serializer = LogoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:

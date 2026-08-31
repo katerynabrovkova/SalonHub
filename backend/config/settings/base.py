@@ -142,8 +142,11 @@ REST_FRAMEWORK = {
     # auth by default rather than being silently open (docs/DECISIONS.md §
     # Stage 3 decisions). Auth endpoints opt out individually with AllowAny.
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    # Retargeted onto Account in Stage 3-R.E (docs/DECISIONS.md) — see
+    # accounts.authentication.AccountJWTAuthentication for the
+    # identity_model claim guard this depends on.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "accounts.authentication.AccountJWTAuthentication",
     ],
     # Fixed default page size, overridable up to a capped maximum
     # (docs/ARCHITECTURE.md § 13, core/pagination.py).

@@ -227,9 +227,11 @@ def test_cancel_of_an_already_cancelled_appointment_surfaces_the_services_except
 # --- guest token has no power elsewhere ------------------------------------
 
 
-def test_guest_token_is_rejected_on_a_non_guest_endpoint(client, token):
+def test_guest_token_is_rejected_on_a_non_guest_endpoint(client, salon, token):
     response = client.post(
-        "/api/v1/auth/logout/", {"refresh": "irrelevant"}, HTTP_X_GUEST_TOKEN=token
+        f"/api/v1/salons/{salon.slug}/auth/logout/",
+        {"refresh": "irrelevant"},
+        HTTP_X_GUEST_TOKEN=token,
     )
 
     assert response.status_code == 401
