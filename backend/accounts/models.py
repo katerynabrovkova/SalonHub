@@ -1,6 +1,5 @@
 from typing import ClassVar
 
-from django.conf import settings
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.db import models
@@ -85,13 +84,6 @@ class Customer(TenantScopedModel, TimeStamped):
     `Appointment` always references this, never `User` directly.
     """
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="customers",
-    )
     name = models.CharField(max_length=255)
     email = models.EmailField()
     phone = models.CharField(max_length=32)

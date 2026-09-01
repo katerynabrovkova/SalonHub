@@ -96,7 +96,6 @@ def test_create_guest_appointment_brand_new_email_creates_customer(salon, specia
             customer_phone="+10000000000",
         )
         customer = Customer.objects.get(pk=appt.customer_id)
-    assert customer.user_id is None
     assert customer.name == "Alice"
     assert customer.email == "alice@example.com"
     assert customer.phone == "+10000000000"
