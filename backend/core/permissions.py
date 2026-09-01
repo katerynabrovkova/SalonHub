@@ -10,7 +10,7 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
-from accounts.models import Account, AccountRole, Customer
+from accounts.models import Account, AccountRole
 from booking.guest_tokens import validate_guest_token
 from booking.models import Appointment
 from core.tenancy import get_current_salon_id
@@ -55,26 +55,37 @@ def IsSalonStaff(*roles: str) -> type[BasePermission]:
 
 class IsAuthenticatedCustomer(BasePermission):
     """
-    request.user is authenticated and has a Customer row in the currently
-    bound tenant (docs/ARCHITECTURE.md § 4 "Customer" role).
+    request.user is an authenticated Account with a linked Customer row
+    (Account.customer) in the currently bound tenant (docs/DECISIONS.md §
+    Stage 3-R decisions, "Account model, settled shape"). The
+    isinstance(request.user, Account) check is the same token-type guard
+    as IsSalonStaff's, above — required before trusting any attribute off
+    request.user, so no unrelated authenticated principal (including a
+    still-valid legacy User-issued token) is mistaken for an Account.
+    docs/ARCHITECTURE.md § 4's "Customer" role definition still describes
+    an authenticated User and is stale pending its rewrite.
     """
 
     def has_permission(self, request: Request, view: APIView) -> bool:
         if not (request.user and request.user.is_authenticated):
             return False
+        if not isinstance(request.user, Account):
+            return False
         salon_id = get_current_salon_id()
         if salon_id is None:
             return False
-        return Customer.objects.filter(user=request.user).exists()
+        return request.user.customer_id is not None
 
 
 class IsOwnCustomer(BasePermission):
     """
-    Object-level: the acting Customer matches obj.customer
-    (docs/ARCHITECTURE.md § 4). "Acting Customer" comes from either a
-    JWT-authenticated user's linked Customer row, or a validated guest
-    token — relies on HasValidGuestToken having already run and attached
+    Object-level: the acting Customer matches obj.customer_id. "Acting
+    Customer" comes from either a validated guest token, or an
+    authenticated Account's linked Customer row (Account.customer) —
+    relies on HasValidGuestToken having already run and attached
     request.guest_access_token when acting as a guest.
+    docs/ARCHITECTURE.md § 4's "Customer" role definition still describes
+    an authenticated User and is stale pending its rewrite.
     """
 
     def has_object_permission(self, request: Request, view: APIView, obj: object) -> bool:
@@ -89,11 +100,12 @@ class IsOwnCustomer(BasePermission):
         if guest_token is not None:
             return guest_token.appointment.customer_id
         if request.user and request.user.is_authenticated:
+            if not isinstance(request.user, Account):
+                return None
             salon_id = get_current_salon_id()
             if salon_id is None:
                 return None
-            customer = Customer.objects.filter(user=request.user).first()
-            return customer.id if customer else None
+            return request.user.customer_id
         return None
 
 

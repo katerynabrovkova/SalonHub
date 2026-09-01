@@ -113,21 +113,30 @@ def test_is_salon_staff_denies_an_account_without_a_staff_role(salon):
 
 
 def test_is_authenticated_customer_true_for_a_users_own_customer_row(salon, customer):
-    user = User.objects.create_user(email="cust@example.com", password="a-strong-passw0rd!")
     with tenant_context(salon.id):
-        customer.user = user
-        customer.save(update_fields=["user"])
+        account = Account.objects.create_account(
+            salon=salon,
+            email="cust@example.com",
+            password="a-strong-passw0rd!",
+            customer=customer,
+        )
 
     request = factory.get("/")
-    request.user = user
+    request.user = account
     with tenant_context(salon.id):
         assert IsAuthenticatedCustomer().has_permission(request, APIView()) is True
 
 
 def test_is_authenticated_customer_false_with_no_linked_customer_row(salon):
-    user = User.objects.create_user(email="nocust@example.com", password="a-strong-passw0rd!")
+    with tenant_context(salon.id):
+        account = Account.objects.create_account(
+            salon=salon,
+            email="nocust@example.com",
+            password="a-strong-passw0rd!",
+        )
+
     request = factory.get("/")
-    request.user = user
+    request.user = account
     with tenant_context(salon.id):
         assert IsAuthenticatedCustomer().has_permission(request, APIView()) is False
 
@@ -136,10 +145,13 @@ def test_is_authenticated_customer_false_with_no_linked_customer_row(salon):
 
 
 def test_is_own_customer_true_for_the_jwt_users_own_customer(salon, customer, specialist, service):
-    user = User.objects.create_user(email="owner@example.com", password="a-strong-passw0rd!")
     with tenant_context(salon.id):
-        customer.user = user
-        customer.save(update_fields=["user"])
+        account = Account.objects.create_account(
+            salon=salon,
+            email="owner@example.com",
+            password="a-strong-passw0rd!",
+            customer=customer,
+        )
         appointment = make_appointment(
             salon=salon,
             customer=customer,
@@ -149,7 +161,7 @@ def test_is_own_customer_true_for_the_jwt_users_own_customer(salon, customer, sp
         )
 
     request = factory.get("/")
-    request.user = user
+    request.user = account
     with tenant_context(salon.id):
         assert IsOwnCustomer().has_object_permission(request, APIView(), appointment) is True
 
@@ -157,8 +169,12 @@ def test_is_own_customer_true_for_the_jwt_users_own_customer(salon, customer, sp
 def test_is_own_customer_false_for_a_different_customers_appointment(
     salon, customer, specialist, service
 ):
-    user = User.objects.create_user(email="notowner@example.com", password="a-strong-passw0rd!")
     with tenant_context(salon.id):
+        account = Account.objects.create_account(
+            salon=salon,
+            email="notowner@example.com",
+            password="a-strong-passw0rd!",
+        )
         appointment = make_appointment(
             salon=salon,
             customer=customer,
@@ -168,7 +184,7 @@ def test_is_own_customer_false_for_a_different_customers_appointment(
         )
 
     request = factory.get("/")
-    request.user = user
+    request.user = account
     with tenant_context(salon.id):
         assert IsOwnCustomer().has_object_permission(request, APIView(), appointment) is False
 
