@@ -46,7 +46,7 @@ class UserAdmin(admin.ModelAdmin):
 
 @admin.register(Customer)
 class CustomerAdmin(SalonScopedAdmin):
-    list_display = ("salon", "name", "email", "phone", "user")
+    list_display = ("salon", "name", "email", "phone")
 
 
 class _TenantBoundModelForm(forms.ModelForm):
