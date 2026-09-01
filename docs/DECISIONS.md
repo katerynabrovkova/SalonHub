@@ -4250,3 +4250,39 @@ retarget that every 3-R.D entry deferred ("login / refresh / logout stay on
   (b)") is likewise untouched by E — it remains its own decision point
   per § Stage 3-R.D.2, not folded in here. Recording the boundary now so
   it reads as intentional scope, not an oversight discovered later.
+
+## Stage 3-R.F — folded into 3-R.J
+
+Decided 2026-09-01.
+
+3-R.F was planned as a documentation-cleanup step: bring URL/endpoint
+documentation in line with the salon-scoped login/refresh/logout retarget
+from 3-R.E. Reconnaissance for F found no separate URL/endpoint reference
+document anywhere in the project — no `API.md`, `URLS.md`, `ENDPOINTS.md`,
+or README routes table exists. URL truth lives only in code
+(`accounts/salon_urls.py`, `config/urls.py`) plus this file's dated
+history, which is intentionally left as-is (history, not a living
+reference).
+
+The only descriptive endpoint documentation outside code is
+`docs/ARCHITECTURE.md` §3 and §13, and both are now stale as a direct
+result of E:
+
+- §13 ("API surface: versioning, URL shape...") states that
+  `/api/v1/auth/...`, including login, is flat and targets `User` — E
+  moved login/refresh/logout off that flat prefix onto
+  `/api/v1/salons/<slug>/auth/...` against `Account`, so this is no
+  longer accurate for those three routes (it remains accurate for
+  register/verify-email/password-reset/resend-verification, which stay
+  flat and `User`-targeted).
+- §3 ("Authentication architecture") still describes login/refresh/logout
+  as a single `User`-based JWT mechanism serving both customers and
+  salon staff, which E also supersedes for staff.
+
+Since `docs/ARCHITECTURE.md` is rewritten as one unit in 3-R.J (§2/3/4/13,
+the tracked `Account`/`Customer` split rewrite already flagged in §3
+itself), there is no standalone documentation-cleanup work left for F to
+do on its own — fixing §13's URL claim in isolation now would just be
+rewritten again in J. F is therefore folded into J rather than run as a
+separate sub-step. Recording this so the plan's F slot is explicitly
+closed, not silently skipped.

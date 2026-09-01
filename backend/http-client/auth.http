@@ -11,6 +11,7 @@
 # no way to capture those automatically since they only exist in the mail body.
 
 @baseUrl = http://localhost:8001
+@salonSlug = bella-demo
 @email = pycharm-test@example.com
 @password = a-genuinely-strong-passw0rd!
 
@@ -36,7 +37,7 @@ Content-Type: application/json
 # }
 # Only works once the account above is created (registration doesn't require
 # email verification to log in — docs/ARCHITECTURE.md § 3).
-POST {{baseUrl}}/api/v1/auth/login/
+POST {{baseUrl}}/api/v1/salons/{{salonSlug}}/auth/login/
 Content-Type: application/json
 
 {
@@ -56,7 +57,7 @@ Content-Type: application/json
 #   "access": "<jwt>",
 #   "refresh": "<jwt>"
 # }
-POST {{baseUrl}}/api/v1/auth/refresh/
+POST {{baseUrl}}/api/v1/salons/{{salonSlug}}/auth/refresh/
 Content-Type: application/json
 
 {
@@ -74,7 +75,7 @@ Content-Type: application/json
 # project-wide IsAuthenticated default, docs/DECISIONS.md § Stage 3
 # decisions). Blacklists the refresh token; a second Refresh with the same
 # token afterward returns 401.
-POST {{baseUrl}}/api/v1/auth/logout/
+POST {{baseUrl}}/api/v1/salons/{{salonSlug}}/auth/logout/
 Content-Type: application/json
 Authorization: Bearer {{accessToken}}
 
