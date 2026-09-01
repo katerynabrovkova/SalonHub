@@ -4286,3 +4286,66 @@ do on its own — fixing §13's URL claim in isolation now would just be
 rewritten again in J. F is therefore folded into J rather than run as a
 separate sub-step. Recording this so the plan's F slot is explicitly
 closed, not silently skipped.
+
+## Stage 3-R remaining work — honest roadmap
+
+Decided 2026-09-01.
+
+Context: the lettered 3-R entries actually on disk are B+C, D.1–D.5, E,
+and F. G/H/I/J existed only as a conversation-level plan, never
+committed here — this entry corrects that by pinning the real remaining
+work against verified disk state.
+
+**Closed / non-existent slots:**
+
+- **"3-R.G" (remove `link_guest_customers`): already DONE in 3-R.D.2**
+  (function, call sites, and tests all removed there). No work remains.
+  Only historical name references survive (the D.2 entry itself, plus a
+  docstring in `accounts/services.py`), correctly framed as history.
+- **"3-R.H" (same-salon reconciliation): not a distinct scope.** The
+  substance — linking a guest `Customer` to a registering `Account` in
+  the same salon — was delivered in 3-R.D.4 as `Account.customer`, a
+  live `OneToOneField` (`accounts/models.py:169-171`). H is closed as
+  already-done.
+- **"3-R.I" (tests rewrite): not free-standing.** Most auth/identity
+  tests were already rewritten (E) or retargeted (E). The only concrete
+  leftover — rewriting `test_core_permissions.py`'s Customer-role tests
+  — cannot happen before the debt-(a) code change and is therefore the
+  test half of debt (a)'s own commit, not a separate stage.
+
+**Real remaining 3-R work, in order:**
+
+1. **Debt (a)** — repoint `IsAuthenticatedCustomer` / `IsOwnCustomer`
+   (`core/permissions.py`) from the `User`-based
+   `Customer.objects.filter(user=request.user)` onto the authenticated
+   `Account` + `Account.customer` link, AND rewrite their
+   `test_core_permissions.py` tests in the same commit (this absorbs the
+   former "I"). Current severity: post-E, `request.user` is an `Account`,
+   so these classes' `User`-FK filter never matches — they are
+   effectively dead code that always denies any real
+   Account-authenticated request today; their tests pass only because
+   they hand-set `request.user` to a `User`, bypassing real JWT auth.
+2. **Debt (b)** — the ordered chain to remove `Customer.user`, per the
+   D.2 prerequisite list: debt-(a) repoint done → `link_guest_customers`
+   gone (already done) → `CustomerAdmin.list_display` updated
+   (`accounts/admin.py:49` still lists `"user"`) → the `Customer.user`
+   `RemoveField` migration. The `RemoveField` is a schema change
+   requiring its own explicit approved decision point per `CLAUDE.md` —
+   it will be a separate, deliberate stop, not folded into anything.
+3. **`ARCHITECTURE.md` rewrite (formerly "J"), done last once all code
+   has landed.** Scope is larger than F's recon suggested — four
+   sections, not two: §2 (describes `SalonStaff`, a model deleted by
+   migration `0005`, and has no `Account` entry at all — a
+   model-existence error plus an omission), §3 (staff-auth description
+   stale since E), §4 (Customer role described as an authenticated
+   `User`, should be `Account` role=`client`), §13 (the `/api/v1/auth/`
+   URL claim stale for login/refresh/logout since E).
+
+**Minor orphan to sweep opportunistically:**
+`test_auth_surface_removed.py`'s docstring still says routes "remain
+under `/api/v1/auth/` until 3-R.E" — stale phrasing, though its
+assertions are unaffected and still correct.
+
+Recording this so the remaining plan finally lives in the source-of-truth
+doc, not only in conversation — that gap is the root cause of the earlier
+F and G divergences.
