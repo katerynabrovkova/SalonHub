@@ -77,11 +77,13 @@ def test_is_salon_staff_restricted_to_a_role_excludes_other_roles(salon, admin_a
 
 
 def test_is_salon_staff_denies_a_user_principal(salon):
-    """request.user is a platform `User`, not an `Account` (the pre-3-R.E
-    state: JWT auth still issues User tokens). IsSalonStaff must reject it
-    outright rather than fall through to a pk lookup — this is the
+    """request.user is a platform `User`, not an `Account`. IsSalonStaff must
+    reject it outright rather than fall through to a pk lookup — this is the
     USER_ID_FIELD cross-model collision mitigation recorded in
-    docs/DECISIONS.md § Stage 3-R decisions, not just a type nicety."""
+    docs/DECISIONS.md § Stage 3-R decisions, not just a type nicety. Holds
+    regardless of whether any live path still issues `User` tokens: `User`
+    and `Account` are separate tables that can share a pk, so the guard
+    must reject any `User` principal on request.user, however it got there."""
     user = User.objects.create_user(email="staff@example.com", password="a-strong-passw0rd!")
     request = factory.get("/")
     request.user = user

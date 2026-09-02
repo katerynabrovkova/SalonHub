@@ -4349,3 +4349,40 @@ assertions are unaffected and still correct.
 Recording this so the remaining plan finally lives in the source-of-truth
 doc, not only in conversation — that gap is the root cause of the earlier
 F and G divergences.
+
+## Stage 3-R — closed
+
+Decided/closed 2026-09-01.
+
+Stage 3-R is complete. Every item the roadmap entry above listed as
+remaining is now done and committed:
+
+- **Debt (a).** `IsAuthenticatedCustomer` / `IsOwnCustomer` repointed from
+  the removed `Customer.user` onto the authenticated `Account`
+  (`Account.customer`), with the `isinstance(Account)` guard added, and
+  their tests rewritten onto an `Account` principal. Commit `3442c41`.
+- **Debt (b).** The `Customer.user` FK removed via migration
+  `0006_remove_customer_user`, `CustomerAdmin.list_display` cleaned, and
+  the one dependent test assertion dropped. Commits `3b0501c` (admin
+  cleanup) and `81903bb` (the `RemoveField`).
+- **`ARCHITECTURE.md` rewrite (formerly "J").** §1, §2, §3, §4, §13
+  brought in line with the shipped `Account` model — `SalonStaff` removed,
+  `Account` added as the per-salon login credential, the `Customer` role
+  corrected, the URL surface fixed. Commit `2f4a019`.
+
+**State at close:** full suite 463 passing, `ruff`/`mypy` clean,
+`makemigrations --check` clean, migration chain linear `0001`→`0006`. A
+post-3-R health check found no blockers, no broken migrations, no dead
+tests, no functional dead code.
+
+**Known deferred (not part of 3-R, recorded so the boundary stays
+explicit):**
+
+- `Notification.user` — a vestigial `User` FK on the `Notification` model,
+  intentionally left for Stage 9 (notifications), not touched by 3-R.
+- `test_tenant_resolution_middleware.py` uses two illustrative example
+  paths (`/api/v1/auth/login/`, `/api/v1/me/`) that no longer resolve; the
+  test asserts only on path shape (it never resolves the URL), so it
+  remains correct — the stale examples are cosmetic and left as-is by
+  explicit decision, to be swept opportunistically if that file is touched
+  later.
