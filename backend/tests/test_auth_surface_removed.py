@@ -1,9 +1,11 @@
 """
 Stage 3-R.D.2 — the `User`-based product-auth surface (registration, email
-verification, password reset) was removed; only login/refresh/logout remain
-under /api/v1/auth/ until 3-R.E (docs/DECISIONS.md § Stage 3-R.D.2). These
-pin the removal so the endpoints can't be silently remounted — an absent
-test guards nothing.
+verification, password reset) was removed from the flat /api/v1/auth/
+prefix; login/refresh/logout stayed there until 3-R.E, when the whole flat
+prefix was removed and every auth endpoint moved under
+/api/v1/salons/<slug>/auth/ (docs/DECISIONS.md § Stage 3-R.D.2, § Stage
+3-R.E). These pin that the five routes below still 404 under the old flat
+prefix, so it can't be silently remounted — an absent test guards nothing.
 """
 
 import pytest

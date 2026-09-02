@@ -25,7 +25,7 @@ stage arrives. Proposed app list and responsibility:
 |---|---|
 | `core` | Cross-cutting infrastructure with no domain meaning of its own: the tenant-scoped abstract base model and manager/queryset, the domain exception hierarchy, shared permission base classes, common mixins (e.g. a `TimeStamped` abstract base with `created_at`/`updated_at`), shared pagination/error-envelope config. |
 | `tenants` | `Salon` — the tenant root entity — plus salon-level settings (timezone, business hours defaults, deposit percentage — single salon-wide value, no per-service override — booking lead-time/advance-window limits) and the tenant-resolution middleware. |
-| `accounts` | `User` (platform-wide auth), `Customer` (per-salon identity, see `docs/DECISIONS.md` § Identity), `SalonStaff` (User↔Salon role membership), registration/login, guest→User linking. |
+| `accounts` | `User` (platform/admin auth only), `Account` (per-salon login credential every JWT authenticates as), `Customer` (per-salon identity, guest or registered, see `docs/DECISIONS.md` § Identity), salon-scoped registration/login/verification. |
 | `catalog` | `ServiceCategory`, `Service`. |
 | `specialists` | `Specialist`, which services a specialist performs, `WorkingHours` (recurring weekly schedule), `TimeOff` (dated exceptions). |
 | `scheduling` | The availability engine: pure, stateless computation of open slots from `specialists` schedule data and `booking` appointments. Owns no models of its own (see § 6). |
@@ -53,14 +53,20 @@ Described, not modeled in code:
 - **Salon** — tenant root. Everything else scopes to it via a `salon` FK. `is_active`
   (default `True`) gates tenant resolution — an inactive or unknown slug resolves the
   same way, `404` (§ 3, `docs/DECISIONS.md` § Stage 3 decisions).
-- **User** — Django auth identity, platform-wide (not salon-scoped). Used for both
-  registered customers and salon staff logins. `email_verified_at` (nullable) gates
-  guest→registered `Customer` linking (§ 3) and review eligibility is unaffected by
-  it directly — only the linked `Customer` matters there.
-- **SalonStaff** — join of `User` × `Salon` with a `role`. A back-office login.
-- **Customer** — per-salon identity, nullable `User` FK, per `docs/DECISIONS.md` §
+- **User** — Django auth identity, platform-wide (not salon-scoped). Post-3-R it
+  authenticates only via the session-based Django `/admin/` (platform operators) — it
+  is not the customer or salon-staff login. `email_verified_at` (nullable) has no
+  write path anymore: the registration/verification flow (§ 3) runs against
+  `Account.email_verified_at` instead.
+- **Account** — per-salon login credential (`AbstractBaseUser` + `TenantScopedModel`);
+  every JWT authenticates as this, not `User` (§ 3). Fields: `email`, `role`
+  (`AccountRole`: `client`/`admin`), `is_active`, `email_verified_at`, `customer`
+  (nullable `OneToOneField`→`Customer`, `SET_NULL`) — the link from a login to its
+  per-salon `Customer` row runs this direction, not a FK on `Customer`.
+- **Customer** — per-salon identity, guest or registered, per `docs/DECISIONS.md` §
   Identity. All customer-facing domain rows (appointments, reviews) hang off this, not
-  off `User`.
+  off `User` or `Account`. A registered customer is linked from an `Account` via
+  `Account.customer` (above), not via any FK on this model.
 - **ServiceCategory** — salon FK, name, ordering.
 - **Service** — salon FK, category FK, name, duration, price, buffer minutes (time
   blocked on the calendar after the appointment for cleanup/room turnaround, never
@@ -133,11 +139,19 @@ for its own sake — see § 5 for why.
 
 Two separate identity tracks, per `docs/DECISIONS.md` § Identity:
 
-**Registered users (`User`).** Standard email + password, issued JWTs via DRF
-SimpleJWT (`TokenObtainPairView`/refresh/logout, landed in Stage 3). Used for both
-customers who choose to register and for salon staff.
+**Accounts (`Account`).** Standard email + password, issued JWTs via DRF SimpleJWT,
+authenticated by `AccountJWTAuthentication` (`accounts/authentication.py`) — the only
+JWT auth path in the API (`DEFAULT_AUTHENTICATION_CLASSES`). Login, refresh and logout
+are salon-scoped (`/api/v1/salons/<slug>/auth/login|refresh|logout/`, landed in Stage
+3-R.E). Every issued token carries an `identity_model: "account"` claim, checked
+*before* any pk lookup: `User` and `Account` are separate tables with independent
+auto-increment sequences that can legitimately share a pk, so this guards against a
+still-valid legacy token resolving against the wrong table. Once the claim passes,
+`Account.objects.get(pk=...)` resolves the token tenant-scoped, and `request.user` is
+always an `Account` — never a `User`. `User` authenticates only via the session-based
+Django `/admin/`; there is no `User` JWT path anywhere in the API.
 
-**Guests (`Customer` with `user=NULL`).** No login at all. At booking time, the
+**Guests (a `Customer` with no linked `Account`).** No login at all. At booking time, the
 customer supplies name/email/phone; the `accounts` service layer does a `salon`-scoped
 get-or-create on `Customer` by email (per `docs/DECISIONS.md`, email is unique per
 salon, so a returning guest updates their existing row). The confirmation email links
@@ -152,17 +166,19 @@ view/cancel requests; the API re-hashes the presented token, looks it up by
 cancelling additionally sets `cancelled_via_token_at`, which is checked independently
 of expiry — a cancelled appointment stays viewable through the same link.
 
-**Guest → registered linking.** Only triggered after the `User`'s email is verified
-(per `docs/DECISIONS.md` — never by phone). On verification, every `Customer` row
-across all salons whose email exactly matches the verified `User`'s email is linked
-(`Customer.user` set). This is why email match is exact, not fuzzy: it's the only
-signal trusted enough to attach a guest's booking history to an account.
+**Guest → registered linking.** Registration creates an `Account` (`role = client`,
+the default) directly — never a `User`. Linking happens at verification, not
+registration: `VerifyEmailView` stamps `Account.email_verified_at` and, only if the
+account has no `Customer` yet, looks for a `Customer` row in *that same salon*
+matching the verified email and adopts it (`Account.customer` set) — same-salon and
+email-matched, never a cross-salon sweep keyed off a `User`'s email. The
+`Customer.user` field and the cross-salon `link_guest_customers` sweep this paragraph
+used to describe were both removed (Stage 3-R.D.2; the field itself, migration
+`0006_remove_customer_user`).
 
 **Salon staff.** A per-salon `Account` (§ 4) carrying `role = admin`; back-office
 authorization is that role, not a separate auth mechanism. (`SalonStaff`, the former
-`User` × `Salon` join, was removed in Stage 3-R.B — see `docs/DECISIONS.md` § Stage 3-R.
-The full § 2 / § 3 / § 4 rewrite for the `Account`/`Customer` split is a tracked
-follow-up; this subsection and § 4 below carry the corrected shape in the meantime.)
+`User` × `Salon` join, was removed in Stage 3-R.B — see `docs/DECISIONS.md` § Stage 3-R.)
 
 ## 4. Authorization: roles, permission classes, reach
 
@@ -170,9 +186,9 @@ Roles:
 
 - **Anonymous / Guest** — no `User`. Reach limited to public catalog browsing, guest
   booking creation, and the signed-token view/cancel flow for their own appointment.
-- **Customer** (authenticated `User` with a linked `Customer` in the target salon) —
-  everything Guest can do, plus: view booking history, leave reviews, cross-salon
-  account management (`/api/v1/me/...`).
+- **Customer** (an `Account` with `role = client` whose `Account.customer` points at
+  a `Customer` row in the target salon) — everything Guest can do, plus: view booking
+  history, leave reviews.
 - **Salon admin** (a per-salon `Account` with `role = admin`) — back-office reach for
   that one salon only: catalog, specialists, schedules, appointments, clients,
   reviews, notifications. **One staff role for v1**; `Account.role` is kept open-ended
@@ -507,11 +523,14 @@ because there is no trigger to attach to.
 - **Versioning:** URL path versioning, `/api/v1/...`. Chosen over header-based
   negotiation for explicitness and cacheability — the version is visible in every
   request without inspecting headers.
-- **URL shape:** tenant-scoped resources live under
-  `/api/v1/salons/<slug>/...`, consistent with the path-prefix tenant resolution in
-  `docs/DECISIONS.md`. A small set of endpoints are platform-level, outside any salon
-  prefix, because they aren't salon-scoped: `/api/v1/auth/...` (User
-  login/registration) and `/api/v1/me/...` (a User's linked Customers across salons).
+- **URL shape:** essentially everything lives under `/api/v1/salons/<slug>/...`,
+  consistent with the path-prefix tenant resolution in `docs/DECISIONS.md` — this
+  includes auth (register, verify-email, password-reset, password-reset/confirm,
+  resend-verification, login, refresh, logout; landed across Stage 3-R.D/3-R.E)
+  alongside the domain resources. The only paths outside a salon prefix are `/admin/`
+  (Django's session-based admin) and `/api/v1/webhooks/...` (payment provider
+  callbacks, inherently cross-tenant). There is no flat `/api/v1/auth/...` prefix — it
+  was fully removed in 3-R.E — and no `/api/v1/me/...` endpoint; it was never built.
 - **Pagination:** `PageNumberPagination`, a fixed default page size, overridable up to
   a capped maximum (so `?page_size=100000` can't be used to force an unbounded
   response). Chosen over offset/limit for predictability in admin list UIs (page N of
