@@ -4607,3 +4607,75 @@ exists; (d) after (b) for the reason given above.
   detailed**: the beat cadence, the per-appointment dedup window, and
   the guard against reminding for a cancelled or expired appointment are
   scoped when we reach step (e).
+
+### Step (b) decisions (the send mechanism)
+
+Decided 2026-09-03, before any step (b) code. Behaviour-visible
+decisions only — the internal structure (the channel package layout,
+whether `send()` takes a `Notification` row or resolved primitives) is
+left to the code and to `docs/ARCHITECTURE.md` § 9 at stage close, per
+the "what vs. why" split.
+
+- **`NotificationStatus` gains a third member, `FAILED`
+  (`pending` / `sent` / `failed`).** `PENDING → SENT` alone is an
+  incomplete state machine: a send can fail (SMTP unreachable), and once
+  retries are exhausted neither existing state can honestly describe the
+  row. `PENDING` would be a lie — nothing sweeps `PENDING` rows to retry
+  them later (the task is event-dispatched, not a beat sweep; see the
+  scope line below), so a stuck `PENDING` row would sit forever
+  pretending a send is still coming. `SENT` would be a lie — nothing was
+  delivered. `FAILED` is the honest terminal state, and it shows in the
+  read-only `NotificationAdmin` `status` column so a human can see which
+  sends failed and follow up out of band.
+  - **This changes no schema.** `choices` is a Django-level concern, not
+    a database constraint — `status` is `varchar(16)` and Postgres has
+    no enum type for it — so adding `FAILED` alters no column and no
+    constraint. Django still emits an `AlterField` migration to sync its
+    own model state; that migration's SQL is a no-op. It nonetheless
+    gets the usual look-at-the-generated-file check before `migrate`,
+    per CLAUDE.md (`AlterField` is on the list that requires it),
+    precisely to confirm it really is the expected state-only sync and
+    that nothing else rode along.
+
+- **A send failure triggers a bounded automatic retry, then `FAILED`.**
+  On failure the task retries a small, bounded number of times over a
+  few minutes — Celery's own mechanism (`bind=True`, a low
+  `max_retries`, a short `countdown`); the exact numbers are an
+  implementation detail — and if it is still failing when retries are
+  exhausted it writes `status = FAILED`.
+  - **The risk asymmetry, as the mirror image of § Stage 8.G
+    decisions.** There, automatic retry of a stuck refund was
+    deliberately forbidden: a duplicate *refund* is an irreversible
+    double payout and a dishonest client will not report it, so a human
+    must look before anything re-fires. Here the asymmetry runs the
+    other way. A duplicate *email* is a minor annoyance — someone
+    receives "booking confirmed" twice — so automatic retry is the
+    right default, not a hazard.
+  - **Retry cannot double-send the same row.** The
+    `(trigger_type, channel, dedup_key)` unique constraint stops a
+    second row for the same event from being created, and the task's own
+    under-lock recheck (`select_for_update`, then "status is already
+    `SENT` → no-op") means a Celery redelivery of an already-completed
+    send does nothing. Both guards mirror the payments idempotency
+    pattern.
+
+- **Message text (subject and body) for each trigger is inline
+  (f-strings), behind a single builder seam.** No template system, no
+  separate `messages` module — localization is deferred to Stage 11.5,
+  the platform runs one language today, and there is no second reason
+  yet to extract the text (the same "don't build for an imagined need"
+  principle as the view-vs-service extraction rule). The text is
+  nonetheless produced in one place — a single function mapping a
+  notification to its `(subject, body)` — rather than scattered through
+  the task. That seam exists specifically so that when Stage 11.5
+  localization lands, the change is a swap of that one function's
+  internals, not surgery spread across the send path.
+
+- **Scope boundary for step (b), already implied by the build order:**
+  the send task is **per-row and event-dispatched** — `send` is called
+  with a single `notification_id` via `.delay(...)` at trigger time,
+  which is step (c) work — **not** a beat sweep over all salons like
+  `flag_stuck_refund_payments` / `expire_pending_payment_appointments`.
+  So step (b) has no production path that creates a `PENDING` row, and
+  that is expected: step (b)'s task is exercised by tests that create a
+  `PENDING` `Notification` directly and then invoke the task.
