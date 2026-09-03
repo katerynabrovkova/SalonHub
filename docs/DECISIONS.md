@@ -4386,3 +4386,224 @@ explicit):**
   remains correct — the stale examples are cosmetic and left as-is by
   explicit decision, to be swept opportunistically if that file is touched
   later.
+
+## Stage 9 decisions (Celery + notifications)
+
+Decided 2026-09-03. Docs-first: this section lands before any Stage 9
+code — when the implementation commits follow, this header stays
+"Decided 2026-09-03", not backdated or relabelled "and implemented".
+Nothing below is built yet. The three schema decisions each need their
+own migration and an explicit go-ahead before the model change is
+written, per CLAUDE.md (a migration containing `RemoveField` /
+`AlterField` / `DeleteModel`, and any change to a model's `Meta`
+constraints, require a decision point raised and approved first —
+generating the migration to inspect it is fine, applying it or writing
+the model change that produces it is not).
+
+This section resolves the Stage 9 items earlier stages deferred to here:
+the `Notification.user` vestige and the `notification_exactly_one_recipient`
+constraint (§ Stage 3-R decisions, "Also now vestigial — Stage 9"), the
+credential-email routing gap (§ Stage 3 decisions, "Email verification
+does not route through the `Notification`/channel abstraction"), the
+human-alert channel for the stuck-refund flag (§ Stage 8 decisions,
+"Notification to a human ... is deferred to Stage 9"; § Stage 8.G
+decisions, "any active per-row signal ... is deferred to Stage 9"), and
+the guest-token response-body reversal (§ Stage 7.D decisions, "Raw
+guest token placement in the 201 response body — TEMPORARY").
+
+### Schema changes
+
+- **`Notification.user` FK is removed.** The field is a nullable second
+  `AUTH_USER_MODEL` FK left from the pre-3-R design, where a guest→`User`
+  verification email was addressed to a platform `User` row; § Stage 3-R
+  decisions already recorded it as vestigial ("no code ever dispatched
+  an `EMAIL_VERIFICATION` `Notification`"). None of the six trigger
+  points in `docs/ARCHITECTURE.md` § 9 addresses a platform or admin
+  superuser: each one is directed either at the client (a `Customer`)
+  or at the salon itself. A recipient slot for a platform `User`
+  therefore has no caller and no prospective caller — it is dead weight
+  that also complicates the recipient constraint (below). Removal is a
+  schema change: it needs its own `RemoveField` migration and an
+  explicit go-ahead per CLAUDE.md. Recorded here as a pending schema
+  decision, not as done.
+
+- **`Salon.contact_email` is added — `NOT NULL`, no model default.**
+  `Salon` has no email field of any kind today. Stage 9 turns
+  salon-directed operational alerts into email — the first case being
+  the Stage 8 stuck-refund flag, whose "turn the flag into a
+  notification" step § Stage 8 / § Stage 8.G decisions explicitly left
+  for Stage 9 — and those alerts need a destination that belongs to the
+  salon, not to any one client. The field is obligatory at creation and
+  carries no default because a salon with no operational contact address
+  is not a usable tenant: an alert with nowhere to go is precisely the
+  failure this field exists to prevent, and a default would let that
+  state be created silently.
+  - **`NOT NULL` alone is not sufficient — it does not guarantee a
+    usable address.** A Postgres `NOT NULL` column still permits the
+    empty string: `NOT NULL` forbids only `NULL`, not emptiness. So the
+    column constraint on its own would happily accept a `Salon` created
+    with `contact_email = ''`. This is the same silent-failure category
+    already burned into CLAUDE.md for a `CharField` that is `NOT NULL`
+    without a default — `Model.objects.create(...)` does not call
+    `full_clean()`, so an empty string persists with no error raised and
+    surfaces only later, as an alert delivered nowhere.
+  - **Non-emptiness is enforced at the database level, by a
+    `CheckConstraint` on `Salon`** — `Q(contact_email__gt="")` (i.e.
+    length ≥ 1) — **not** by a field `validators=[...]`. A validator only
+    runs when Django validation is explicitly invoked (forms,
+    serializers); it is bypassed by `.create()`, `bulk_create()`, raw
+    SQL, and data migrations — exactly the write paths that could slip an
+    empty string past. The `CheckConstraint` holds on every path,
+    including when validation is skipped, so it is the true backstop; the
+    admin create form remains the primary obligate-at-creation guard at
+    the point salons are actually born. Pleasing symmetry: the same
+    schema-change set drops one dead `CheckConstraint` (the recipient
+    tautology, below) and adds one live one (non-empty `contact_email`).
+    This constraint ships in the same `Salon` migration as the
+    `AddField` and needs the same explicit go-ahead — a `Meta.constraints`
+    change per CLAUDE.md. (The one-off `''` default from the prompt below
+    is applied to zero rows by construction, so the new check is
+    satisfied the moment it is added.)
+  - **No backfill is needed by construction — not merely because the
+    table happens to be empty now.** A `Salon` row is only ever created
+    through the cross-tenant operator admin surface
+    (`django.contrib.admin`); there is no public salon self-registration
+    endpoint and none is planned before the productionization stages.
+    The admin create form enforces the required field on every salon
+    that will ever exist, so there is no class of rows that could
+    predate the column and need populating.
+  - **`makemigrations` will prompt for a one-off default for the new
+    `NOT NULL` column.** The correct answer to that prompt is an
+    obviously non-functional value — an empty string — which by
+    construction is applied to zero rows and is not preserved into the
+    model state (`preserve_default=False`), leaving a clean
+    `NOT NULL` / no-default field. It must **not** be answered with a
+    plausible-looking placeholder address (`changeme@example.com` and
+    the like): a placeholder that reaches a live `Salon` row is exactly
+    the silent misconfiguration the `NOT NULL` constraint is meant to
+    stop, and it would route real stuck-refund alerts into a black hole.
+    Schema change → own migration → explicit go-ahead.
+
+- **`notification_exactly_one_recipient` is removed** (rewritten, and the
+  rewrite is vacuous). The current `CheckConstraint` requires exactly
+  one of `{customer, user}` to be populated. With `user` gone (above),
+  the recipient model is:
+  - `customer` populated → the notification is an email to that client,
+    at `Customer.email`;
+  - `customer` null → the notification is an alert to the salon itself,
+    delivered to `Salon.contact_email`; the salon is always known
+    because `Notification` extends `TenantScopedModel`, which guarantees
+    a non-null `salon` FK on every row.
+  Both states are valid and `customer` is the only column that varies,
+  so the rewritten predicate is
+  `Q(customer__isnull=False) | Q(customer__isnull=True)` — true for
+  every possible row. A constraint that can never fail carries no
+  information, so the honest form is to drop the `CheckConstraint`
+  named `notification_exactly_one_recipient` in the same migration that
+  removes the `user` field, rather than keep a tautology in
+  `Meta.constraints`. The one guard still worth having —
+  "`customer`, when populated, belongs to `salon`" — is already
+  enforced by the composite tenant FK
+  (`notifications_notification_customer_composite_fk`, present since
+  `0001_initial`), so nothing is lost. Schema change → migration
+  (`AlterModelOptions` / constraint drop) → explicit go-ahead.
+
+### Credential emails folded into `Notification`
+
+- **Verification and password-reset emails are routed through the
+  `Notification` journal**, reversing the Stage 3 deferral in § Stage 3
+  decisions ("Email verification does not route through the
+  `Notification`/channel abstraction described in `docs/ARCHITECTURE.md`
+  § 9, for Stage 3").
+  - **That deferral's stated premise is now stale.** It rested on
+    verification/reset being "a platform-wide `User` event with no salon
+    in scope (`/api/v1/auth/...` is explicitly outside the salon
+    prefix)". Stage 3-R moved product auth onto the per-salon `Account`
+    model and put registration, verification, and password reset
+    **under** the salon prefix (§ Stage 3-R reversals, "auth endpoints
+    outside the salon prefix"). Every credential email now has a
+    concrete salon in scope, so `Notification.salon` being non-null is
+    no longer an obstacle to routing them.
+  - **Why fold them in rather than leave them standalone.** The
+    `PENDING`-before-send dedup machinery (`docs/ARCHITECTURE.md` § 9)
+    is being built for the booking and payment emails regardless.
+    Routing the two credential emails through the same journal costs
+    almost nothing on top of that, and it buys them uniform
+    duplicate-send protection plus one place that records every email
+    the platform has attempted.
+  - **`dedup_key` for these triggers is per-request, never
+    per-account.** Keying on `account:{id}` would collapse a user's
+    deliberate "resend verification" or repeat "forgot password"
+    request into the first one and suppress the email — but a deliberate
+    re-request is a *new* event, not a technical duplicate. The key is
+    derived from the per-request credential token that is already minted
+    for each such email — a hash or short digest of it — and **never the
+    raw token itself**, which is a secret and must not sit in the
+    notifications table in cleartext. Two genuine reset requests mint
+    two tokens, so they get two `dedup_key`s and two emails; one reset
+    task that Celery runs twice carries one token, one `dedup_key`, and
+    sends once. Duplicate-send protection is always about the technical
+    replay of a single event (a webhook or task firing twice), never
+    about a person asking again on purpose.
+
+### Guest-token response-body reversal
+
+- **The raw guest token stops being returned in the booking `POST`
+  response body and moves into the confirmation email.** The endpoint in
+  `booking/views.py` currently returns
+  `{"appointment": {...}, "token": "<raw token>"}` on the 201. § Stage
+  7.D decisions made that placement explicitly temporary ("removed once
+  Stage 9 (email) lands, at which point the token moves into an email
+  link instead") and required the reversal to be "recorded as its own
+  dated entry that preserves this original reasoning, not a backdated
+  edit to this entry". This is that entry; the § Stage 7.D decisions
+  entry is **not** edited.
+  - **Original reasoning, preserved:** email did not physically exist
+    before Stage 9, so an email-only rule then would have made the token
+    a dead artifact — generated, hashed, stored, but delivered through
+    no channel — leaving a login-less guest unable to view or cancel the
+    booking they had just made. Returning it in the response body was a
+    sequence-in-time stopgap for the window before email existed, not a
+    judgement that the body is an acceptable home for an access
+    credential. There were no live users while that stopgap stood, so it
+    leaked nothing.
+  - **What Stage 9 does:** delete the `"token"` key from the 201 body,
+    and put the raw token into the `BOOKING_CONFIRMED` confirmation
+    email as a manage/cancel link. Per § Stage 7.D decisions the
+    `"appointment"` object's own shape is untouched — only the sibling
+    key is removed.
+  - **Ordering: this lands after the send mechanism exists**, not with
+    the schema work. The token can only move into the email once there
+    is an email to carry it; doing the reversal earlier would
+    reintroduce the exact dead-artifact problem the original entry
+    described. This is step (d) in the build order below.
+
+### Build order within Stage 9
+
+Recorded as a decision so the sequencing is not reopened mid-stage.
+Step (a) precedes everything because it is the shape the rest stands on;
+(b) before (c) because a trigger has nothing to call until the mechanism
+exists; (d) after (b) for the reason given above.
+
+- **(a) Schema decisions + migrations** — `Notification.user` removal,
+  `Salon.contact_email` addition, `notification_exactly_one_recipient`
+  removal. Each needs the explicit go-ahead noted above before the
+  model change is written.
+- **(b) The mechanism** — the `NotificationChannel` interface, the email
+  adapter behind it, and the `PENDING → SENT` dedup/send Celery task
+  (`docs/ARCHITECTURE.md` § 9). No trigger wiring yet; the task is
+  exercised directly by tests.
+- **(c) Wire the trigger points** — booking confirmed, booking
+  cancelled, payment succeeded, payment failed, review request, plus the
+  two credential emails folded in above. Named here but **not yet
+  detailed**: each trigger's call site, its `dedup_key` shape, and its
+  recipient resolution are scoped when we reach step (c).
+- **(d) Guest-token response-body reversal** — as above; after (b) so
+  the confirmation email exists to carry the token.
+- **(e) Reminder tasks (24h / 2h before the appointment)** — the
+  scheduled `APPOINTMENT_REMINDER` triggers, deferred to this stage by
+  the `beat_schedule` comment in `config/celery.py` ("Reminder tasks
+  (24h/2h) land in the notifications stage"). Named here but **not yet
+  detailed**: the beat cadence, the per-appointment dedup window, and
+  the guard against reminding for a cancelled or expired appointment are
+  scoped when we reach step (e).
