@@ -223,6 +223,24 @@ on them, rather than being forgotten and improvised in the moment.
   stage (Stage 22), not a code change in the notifications app — the
   in-app design is already correct given a bounded timeout. Recorded here
   so it is not lost between Stage 9 and Stage 22.
+- **Notification retry loop is not integration-tested end to end.** The
+  Stage 9 step (b.4.2) task retries a failed send via Celery's own
+  `self.retry()` (`max_retries=3`), and its unit test
+  (`test_notifications_send_task.py`) pins only *our* reaction to the
+  exhausted signal: when `self.retry()` raises `MaxRetriesExceededError`
+  the task calls `mark_notification_failed` and the row lands `FAILED`.
+  What is *not* covered at unit level is the loop itself — the initial
+  attempt plus N retries actually firing. Under `CELERY_TASK_ALWAYS_EAGER`
+  the retry is only simulated, and with `CELERY_TASK_EAGER_PROPAGATES` on
+  (this project's test default) the simulation short-circuits:
+  `self.retry()` raises `Retry` straight out of `.delay()` rather than
+  looping. Forcing the loop in eager mode means depending on a specific
+  Celery version's internal recursion — brittle, and it exercises Celery's
+  retry counter rather than our code. True end-to-end retry behaviour
+  (real countdown, real redelivery) needs a running broker and belongs to
+  the productionization stage's integration suite (Stage 22), not the unit
+  tests. Recorded so the gap is explicit, not accidental. (§ Stage 9
+  decisions, step (b).)
 
 ## Overall style
 
