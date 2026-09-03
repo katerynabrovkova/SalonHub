@@ -25,6 +25,7 @@ class NotificationTrigger(models.TextChoices):
 class NotificationStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     SENT = "sent", "Sent"
+    FAILED = "failed", "Failed"
 
 
 class Notification(TenantScopedModel, TimeStamped):
