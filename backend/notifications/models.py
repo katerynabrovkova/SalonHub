@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.db import models
 
 from accounts.models import Customer
@@ -43,13 +42,6 @@ class Notification(TenantScopedModel, TimeStamped):
     customer = models.ForeignKey(
         Customer, null=True, blank=True, on_delete=models.CASCADE, related_name="notifications"
     )
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.CASCADE,
-        related_name="notifications",
-    )
 
     channel = models.CharField(max_length=16, choices=NotificationChannel.choices)
     trigger_type = models.CharField(max_length=32, choices=NotificationTrigger.choices)
@@ -67,13 +59,6 @@ class Notification(TenantScopedModel, TimeStamped):
             models.UniqueConstraint(
                 fields=["trigger_type", "channel", "dedup_key"],
                 name="notification_trigger_channel_dedup_uniq",
-            ),
-            models.CheckConstraint(
-                condition=(
-                    models.Q(customer__isnull=False, user__isnull=True)
-                    | models.Q(customer__isnull=True, user__isnull=False)
-                ),
-                name="notification_exactly_one_recipient",
             ),
         ]
 
