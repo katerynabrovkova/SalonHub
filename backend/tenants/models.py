@@ -29,6 +29,16 @@ class Salon(TimeStamped):
     # at creation time; see payments.models.Payment.currency.
     currency = models.CharField(max_length=3, validators=[iso_4217_validator])
 
+    # Destination for salon-directed operational alerts (first case: the
+    # Stage 8 stuck-refund flag, turned into an email in Stage 9). NOT NULL
+    # and no model default: a salon with no operational contact address is
+    # not a usable tenant. NOT NULL alone still permits "" — non-emptiness
+    # is enforced by the salon_contact_email_not_empty CheckConstraint
+    # below, deliberately not a field-level validator (a validator is
+    # bypassed by .create()/bulk_create/raw SQL; the DB constraint is not).
+    # See docs/DECISIONS.md § Stage 9 decisions.
+    contact_email = models.EmailField(max_length=254)
+
     # Business rules — see docs/DECISIONS.md § Business rules for the "why"
     # behind every default below; all are salon-configurable.
     deposit_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=20)
@@ -42,6 +52,10 @@ class Salon(TimeStamped):
             models.CheckConstraint(
                 condition=models.Q(currency__regex=ISO_4217_PATTERN),
                 name="salon_currency_iso_4217",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(contact_email__gt=""),
+                name="salon_contact_email_not_empty",
             ),
         ]
 

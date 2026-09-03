@@ -38,7 +38,10 @@ START = dt.datetime(2026, 8, 20, 10, 0, tzinfo=dt.UTC)
 
 def test_salon_currency_valid_value_succeeds():
     salon = Salon.objects.create(
-        name="Valid Currency Salon", slug="valid-currency-salon", currency="USD"
+        name="Valid Currency Salon",
+        slug="valid-currency-salon",
+        currency="USD",
+        contact_email="owner@valid-currency-salon.example",
     )
     assert salon.currency == "USD"
 
@@ -47,7 +50,10 @@ def test_salon_currency_empty_string_rejected():
     with pytest.raises(IntegrityError):
         with transaction.atomic():
             Salon.objects.create(
-                name="Empty Currency Salon", slug="empty-currency-salon", currency=""
+                name="Empty Currency Salon",
+                slug="empty-currency-salon",
+                currency="",
+                contact_email="owner@empty-currency-salon.example",
             )
 
 
@@ -55,7 +61,10 @@ def test_salon_currency_lowercase_rejected():
     with pytest.raises(IntegrityError):
         with transaction.atomic():
             Salon.objects.create(
-                name="Lowercase Currency Salon", slug="lowercase-currency-salon", currency="uah"
+                name="Lowercase Currency Salon",
+                slug="lowercase-currency-salon",
+                currency="uah",
+                contact_email="owner@lowercase-currency-salon.example",
             )
 
 
@@ -66,6 +75,7 @@ def test_salon_currency_wrong_length_rejected():
                 name="Wrong Length Currency Salon",
                 slug="wrong-length-currency-salon",
                 currency="US",
+                contact_email="owner@wrong-length-currency-salon.example",
             )
 
 

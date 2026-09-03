@@ -33,7 +33,12 @@ def test_binds_salon_id_for_a_matching_active_slug(salon) -> None:
 
 @pytest.mark.django_db
 def test_clears_salon_id_after_the_response() -> None:
-    salon = Salon.objects.create(name="Clears Salon", slug="clears-salon", currency="UAH")
+    salon = Salon.objects.create(
+        name="Clears Salon",
+        slug="clears-salon",
+        currency="UAH",
+        contact_email="owner@clears-salon.example",
+    )
     middleware = TenantResolutionMiddleware(lambda request: HttpResponse())
     request = factory.get(f"/api/v1/salons/{salon.slug}/services/")
 
@@ -47,7 +52,12 @@ def test_clears_salon_id_even_when_the_view_raises() -> None:
     def get_response(request: HttpRequest) -> HttpResponse:
         raise RuntimeError("view exploded")
 
-    salon = Salon.objects.create(name="Raises Salon", slug="raises-salon", currency="UAH")
+    salon = Salon.objects.create(
+        name="Raises Salon",
+        slug="raises-salon",
+        currency="UAH",
+        contact_email="owner@raises-salon.example",
+    )
     middleware = TenantResolutionMiddleware(get_response)
     request = factory.get(f"/api/v1/salons/{salon.slug}/services/")
 
@@ -73,7 +83,11 @@ def test_unknown_slug_returns_404_and_binds_no_context() -> None:
 @pytest.mark.django_db
 def test_inactive_slug_returns_404() -> None:
     salon = Salon.objects.create(
-        name="Inactive Salon", slug="inactive-salon", is_active=False, currency="UAH"
+        name="Inactive Salon",
+        slug="inactive-salon",
+        is_active=False,
+        currency="UAH",
+        contact_email="owner@inactive-salon.example",
     )
     middleware = TenantResolutionMiddleware(lambda request: HttpResponse())
     request = factory.get(f"/api/v1/salons/{salon.slug}/services/")
