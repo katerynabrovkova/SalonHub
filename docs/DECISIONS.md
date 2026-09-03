@@ -208,6 +208,21 @@ on them, rather than being forgotten and improvised in the moment.
   Deferred until the frontend exists (Stage 14+), since the shape depends on
   how the frontend holds state. Distinct from the double-click case (§ Stage
   8.C decisions).
+- **Production email send timeout (`EMAIL_TIMEOUT`).**
+  `notifications.services.send_notification` (Stage 9 step b.4.1) calls
+  `channel.send()` *inside* the `Notification` row lock — deliberate, per
+  § Stage 9 decisions step (b): holding the lock across the send serializes
+  duplicate delivery of the same event, and a duplicate email is the
+  tolerated minor-annoyance case (the mirror-image of the stuck-refund
+  asymmetry). The tradeoff: a hung or unresponsive SMTP server would hold
+  both the worker's DB connection and that row's lock for as long as the
+  send blocks — indefinitely, if the socket never times out. Production
+  must set a finite email send timeout (Django's `EMAIL_TIMEOUT`, in
+  seconds) so a stuck send fails fast, releases the lock, and hands off to
+  the retry policy. This is a settings/ops task for the productionization
+  stage (Stage 22), not a code change in the notifications app — the
+  in-app design is already correct given a bounded timeout. Recorded here
+  so it is not lost between Stage 9 and Stage 22.
 
 ## Overall style
 
