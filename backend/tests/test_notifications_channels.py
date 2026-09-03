@@ -22,8 +22,11 @@ taking primitives rather than a model row.
 """
 
 import pytest
+from django.conf import settings
+from django.core import mail
 
 from notifications.channels.base import NotificationChannel
+from notifications.channels.email import EmailChannel
 from notifications.channels.mock import MockNotificationChannel
 
 # --- Interface shape -------------------------------------------------------
@@ -62,3 +65,30 @@ def test_mock_channel_send_returns_none_and_records_the_call():
     assert channel.sent == [
         ("owner@bella-demo.example", "Booking confirmed", "Your appointment is confirmed.")
     ]
+
+
+# --- EmailChannel: real delivery via django.core.mail --------------------
+#
+# mail.outbox needs Django's locmem email backend (pytest-django sets it up
+# and auto-clears it per test) but NOT the database — these stay pure unit,
+# no @pytest.mark.django_db.
+
+
+def test_email_channel_is_a_notification_channel_and_instantiates():
+    assert isinstance(EmailChannel(), NotificationChannel)
+
+
+def test_email_channel_send_puts_one_message_in_the_outbox():
+    result = EmailChannel().send(
+        recipient="client@example.com",
+        subject="Booking confirmed",
+        body="Your appointment is confirmed.",
+    )
+
+    assert result is None
+    assert len(mail.outbox) == 1
+    message = mail.outbox[0]
+    assert message.to == ["client@example.com"]
+    assert message.subject == "Booking confirmed"
+    assert message.body == "Your appointment is confirmed."
+    assert message.from_email == settings.DEFAULT_FROM_EMAIL
