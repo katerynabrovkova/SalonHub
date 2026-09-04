@@ -32,6 +32,8 @@ from booking.guest_tokens import issue_guest_token
 from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus
 from catalog.models import Service
 from core.exceptions import InvalidStateTransitionError, SlotNotOfferedError, SlotUnavailableError
+from notifications.models import NotificationTrigger
+from notifications.services import record_and_dispatch_notification
 from scheduling.services import compute_candidate_start_times
 from specialists.models import Specialist
 from tenants.models import Salon
@@ -184,6 +186,15 @@ def cancel_appointment(
         appointment.cancellation_reason = reason
         appointment.save(
             update_fields=["status", "cancelled_at", "cancelled_by", "cancellation_reason"]
+        )
+        record_and_dispatch_notification(
+            salon=salon,
+            trigger_type=NotificationTrigger.BOOKING_CANCELLED,
+            appointment=appointment,
+            dedup_key=(
+                f"booking_cancelled:appointment:{appointment.pk}:"
+                f"{appointment.cancelled_at.isoformat()}"
+            ),
         )
         return appointment
 

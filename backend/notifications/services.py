@@ -180,13 +180,15 @@ def record_and_dispatch_notification(
     dedup_key: str,
 ) -> None:
     """
-    Record a PENDING Notification journal row for a webhook-fired trigger
-    and schedule its delivery for after the surrounding webhook transaction
-    commits (docs/DECISIONS.md § Stage 9 step (c)). Called from inside
-    PaymentWebhookView.post's atomic() block, right after a status save.
+    Record a PENDING Notification journal row for a trigger event and
+    schedule its delivery for after the surrounding transaction commits
+    (docs/DECISIONS.md § Stage 9 step (c)). Called from inside a caller's
+    own atomic() block, right after a status save — currently
+    PaymentWebhookView.post (payments/views.py) and
+    booking.services.cancel_appointment.
 
-    Own nested atomic() savepoint, one per call: a webhook re-delivery
-    reproduces the same dedup_key, so the INSERT can violate
+    Own nested atomic() savepoint, one per call: a redelivered or re-run
+    trigger reproduces the same dedup_key, so the INSERT can violate
     notification_trigger_channel_dedup_uniq. That one specific unique
     violation means the event's notification is already journalled — a
     no-op, and no second send is dispatched. The savepoint keeps that
@@ -195,9 +197,10 @@ def record_and_dispatch_notification(
     is re-raised and surfaces as a 500, the same __cause__ narrowing as
     booking.services.create_appointment and core.exceptions.exception_handler.
 
-    In practice the transition guards in post() (a status is only
-    transitioned from PENDING) already stop a redelivery before it reaches
-    this INSERT; the unique-violation branch is defence in depth.
+    In practice each caller's own transition guard (a status is only
+    transitioned from its expected starting state) already stops a
+    redelivery or re-run before it reaches this INSERT; the unique-violation
+    branch is defence in depth.
     """
     # Imported here, not at module top: notifications.tasks imports
     # send_notification/mark_notification_failed from this module, so a
