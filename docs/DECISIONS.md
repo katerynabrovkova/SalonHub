@@ -4780,3 +4780,72 @@ is four triggers.
 - **Result:** Stage 9 step (c) wires exactly four triggers —
   `BOOKING_CONFIRMED`, `BOOKING_CANCELLED`, `PAYMENT_SUCCEEDED`,
   `PAYMENT_FAILED`.
+
+### Step (c) `dedup_key` formats — the four wired triggers
+
+Decided and implemented 2026-09-04. Fixes the `dedup_key` string each of
+the four step (c) triggers writes (§ Step (c) scope narrowing cut the set
+to `BOOKING_CONFIRMED`, `BOOKING_CANCELLED`, `PAYMENT_SUCCEEDED`,
+`PAYMENT_FAILED`). Recorded before the triggers are wired because
+`dedup_key` is a client-visible delivery contract, not an implementation
+detail: it decides whether a client is guaranteed an email for every
+occurrence of an event, or only for the first.
+
+The `Notification` uniqueness constraint is
+`(trigger_type, channel, dedup_key)` — `salon` is deliberately **not** a
+column in it (`notifications/models.py`, the
+`notification_trigger_channel_dedup_uniq` `UniqueConstraint`). So each
+`dedup_key` value must be globally unique on its own; it cannot lean on
+an implicit per-salon namespace. Every format below is prefixed with its
+trigger name and the entity kind, so the key is self-describing and
+cannot collide across triggers or entity types.
+
+**Cross-cutting principle.** Every `dedup_key` still collapses a
+*technical replay of one event* — the same webhook or Celery task
+delivered twice — to a single send, because a replay reproduces the exact
+same key. The two triggers whose underlying event can legitimately recur
+(`PAYMENT_FAILED`, `BOOKING_CANCELLED`) add an attempt discriminator to
+the key, so a genuine repeat is a *new* event that sends, not a duplicate
+that is suppressed. The two that cannot recur (`BOOKING_CONFIRMED`,
+`PAYMENT_SUCCEEDED`) use a bare entity id, the honest key for a
+once-only event.
+
+- **`BOOKING_CONFIRMED` →
+  `"booking_confirmed:appointment:{appointment_id}"`.**
+  An appointment is confirmed exactly once — the `PENDING_PAYMENT →
+  CONFIRMED` transition in the payment webhook has no re-confirm path and
+  `CONFIRMED` is not re-enterable. The bare appointment id is the honest
+  key.
+
+- **`PAYMENT_SUCCEEDED` →
+  `"payment_succeeded:payment:{payment_id}"`.**
+  A payment succeeds exactly once — the webhook only makes the `PENDING →
+  SUCCEEDED` transition, and `SUCCEEDED` is terminal for the forward
+  path. The bare payment id is the honest key.
+
+- **`PAYMENT_FAILED` →
+  `"payment_failed:payment:{payment_id}:{provider_reference_id}"`.**
+  `Payment.appointment` is a `OneToOneField`, so a retry after a failed
+  payment reuses the **same** `Payment` row (same pk) via
+  `initiate_payment`'s `FAILED → PENDING` retry-in-place branch
+  (`payments/services.py:88-92`); that row can therefore fail more than
+  once. This retry path exists today, through `GuestAppointmentPayView`.
+  A bare `payment_id` key would silently suppress every failure email
+  after the first, on a path that is already reachable.
+  `provider_reference_id` is refreshed on every retry
+  (`payments/services.py:90`), so it distinguishes one attempt from the
+  next; a technical replay of a single failure carries the same
+  `provider_reference_id`, so replay dedup still holds.
+
+- **`BOOKING_CANCELLED` →
+  `"booking_cancelled:appointment:{appointment_id}:{cancelled_at}"`.**
+  No re-cancel path exists today — cancellation is guest-only, there is
+  no un-cancel and no staff cancel — so the `cancelled_at` discriminator
+  is protective ahead of a future re-book / re-cancel capability, not a
+  response to a path that exists now. Adding it now rather than deferring
+  costs nothing: `cancelled_at` is already written on the row at the
+  `CANCELLED` transition (`appointment.cancelled_at = now`,
+  `booking/services.py`), and closing the contract now avoids a silent
+  gap that a future re-book would otherwise open in a client-visible
+  delivery guarantee. A technical replay of one cancellation carries the
+  same `cancelled_at`, so replay dedup still holds.
