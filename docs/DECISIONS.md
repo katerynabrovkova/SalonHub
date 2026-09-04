@@ -4849,3 +4849,51 @@ once-only event.
   gap that a future re-book would otherwise open in a client-visible
   delivery guarantee. A technical replay of one cancellation carries the
   same `cancelled_at`, so replay dedup still holds.
+
+### Step (c) — `PAYMENT_SUCCEEDED` suppressed on the EXPIRED-appointment branch
+
+Decided and implemented 2026-09-04. Wiring the step (c) triggers surfaced
+a client-visible edge case on the `PAYMENT_SUCCEEDED` path that neither
+§ Step (c) scope narrowing nor § Step (c) `dedup_key` formats covered.
+Recorded before the code that implements it.
+
+**The fact.** In the payment webhook (`payments/views.py`), a
+`PENDING → SUCCEEDED` payment transition can land on an `Appointment`
+that has already been swept to `EXPIRED` — its `hold_expires_at` passed
+while the payment was in flight. That branch sets
+`should_initiate_refund = True` and the deposit is refunded once the
+webhook's transaction commits. Nothing about the appointment changes:
+there is no booking, and it never reaches `CONFIRMED`.
+
+**Two failure modes, chosen by reversibility** (the asymmetric-risk
+principle, as in § Stage 8.G decisions):
+- Emitting `PAYMENT_SUCCEEDED` here sends the client an email whose body
+  is "We have received your deposit payment." (the current
+  `_build_message` text) immediately before a silent refund and with no
+  booking to show for it. The client reads it and believes it — a
+  misleading confirmation is not recoverable.
+- Emitting nothing leaves a temporary silence, recoverable later by the
+  correct message.
+
+**Decision.** `PAYMENT_SUCCEEDED` is emitted only when the successful
+payment confirms a booking — i.e. only on the
+`appointment_row.status == PENDING_PAYMENT` path, the same path that
+emits `BOOKING_CONFIRMED`. On the `EXPIRED` branch no `PAYMENT_SUCCEEDED`
+`Notification` is created. In practice this makes `PAYMENT_SUCCEEDED`
+co-fire with `BOOKING_CONFIRMED` for step (c).
+  - This narrows the "once per successful payment" framing in § Step (c)
+    `dedup_key` formats: the `dedup_key` stays payment-keyed
+    (`"payment_succeeded:payment:{payment_id}"`), but *emission* is gated
+    on the booking actually being confirmed, not on the payment
+    transition alone.
+
+**Deferred (not built now): the correct message for the expired-refund
+path.** Something like "your booking did not go through; your deposit is
+being refunded; please choose a new time" — **not** "retry payment": the
+slot is gone and the appointment is `EXPIRED`, so re-payment is
+impossible by `initiate_payment`'s status guard. Delivering it needs a
+new trigger type, its message text, and wiring into the refund flow,
+none of which exist today — `initiate_refund` and the `refund_succeeded`
+webhook send the client nothing, and `NotificationTrigger` has no refund
+member. Deferred to the stage that builds refund-as-an-event, alongside
+the deferred `REVIEW_REQUEST` (§ Step (c) scope narrowing).
