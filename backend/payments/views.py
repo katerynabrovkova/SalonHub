@@ -5,7 +5,8 @@ docs/DECISIONS.md § Stage 8 decisions, § Stage 8.E decisions).
 
 import logging
 
-from django.db import transaction
+import psycopg
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -15,6 +16,8 @@ from rest_framework.views import APIView
 
 from booking.models import Appointment, AppointmentStatus
 from core.tenancy import tenant_context
+from notifications.models import Notification, NotificationChannel, NotificationTrigger
+from notifications.tasks import send_notification_task
 from payments.models import Payment, PaymentStatus, ProcessedWebhookEvent
 from payments.providers.base import PaymentProvider
 from payments.providers.mock import MockPaymentProvider
@@ -57,6 +60,60 @@ def _warn_if_impossible_transition(
         payment_row.id,
         payment_row.status,
     )
+
+
+def _record_and_dispatch_notification(
+    *,
+    salon: Salon,
+    trigger_type: str,
+    appointment: Appointment,
+    dedup_key: str,
+) -> None:
+    """
+    Record a PENDING Notification journal row for a webhook-fired trigger
+    and schedule its delivery for after the surrounding webhook transaction
+    commits (docs/DECISIONS.md § Stage 9 step (c)). Called from inside
+    PaymentWebhookView.post's atomic() block, right after a status save.
+
+    Own nested atomic() savepoint, one per call: a webhook re-delivery
+    reproduces the same dedup_key, so the INSERT can violate
+    notification_trigger_channel_dedup_uniq. That one specific unique
+    violation means the event's notification is already journalled — a
+    no-op, and no second send is dispatched. The savepoint keeps that
+    rollback from touching the outer transaction or a sibling call's row.
+    Any other IntegrityError — a composite tenant FK violation especially —
+    is re-raised and surfaces as a 500, the same __cause__ narrowing as
+    booking.services.create_appointment and core.exceptions.exception_handler.
+
+    In practice the transition guards in post() (a status is only
+    transitioned from PENDING) already stop a redelivery before it reaches
+    this INSERT; the unique-violation branch is defence in depth.
+    """
+    try:
+        with transaction.atomic():
+            notification = Notification.objects.create(
+                salon=salon,
+                trigger_type=trigger_type,
+                channel=NotificationChannel.EMAIL,
+                appointment=appointment,
+                customer_id=appointment.customer_id,
+                dedup_key=dedup_key,
+            )
+    except IntegrityError as exc:
+        cause = exc.__cause__
+        if (
+            isinstance(cause, psycopg.errors.UniqueViolation)
+            and cause.diag.constraint_name == "notification_trigger_channel_dedup_uniq"
+        ):
+            return
+        raise
+
+    # Bound into locals (not read off `notification`/`salon` when the hook
+    # fires): each call to this helper has its own frame, so the two hooks
+    # the confirming path registers stay independent.
+    notification_id = notification.id
+    salon_id = salon.id
+    transaction.on_commit(lambda: send_notification_task.delay(notification_id, salon_id))
 
 
 class PaymentWebhookView(APIView):
@@ -172,6 +229,26 @@ class PaymentWebhookView(APIView):
                         if appointment_row.status == AppointmentStatus.PENDING_PAYMENT:
                             appointment_row.status = AppointmentStatus.CONFIRMED
                             appointment_row.save(update_fields=["status"])
+                            # PAYMENT_SUCCEEDED is recorded only on this
+                            # confirming path, never on the EXPIRED branch
+                            # below (docs/DECISIONS.md § Step (c) —
+                            # PAYMENT_SUCCEEDED suppressed on the
+                            # EXPIRED-appointment branch): an "we received
+                            # your payment" email moments before a silent
+                            # refund, with no booking, is a misleading
+                            # confirmation.
+                            _record_and_dispatch_notification(
+                                salon=salon,
+                                trigger_type=NotificationTrigger.PAYMENT_SUCCEEDED,
+                                appointment=appointment_row,
+                                dedup_key=f"payment_succeeded:payment:{payment_row.pk}",
+                            )
+                            _record_and_dispatch_notification(
+                                salon=salon,
+                                trigger_type=NotificationTrigger.BOOKING_CONFIRMED,
+                                appointment=appointment_row,
+                                dedup_key=(f"booking_confirmed:appointment:{appointment_row.pk}"),
+                            )
                         elif appointment_row.status == AppointmentStatus.EXPIRED:
                             # Sweep-vs-webhook rule 3 (§ Stage 8 decisions):
                             # the slot was already released by the § Stage
@@ -196,6 +273,22 @@ class PaymentWebhookView(APIView):
                     if payment_row.status == PaymentStatus.PENDING:
                         payment_row.status = PaymentStatus.FAILED
                         payment_row.save(update_fields=["status"])
+                        # appointment_row is not loaded on this branch (no
+                        # appointment transition here) — one fetch, reused
+                        # for the FK and the recipient. dedup_key carries
+                        # provider_reference_id so a legitimate retry (a new
+                        # ref, per initiate_payment) is a new notification
+                        # (docs/DECISIONS.md § Step (c) `dedup_key` formats).
+                        failed_appointment = Appointment.objects.get(pk=payment_row.appointment_id)
+                        _record_and_dispatch_notification(
+                            salon=salon,
+                            trigger_type=NotificationTrigger.PAYMENT_FAILED,
+                            appointment=failed_appointment,
+                            dedup_key=(
+                                f"payment_failed:payment:{payment_row.pk}:"
+                                f"{payment_row.provider_reference_id}"
+                            ),
+                        )
                     else:
                         _warn_if_impossible_transition(
                             event_id=event_id,
