@@ -4712,3 +4712,71 @@ the "what vs. why" split.
   So step (b) has no production path that creates a `PENDING` row, and
   that is expected: step (b)'s task is exercised by tests that create a
   `PENDING` `Notification` directly and then invoke the task.
+
+### Step (c) scope narrowing — two triggers deferred
+
+Decided and implemented 2026-09-04. This entry narrows the scope of Stage
+9 step (c) ("Wire the trigger points", § Build order within Stage 9). It
+does **not** reverse or weaken the step (b) send mechanism — that stands
+as built. Reconnaissance ahead of step (c) found that two of the six
+triggers named in the original Stage 9 decisions (§ Build order within
+Stage 9, and § Credential emails folded into `Notification`) cannot or
+should not be wired now. This records both deferrals; the remaining scope
+is four triggers.
+
+- **`REVIEW_REQUEST` — deferred, no call site exists.**
+  `docs/ARCHITECTURE.md` § 11 / § 12 specify the review-request email as
+  event-driven, fired "the moment an appointment is marked `COMPLETED`".
+  Nothing in the codebase marks an appointment `COMPLETED`: there is no
+  service function, no Celery task, and no `beat_schedule` entry for the
+  `CONFIRMED → COMPLETED` transition that `ARCHITECTURE.md` § 12
+  describes. `AppointmentStatus.COMPLETED` exists only as an enum member
+  and in test fixtures.
+  - Building that transition is out of scope for step (c). "When exactly
+    is an appointment completed" is a state-machine decision with a
+    client-visible contract — it gates review eligibility
+    (`ARCHITECTURE.md` § 11) — not a notification-wiring detail, and it
+    belongs with the reviews functionality it exists to serve.
+  - Nothing is removed. The `_build_message` `REVIEW_REQUEST` entry and
+    the `NotificationTrigger.REVIEW_REQUEST` member stay exactly as they
+    are. `REVIEW_REQUEST` wiring is deferred until the
+    `COMPLETED`-transition sweep exists — a later stage, alongside
+    reviews.
+
+- **Credential emails (verification + password reset) — not folded into
+  `Notification`. This narrows § Credential emails folded into
+  `Notification`.**
+  That decision's premise was that folding them in "costs almost nothing
+  on top of" the dedup machinery being built regardless. Reconnaissance
+  ahead of step (c) showed the cost is not small:
+  - **Recipient resolution does not fit.** The step (b) recipient
+    resolver returns `Customer.email` when the notification's `customer`
+    is set, else `Salon.contact_email`. A credential email is addressed
+    to `Account.email`, and at registration and at password-reset time
+    there is usually no `Customer` row linked yet (the `Account →
+    Customer` link is made only at verify time). The resolver would fall
+    through to `Salon.contact_email` and deliver the client's
+    verification or reset link to the salon's operational inbox.
+  - **Message building does not fit.** The step (b) builder seam maps a
+    notification to static `(subject, body)` text. Credential email
+    bodies must interpolate `FRONTEND_URL`, the salon slug, and a
+    per-request token (plus a `uid` for reset) into a link. None of that
+    is on the `Notification` row, and § Credential emails folded into
+    `Notification` itself forbids storing the raw token there. Carrying
+    it would mean widening the `Notification` schema for a fundamentally
+    different resolve-and-render path.
+  - **Decision:** the verification and password-reset emails keep their
+    existing direct `send_mail` path in `accounts/tasks.py`, unchanged.
+    The `NotificationTrigger.EMAIL_VERIFICATION` member and the absence
+    of a `PASSWORD_RESET` member on the model are both left exactly as
+    they are — no code change in this entry. If a real dedup or
+    single-journal need for credential emails surfaces later, revisit it
+    then, as its own decision.
+
+- **Unaffected:** § Guest-token response-body reversal (step (d)) still
+  stands as written — it hangs off `BOOKING_CONFIRMED`, which remains in
+  step (c) scope.
+
+- **Result:** Stage 9 step (c) wires exactly four triggers —
+  `BOOKING_CONFIRMED`, `BOOKING_CANCELLED`, `PAYMENT_SUCCEEDED`,
+  `PAYMENT_FAILED`.
