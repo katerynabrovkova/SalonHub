@@ -18,10 +18,13 @@ directly.
 
 import datetime as dt
 
-from django.db import transaction
+import psycopg
+from django.db import IntegrityError, transaction
 
+from booking.models import Appointment
 from notifications.channels.base import NotificationChannel
 from notifications.models import Notification, NotificationStatus, NotificationTrigger
+from notifications.models import NotificationChannel as ChannelChoices
 from tenants.models import Salon
 
 
@@ -167,3 +170,62 @@ def mark_notification_failed(*, notification_id: int, salon: Salon) -> None:
             return
         notification.status = NotificationStatus.FAILED
         notification.save(update_fields=["status"])
+
+
+def record_and_dispatch_notification(
+    *,
+    salon: Salon,
+    trigger_type: str,
+    appointment: Appointment,
+    dedup_key: str,
+) -> None:
+    """
+    Record a PENDING Notification journal row for a webhook-fired trigger
+    and schedule its delivery for after the surrounding webhook transaction
+    commits (docs/DECISIONS.md § Stage 9 step (c)). Called from inside
+    PaymentWebhookView.post's atomic() block, right after a status save.
+
+    Own nested atomic() savepoint, one per call: a webhook re-delivery
+    reproduces the same dedup_key, so the INSERT can violate
+    notification_trigger_channel_dedup_uniq. That one specific unique
+    violation means the event's notification is already journalled — a
+    no-op, and no second send is dispatched. The savepoint keeps that
+    rollback from touching the outer transaction or a sibling call's row.
+    Any other IntegrityError — a composite tenant FK violation especially —
+    is re-raised and surfaces as a 500, the same __cause__ narrowing as
+    booking.services.create_appointment and core.exceptions.exception_handler.
+
+    In practice the transition guards in post() (a status is only
+    transitioned from PENDING) already stop a redelivery before it reaches
+    this INSERT; the unique-violation branch is defence in depth.
+    """
+    # Imported here, not at module top: notifications.tasks imports
+    # send_notification/mark_notification_failed from this module, so a
+    # top-level import the other way would be a circular import.
+    from notifications.tasks import send_notification_task
+
+    try:
+        with transaction.atomic():
+            notification = Notification.objects.create(
+                salon=salon,
+                trigger_type=trigger_type,
+                channel=ChannelChoices.EMAIL,
+                appointment=appointment,
+                customer_id=appointment.customer_id,
+                dedup_key=dedup_key,
+            )
+    except IntegrityError as exc:
+        cause = exc.__cause__
+        if (
+            isinstance(cause, psycopg.errors.UniqueViolation)
+            and cause.diag.constraint_name == "notification_trigger_channel_dedup_uniq"
+        ):
+            return
+        raise
+
+    # Bound into locals (not read off `notification`/`salon` when the hook
+    # fires): each call to this helper has its own frame, so the two hooks
+    # the confirming path registers stay independent.
+    notification_id = notification.id
+    salon_id = salon.id
+    transaction.on_commit(lambda: send_notification_task.delay(notification_id, salon_id))
