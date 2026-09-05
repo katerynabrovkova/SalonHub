@@ -27,15 +27,19 @@ def _hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
+def _sign_token(appointment_id: int) -> str:
+    return signing.Signer(salt=_SALT).sign_object({"appointment_id": appointment_id})
+
+
 def issue_guest_token(appointment: Appointment) -> tuple[str, GuestAccessToken]:
     """
     Creates the GuestAccessToken row and returns (raw_token, row). The raw
     token is handed back once, for the caller to put in the confirmation
-    email link — it is never itself persisted or logged. Not yet called from
-    anywhere in production code: booking confirmation (Stage 7/9) is what
-    will call this when a real appointment is created.
+    email link — it is never itself persisted or logged. Already called from
+    production code: booking.services.create_guest_appointment, at
+    guest-booking-creation time.
     """
-    raw_token = signing.Signer(salt=_SALT).sign_object({"appointment_id": appointment.id})
+    raw_token = _sign_token(appointment.id)
     row = GuestAccessToken.objects.create(
         salon=appointment.salon,
         appointment=appointment,
@@ -43,6 +47,27 @@ def issue_guest_token(appointment: Appointment) -> tuple[str, GuestAccessToken]:
         expires_at=appointment.end_datetime + GUEST_TOKEN_VALIDITY,
     )
     return raw_token, row
+
+
+def derive_guest_token(appointment_id: int) -> str:
+    """
+    Re-derives the exact raw token issue_guest_token minted for this
+    appointment, without touching the database (no row read or write) —
+    pure re-computation from the id. Relies on the signature being
+    deterministic (a plain Signer over {"appointment_id": ...}, no
+    timestamp or nonce): signing the same payload with the same salt always
+    reproduces the same raw token, which hashes to the same token_hash
+    already stored on the GuestAccessToken row. Determinism is the
+    load-bearing constraint this function depends on (docs/DECISIONS.md §
+    Step (d) decisions) — do not add a timestamp or any other
+    non-deterministic element to _sign_token.
+
+    Exists so a caller that only has the appointment id — e.g. the payment
+    webhook building the BOOKING_CONFIRMED email — can reconstruct the raw
+    token to put in the guest access link, since only its SHA-256 hash is
+    ever stored.
+    """
+    return _sign_token(appointment_id)
 
 
 def validate_guest_token(raw_token: str, *, for_cancel: bool = False) -> GuestAccessToken:
