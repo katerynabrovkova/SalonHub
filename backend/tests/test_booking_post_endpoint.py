@@ -42,7 +42,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 import booking.services as booking_services
-from booking.guest_tokens import validate_guest_token
+from booking.guest_tokens import derive_guest_token, validate_guest_token
 from booking.models import Appointment, AppointmentStatus
 from core.tenancy import tenant_context
 from tests.conftest import make_appointment, make_working_hours
@@ -113,7 +113,7 @@ def _defeat_slot_validity_check(monkeypatch, start_datetime: dt.datetime) -> Non
 # --- 1. Happy path -----------------------------------------------------------
 
 
-def test_valid_guest_booking_on_offered_slot_returns_201_with_working_token(
+def test_valid_guest_booking_on_offered_slot_returns_201_without_a_token_in_the_body(
     client, monkeypatch, salon, specialist, service
 ):
     _working_hours(salon, specialist)
@@ -129,10 +129,17 @@ def test_valid_guest_booking_on_offered_slot_returns_201_with_working_token(
     assert appt.service_id == service.id
     assert response.data["appointment"]["id"] == appt.id
 
-    raw_token = response.data["token"]
-    assert raw_token
+    # The raw guest token is no longer in the 201 body (docs/DECISIONS.md §
+    # Step (d) decisions) — it is delivered later, in the BOOKING_CONFIRMED
+    # email, re-derived from the appointment id rather than round-tripped
+    # through this response.
+    assert "token" not in response.data
+
+    # A working token still exists for this appointment end-to-end — proven
+    # via the commit-A re-derivation function instead of off the response.
     with tenant_context(salon.id):
-        validated = validate_guest_token(raw_token)
+        derived = derive_guest_token(appt.id)
+        validated = validate_guest_token(derived)
     assert validated.appointment_id == appt.id
 
 
