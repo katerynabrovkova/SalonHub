@@ -4897,3 +4897,60 @@ none of which exist today — `initiate_refund` and the `refund_succeeded`
 webhook send the client nothing, and `NotificationTrigger` has no refund
 member. Deferred to the stage that builds refund-as-an-event, alongside
 the deferred `REVIEW_REQUEST` (§ Step (c) scope narrowing).
+
+### Step (d) decisions (guest-token delivery)
+
+Decided and implemented 2026-09-05. Carries out § Guest-token
+response-body reversal's plan, now that step (b)'s send mechanism and
+step (c)'s `BOOKING_CONFIRMED` wiring both exist. Fills in one mechanism
+that entry left open: how the webhook, which never holds the raw token,
+gets one to put in the email.
+
+- **The `"token"` key is removed from the 201 booking-creation
+  response.** Per § Guest-token response-body reversal, only the sibling
+  key goes — the `"appointment"` object's own shape is untouched. The
+  contract is now `{"appointment": {"id", "status", "start_datetime",
+  "end_datetime"}}`. The outer envelope is deliberately kept, not
+  flattened to a bare appointment object, to leave room for the Stage 8
+  price/deposit snapshot fields alongside `"appointment"` later.
+
+- **The raw token is instead delivered in the `BOOKING_CONFIRMED`
+  notification email, as a manage/cancel link**, exactly as § Guest-token
+  response-body reversal specified.
+
+- **`BOOKING_CONFIRMED` fires from exactly one production call site** —
+  `payments/views.py`, inside `PaymentWebhookView.post`, on the
+  `_PAYMENT_SUCCEEDED` → `payment_row.status == PENDING` →
+  `appointment_row.status == PENDING_PAYMENT` branch, immediately after
+  the transition to `AppointmentStatus.CONFIRMED` is saved, inside the
+  same `select_for_update()` lock. It never fires on the sibling
+  `EXPIRED` branch (§ Step (c) — `PAYMENT_SUCCEEDED` suppressed on the
+  EXPIRED-appointment branch already suppresses `PAYMENT_SUCCEEDED`
+  there, and `BOOKING_CONFIRMED` was already co-gated with it), nor on
+  `_PAYMENT_FAILED`, nor on `_REFUND_SUCCEEDED`. So every time it fires,
+  the appointment is guaranteed `CONFIRMED` and the token is meaningful —
+  never expired, refunded, or otherwise stale.
+
+- **The webhook cannot hand the email builder the raw token directly —
+  only `GuestAccessToken.token_hash` (a SHA-256 digest) is ever stored**
+  (`issue_guest_token`, `booking/guest_tokens.py`), and a hash is not
+  reversible. Instead, `booking/guest_tokens.py` gains a new public
+  function that **re-derives** the raw token from the appointment at send
+  time, and `payments/views.py` calls it rather than reconstructing the
+  signed value itself. `payments` does not know the signing salt or the
+  payload shape (`{"appointment_id": ...}`) — that stays private to
+  `booking.guest_tokens`, the same encapsulation `validate_guest_token`
+  already keeps for verification.
+
+- **Constraint this depends on, recorded explicitly: the guest-token
+  signature must stay deterministic.** `issue_guest_token` signs a plain
+  `{"appointment_id": appointment.id}` payload with `signing.Signer` — no
+  timestamp, no nonce, no other non-deterministic element. Re-derivation
+  works only because signing the same payload with the same salt always
+  reproduces the same raw token, which then hashes to the same
+  `token_hash` already stored on the `GuestAccessToken` row. **Do not add
+  a timestamp or any other non-deterministic element to this
+  signature** — doing so would make re-derivation produce a different
+  token than the one issued at booking time, silently invalidating every
+  stored hash and breaking guest verification for every booking made
+  before the change.
