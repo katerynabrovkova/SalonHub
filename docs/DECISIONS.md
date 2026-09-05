@@ -5002,3 +5002,45 @@ gets one to put in the email.
   token than the one issued at booking time, silently invalidating every
   stored hash and breaking guest verification for every booking made
   before the change.
+
+- **`BOOKING_CONFIRMED` email content (client-visible).** English only —
+  content localization is deferred to Stage 11.5 (§ Agreed stage order;
+  § Content localization), and no per-guest or per-salon language is
+  stored anywhere yet, so this is one fixed English string, like every
+  other current `_MESSAGES` entry.
+  - **Subject:** `"Your booking is confirmed"` — unchanged from the
+    existing `_MESSAGES` entry.
+  - **Body:**
+    ```
+    Your booking at {salon name} on {date/time} is confirmed.
+
+    View or cancel your booking: {manage link}
+    ```
+  - `{salon name}` = `salon.name` — already loaded at the firing site, no
+    extra query.
+  - `{date/time}` = the appointment's `start_datetime`, converted to the
+    salon's timezone (`salon.timezone`) and formatted like
+    `"Fri, 26 Sep 2026, 14:00"` — start time only, no end time or range,
+    24-hour clock, no explicit timezone label. The salon is a physical
+    local venue, so local time is unambiguous to the recipient without
+    naming the zone. `end_datetime` is deliberately not shown.
+  - `{manage link}` = the URL-path form decided above:
+    `{FRONTEND_URL}/salons/<slug>/appointments/<id>/manage/<token>/`.
+  - The link text frames it as "view or cancel" because clicking leads to
+    the booking's view page, from which cancelling is a separate choice —
+    consistent with the transport decision above.
+
+- **Mechanism note: this changes what `_build_message` is, not just its
+  wording, for this one trigger.** `BOOKING_CONFIRMED` goes through the
+  `Notification` / `_build_message` / `channel.send` path
+  (`notifications/services.py`), not the standalone `accounts/tasks.py`
+  f-string path the two credential emails use. `_build_message` today
+  returns a static `(subject, body)` straight out of `_MESSAGES`, with
+  only the `Notification` row in scope. Producing the body above means
+  `_build_message`, for `BOOKING_CONFIRMED` specifically, must follow the
+  notification's `appointment` FK to reach `salon.name`, `start_datetime`,
+  the salon `slug`, and the appointment id, and must call the new
+  guest-token re-derivation function (above) to get the raw token for the
+  link — so `_build_message` stops being a pure static-dict lookup for
+  this trigger. Recorded here as the intended step (d) mechanism; not
+  built yet.
