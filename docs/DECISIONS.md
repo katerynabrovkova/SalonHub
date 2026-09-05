@@ -4915,8 +4915,52 @@ gets one to put in the email.
   price/deposit snapshot fields alongside `"appointment"` later.
 
 - **The raw token is instead delivered in the `BOOKING_CONFIRMED`
-  notification email, as a manage/cancel link**, exactly as § Guest-token
-  response-body reversal specified.
+  notification email, as a manage/cancel link, in the URL PATH — not a
+  query string, not a fragment:**
+  `{FRONTEND_URL}/salons/<slug>/appointments/<id>/manage/<token>/`. This
+  narrows § Guest-token response-body reversal's plan, which assumed this
+  token would use the same fragment transport as every other emailed
+  token; that assumption does not hold for this token, for the reasons
+  below.
+  - **Query string ruled out, same reasoning as always.** OWASP's
+    "information exposure through query strings" concern is specifically
+    about the *query* string landing in server and intermediary-proxy
+    access logs even over HTTPS. That concern is untouched here and still
+    rules out `?token=...`.
+  - **Fragment reconsidered and rejected for this token.** `#token=...`
+    is a narrow workaround against an email scanner or link-prefetcher
+    hitting the link and consuming a one-time credential before the real
+    recipient does. It only works because a client-side landing page
+    reads `window.location.hash` and re-sends the token as a header — and
+    no such page exists: the frontend is Stage 18-21 work, not built yet.
+    The fragment approach remains the right call for the two existing
+    one-time credential tokens (email verification, password reset),
+    which are single-use and short-lived; this entry does not revisit
+    those, only the guest token's transport.
+  - **Why the guest token is different: it is a persistent resource
+    link, not a magic login.** The guest opens the same link repeatedly,
+    to view (and optionally cancel) the one booking it names, any time up
+    to the appointment date — not a once-off "click to log in" action.
+    Magic-login tokens want single-use, short-TTL, high-entropy,
+    device-bound credentials; this token is deliberately none of those
+    (`GUEST_TOKEN_VALIDITY` = 30 days, multi-use for viewing).
+  - **Accepted as a conscious risk.** Because the link is long-lived and
+    multi-use by design, the token is a standing credential that sits in
+    the guest's mailbox for the life of the 30-day window: anyone with
+    access to that mailbox can view or cancel that one booking. Accepted
+    because the blast radius is a single booking — no account, no stored
+    funds, nothing else reachable — not account takeover. Putting the
+    token in the path exposes it to the same class of server access logs
+    a query string would; for a persistent link already living long-term
+    in the guest's email, that is not a new or decisive exposure — it is
+    the built-in cost of choosing this access model, not one the path
+    form adds on top.
+  - **The link leads to a view page, not directly to cancellation.**
+    Clicking it opens the booking's view/manage page; cancelling is a
+    separate action the guest chooses from there. Cancellation is already
+    effectively single-use — `cancelled_via_token_at` gates the
+    `for_cancel` branch in `validate_guest_token`
+    (`booking/guest_tokens.py`) — independent of this transport decision.
 
 - **`BOOKING_CONFIRMED` fires from exactly one production call site** —
   `payments/views.py`, inside `PaymentWebhookView.post`, on the
