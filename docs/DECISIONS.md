@@ -4206,7 +4206,11 @@ against `Account`) is next. Login / refresh / logout stay on `User` at
   `unscoped_objects` and imports no model. The link it builds is
   `{FRONTEND_URL}/salons/<slug>/reset-password#uid=...&token=...` (URL
   fragment, never query string — § Stage 3 decisions, guest-token
-  transport, applied to every emailed token).
+  transport). That reasoning holds for this one-time credential token.
+  § Step (d) decisions later split the guest access token onto a
+  different transport, the URL path, because it is a persistent,
+  long-lived resource link rather than a one-time credential — this
+  fragment placement is unaffected by that split.
 
 - **Untouched debt (restated, not resolved here).** `Customer.user`
   (`accounts/models.py`) still points at the platform `User` model —

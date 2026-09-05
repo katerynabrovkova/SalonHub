@@ -192,10 +192,13 @@ EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@bella-beauty-salon.example")
 
 # Base URL of the (not-yet-built, see docs/DECISIONS.md § Frontend cadence)
-# frontend, used only to build clickable links in outgoing email. The token
-# itself travels in the URL fragment, never a query string — see
-# docs/DECISIONS.md § Stage 3 decisions (guest token transport; the same
-# reasoning applies to every emailed token, not only the guest one).
+# frontend, used only to build clickable links in outgoing email. One-time
+# credential tokens (email verification, password reset) travel in the URL
+# fragment, never a query string — see docs/DECISIONS.md § Stage 3
+# decisions (guest token transport). The guest access token is the
+# exception: it travels in the URL path instead, being a persistent,
+# long-lived resource link rather than a one-time credential — see
+# docs/DECISIONS.md § Step (d) decisions (guest-token delivery).
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 
 # Django's own token generator (used for password reset) reads this directly.
