@@ -4637,13 +4637,13 @@ exists; (d) after (b) for the reason given above.
   recipient resolution are scoped when we reach step (c).
 - **(d) Guest-token response-body reversal** — as above; after (b) so
   the confirmation email exists to carry the token.
-- **(e) Reminder tasks (24h / 2h before the appointment)** — the
-  scheduled `APPOINTMENT_REMINDER` triggers, deferred to this stage by
-  the `beat_schedule` comment in `config/celery.py` ("Reminder tasks
-  (24h/2h) land in the notifications stage"). Named here but **not yet
-  detailed**: the beat cadence, the per-appointment dedup window, and
-  the guard against reminding for a cancelled or expired appointment are
-  scoped when we reach step (e).
+- **(e) The appointment-reminder sweep** — a single day-before
+  `APPOINTMENT_REMINDER` per appointment, deferred to this stage by the
+  `beat_schedule` comment in `config/celery.py` ("Reminder tasks (24h/2h)
+  land in the notifications stage"). Scoped and detailed in § Step (e)
+  decisions below: the "24h / 2h" placeholder is narrowed to **one**
+  ~24h reminder (the 2h reminder is dropped), delivered by a model-A time
+  sweep mirroring the two existing sweeps.
 
 ### Step (b) decisions (the send mechanism)
 
@@ -5044,3 +5044,119 @@ gets one to put in the email.
   link — so `_build_message` stops being a pure static-dict lookup for
   this trigger. Recorded here as the intended step (d) mechanism; not
   built yet.
+
+### Step (e) decisions (the appointment-reminder sweep)
+
+Decided and implemented 2026-09-06. This records the **mechanism** only.
+The reminder email's exact wording is client-visible and is recorded
+separately, alongside the § Step (d) `BOOKING_CONFIRMED` email content
+entry, when that text is settled.
+
+- **Scope: exactly one reminder per appointment, the day before.** The
+  § Build order within Stage 9 placeholder said "24h / 2h before the
+  appointment"; that is narrowed here to a **single** ~24h reminder. The
+  2h reminder is dropped — one "your appointment is tomorrow" nudge is
+  the whole feature; a second same-day reminder is not worth the extra
+  sweep, the extra dedup key, and the extra beat entry for the first
+  tenant. It can be added later as its own decision if a salon asks for
+  it. The `config/celery.py` `beat_schedule` comment still reads
+  "Reminder tasks (24h/2h)" — that comment is corrected to describe the
+  single reminder in the code phase that implements this.
+
+- **Model: a model-A time sweep**, mirroring the two existing sweeps
+  (`booking.tasks.expire_pending_payment_appointments` /
+  `booking.services.expire_overdue_appointments`, and
+  `payments.tasks.flag_stuck_refund_payments` /
+  `payments.services.flag_stuck_refunds`). **No new field on
+  `Appointment`**, and no stored "scheduled send moment" — the sweep
+  scans by the appointment's existing `start_datetime`. The reminder's
+  send time is a function of `start_datetime` and the current wall clock,
+  computed fresh each run, never persisted.
+
+- **Window: `start_datetime` in `(now + 24h, now + 25h]`** — strictly
+  greater than `now + 24h`, less than or equal to `now + 25h`.
+  - A reminder therefore arrives roughly 24–25 hours before the
+    appointment ("the day before"), never in the final hours.
+  - **The upper-side window is a by-construction guarantee, not an
+    approximate cutoff.** An appointment booked *less* than 24h before
+    its own start is always closer than 24h away, so it can never enter
+    `(now + 24h, now + 25h]` on any subsequent run — short-notice
+    bookings correctly get no reminder, with no explicit "was this booked
+    too late?" check anywhere. The only appointments the sweep can ever
+    select are ones that were on the books more than 24h ahead.
+
+- **Status: `CONFIRMED` only.** Filtered directly as
+  `status=AppointmentStatus.CONFIRMED` — **not**
+  `ACTIVE_APPOINTMENT_STATUSES`, which also includes `PENDING_PAYMENT`
+  (unpaid holds that are not real bookings and mostly expire). Not
+  `CANCELLED` / `EXPIRED` (dead). Not `COMPLETED` / `NO_SHOW` (in the
+  past, and unreachable anyway given the future-dated window). **No new
+  status-set constant is introduced** for a single status — a bare
+  `CONFIRMED` filter is clearer than a one-element named set, and reusing
+  or widening `ACTIVE_APPOINTMENT_STATUSES` (load-bearing for the
+  double-booking exclusion constraint and the cancellation guard) for
+  this is out of the question.
+
+- **Beat cadence: hourly (`3600.0`), a new `beat_schedule` entry.** The
+  window width (1h) is matched to the beat period (1h) so that, in the
+  common case, each qualifying appointment is seen by exactly one run.
+  A coarse ~24h reminder does not need finer granularity — same
+  reasoning as the § Stage 8.G decisions refund sweep running at
+  `1800.0` rather than the expiry sweep's `60.0`.
+  - **Residual edge fragility, accepted.** Beat runs are not perfectly
+    1h apart (worker restarts, scheduler drift, a long-running previous
+    tick), so an appointment could in principle cross the whole
+    `(now+24h, now+25h]` band inside a gap between two runs and be
+    missed. This is accepted: the failure is soft — a single missed
+    day-before reminder, with no money, no state transition, and no
+    correctness impact on the booking itself — and the opposite case
+    (an appointment caught by two adjacent runs) is absorbed by dedup.
+
+- **Dedup: the existing `notification_trigger_channel_dedup_uniq`
+  constraint**, with
+  `dedup_key = f"appointment_reminder:appointment:{appointment.pk}"` —
+  **no trailing segment** (contrast `booking_cancelled:...:{timestamp}`
+  and `payment_failed:...:{provider_reference_id}` in § Step (c)
+  `dedup_key` formats). One reminder per appointment, ever: a re-run that
+  re-selects the same appointment reproduces the identical key, and
+  `record_and_dispatch_notification` swallows the resulting
+  `UniqueViolation` as a no-op. **This is the sole guard against
+  duplicate sends** — there is deliberately no `reminder_sent_at` or
+  equivalent flag on `Appointment` (that would be the stored send-state
+  the model-A decision above rejects).
+
+- **Dispatch: reuse `record_and_dispatch_notification` unchanged.** It
+  already binds `notification_id` / `salon_id` into local variables
+  before registering the `transaction.on_commit` send hook, so calling it
+  once per appointment inside the per-row lock is loop-safe with no
+  separate late-binding handling at the call site.
+
+- **Location: the sweep service function lives in
+  `notifications/services.py`**, alongside `record_and_dispatch_notification`
+  — not in `booking/services.py`. Its purpose is dispatching
+  notifications; it only *reads* `Appointment` as a source of candidates,
+  the same way `_build_message` reads it. The `@shared_task` lives in
+  `notifications/tasks.py` (which already holds `send_notification_task`).
+
+- **Service / task shape: mirror the two existing sweeps exactly.**
+  - Task: reads `now = timezone.now()` once before the loop; iterates
+    `Salon.objects.all()`; binds `tenant_context(salon.id)` per
+    iteration around the service call; wraps each salon in its own
+    `try` / `except Exception` with `logger.exception(...)` so one
+    failing salon is logged and skipped.
+  - Service: signature `def <fn>(*, salon: Salon, now: dt.datetime) -> int`,
+    tenant context assumed already bound (not bound here); an unlocked
+    candidate-id query (`status=CONFIRMED`, `start_datetime` in the
+    window, `.values_list("id", flat=True)`), then per row a
+    `transaction.atomic()` + `select_for_update()` fetch + recheck that
+    status is still `CONFIRMED` (`continue` if it changed under the race)
+    + `record_and_dispatch_notification(...)` + increment a count the
+    task logs.
+
+- **The reminder email text will be dynamic, not the current static
+  `_MESSAGES` entry.** Like `BOOKING_CONFIRMED` (§ Step (d) mechanism
+  note), the reminder body needs the salon name, the appointment's local
+  start time, and a guest manage link — none of which are fixed strings —
+  so the static `APPOINTMENT_REMINDER` tuple in `_MESSAGES` moves to a
+  `_build_message` special case. The exact wording is a client-visible
+  decision recorded separately; it is **not** specified here.
