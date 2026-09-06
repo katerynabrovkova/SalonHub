@@ -38,12 +38,12 @@ NOW = dt.datetime(2026, 9, 3, 12, 0, tzinfo=dt.UTC)
 EARLIER = dt.datetime(2026, 9, 1, 8, 0, tzinfo=dt.UTC)
 APPOINTMENT_START = dt.datetime(2026, 9, 26, 11, 0, tzinfo=dt.UTC)
 
-# BOOKING_CONFIRMED excluded: it is no longer a static _MESSAGES lookup (it
-# now builds a subject/body from a real appointment), so it has its own
-# dedicated tests below instead of running through this generic check.
+# BOOKING_CONFIRMED and APPOINTMENT_REMINDER excluded: neither is a static
+# _MESSAGES lookup any more — each builds a subject/body from a real
+# appointment (salon name, local start time, guest manage link), so each has
+# its own dedicated tests below instead of running through this generic check.
 _IMPLEMENTED_TRIGGERS = [
     NotificationTrigger.BOOKING_CANCELLED,
-    NotificationTrigger.APPOINTMENT_REMINDER,
     NotificationTrigger.PAYMENT_SUCCEEDED,
     NotificationTrigger.PAYMENT_FAILED,
     NotificationTrigger.REVIEW_REQUEST,
@@ -164,6 +164,88 @@ def test_build_message_for_booking_confirmed_link_carries_the_re_derived_token(
 
 def test_build_message_raises_for_booking_confirmed_without_an_appointment(salon, customer):
     notification = _make_notification(salon, customer=customer, appointment=None)
+
+    with tenant_context(salon.id), pytest.raises(ValueError, match="appointment"):
+        _build_message(notification)
+
+
+# --- _build_message for APPOINTMENT_REMINDER (dynamic, mirrors BOOKING_CONFIRMED)
+
+
+def test_build_message_for_appointment_reminder_builds_subject_body_and_link(
+    salon, customer, specialist, service
+):
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(
+        salon,
+        customer=customer,
+        appointment=appointment,
+        trigger=NotificationTrigger.APPOINTMENT_REMINDER,
+    )
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Reminder: your appointment tomorrow"
+    assert salon.name in body
+    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
+    manage_link = (
+        f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+        f"/manage/{derive_guest_token(appointment.id)}/"
+    )
+    assert manage_link in body
+    assert "View or cancel your booking:" in body
+    # The exact body, including the required blank line between the two
+    # sentences (docs/DECISIONS.md § Step (e), email text).
+    expected_body = (
+        f"This is a reminder of your appointment at {salon.name} on "
+        f"{format_datetime_for_salon(appointment.start_datetime, salon.timezone)}.\n\n"
+        f"View or cancel your booking: {manage_link}"
+    )
+    assert body == expected_body
+
+
+def test_build_message_for_appointment_reminder_link_carries_the_re_derived_token(
+    salon, customer, specialist, service
+):
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(
+        salon,
+        customer=customer,
+        appointment=appointment,
+        trigger=NotificationTrigger.APPOINTMENT_REMINDER,
+    )
+
+    with tenant_context(salon.id):
+        _subject, body = _build_message(notification)
+
+    expected_token = derive_guest_token(appointment.id)
+    expected_link = (
+        f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+        f"/manage/{expected_token}/"
+    )
+    assert expected_link in body
+
+
+def test_build_message_raises_for_appointment_reminder_without_an_appointment(salon, customer):
+    notification = _make_notification(
+        salon,
+        customer=customer,
+        appointment=None,
+        trigger=NotificationTrigger.APPOINTMENT_REMINDER,
+    )
 
     with tenant_context(salon.id), pytest.raises(ValueError, match="appointment"):
         _build_message(notification)

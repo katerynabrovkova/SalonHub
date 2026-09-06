@@ -52,19 +52,15 @@ def _resolve_recipient(notification: Notification) -> str:
 # (b)). Inline text, one language, no template system. When Stage 11.5
 # localization lands, only _build_message's internals change.
 #
-# BOOKING_CONFIRMED has no entry here: it is built from the notification's
-# appointment in _build_message instead of being a static lookup (see
-# docs/DECISIONS.md § Step (d) decisions, guest-token delivery) — the
-# manage-link URL and the human-readable appointment time can't be fixed
-# strings.
+# BOOKING_CONFIRMED and APPOINTMENT_REMINDER have no entry here: each is
+# built from the notification's appointment in _build_message instead of
+# being a static lookup (see docs/DECISIONS.md § Step (d) decisions and
+# § Step (e) decisions) — the manage-link URL and the human-readable
+# appointment time can't be fixed strings.
 _MESSAGES: dict[str, tuple[str, str]] = {
     NotificationTrigger.BOOKING_CANCELLED.value: (
         "Your booking was cancelled",
         "Your booking has been cancelled.",
-    ),
-    NotificationTrigger.APPOINTMENT_REMINDER.value: (
-        "Appointment reminder",
-        "This is a reminder about your upcoming appointment.",
     ),
     NotificationTrigger.PAYMENT_SUCCEEDED.value: (
         "Payment received",
@@ -87,14 +83,36 @@ def _build_message(notification: Notification) -> tuple[str, str]:
     place the wording lives, so Stage 11.5 localization is a swap of this
     function's internals and nothing else on the send path.
 
-    Every trigger but BOOKING_CONFIRMED is a fixed string from _MESSAGES.
-    BOOKING_CONFIRMED is built from the notification's appointment instead
-    (salon name, human-readable local time, the re-derived guest-access
-    manage link) — see docs/DECISIONS.md § Step (d) decisions. A
-    trigger_type with no entry in _MESSAGES and no special case here
-    (EMAIL_VERIFICATION today) raises rather than sending a blank email: a
-    missing message is a bug, not a valid empty send.
+    Every trigger but BOOKING_CONFIRMED and APPOINTMENT_REMINDER is a fixed
+    string from _MESSAGES. Those two are built from the notification's
+    appointment instead (salon name, human-readable local time, the
+    re-derived guest-access manage link) — see docs/DECISIONS.md § Step (d)
+    decisions and § Step (e) decisions. A trigger_type with no entry in
+    _MESSAGES and no special case here (EMAIL_VERIFICATION today) raises
+    rather than sending a blank email: a missing message is a bug, not a
+    valid empty send.
     """
+    if notification.trigger_type == NotificationTrigger.APPOINTMENT_REMINDER:
+        appointment = notification.appointment
+        if appointment is None:
+            raise ValueError(
+                "APPOINTMENT_REMINDER notification "
+                f"{notification.pk!r} has no appointment to build its message from"
+            )
+        salon = appointment.salon
+        when = format_datetime_for_salon(appointment.start_datetime, salon.timezone)
+        token = derive_guest_token(appointment.id)
+        link = (
+            f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+            f"/manage/{token}/"
+        )
+        subject = "Reminder: your appointment tomorrow"
+        body = (
+            f"This is a reminder of your appointment at {salon.name} on {when}.\n\n"
+            f"View or cancel your booking: {link}"
+        )
+        return subject, body
+
     if notification.trigger_type == NotificationTrigger.BOOKING_CONFIRMED:
         appointment = notification.appointment
         if appointment is None:
