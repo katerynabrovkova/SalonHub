@@ -509,7 +509,7 @@ but deletion is not exposed to anyone (`docs/DECISIONS.md` § Business rules).
 confirmation/cancellation email, payment webhook processing, review-request email
 (fired the moment an appointment is marked `COMPLETED`).
 
-**Scheduled** (Celery beat): appointment reminders (timing not yet decided),
+**Scheduled** (Celery beat): appointment reminders (a single day-before reminder, hourly sweep),
 expiring `PENDING_PAYMENT` appointments once `hold_expires_at` passes (hold
 duration recorded in `docs/DECISIONS.md` § Business rules), transitioning
 `CONFIRMED` appointments to `COMPLETED` once `end_datetime` passes (with a staff
