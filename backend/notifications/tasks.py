@@ -23,7 +23,11 @@ from core.tenancy import tenant_context
 from notifications.channels.base import NotificationChannel
 from notifications.channels.email import EmailChannel
 from notifications.models import Notification
-from notifications.services import mark_notification_failed, send_notification
+from notifications.services import (
+    mark_notification_failed,
+    send_due_appointment_reminders,
+    send_notification,
+)
 from tenants.models import Salon
 
 logger = logging.getLogger(__name__)
@@ -77,3 +81,31 @@ def send_notification_task(self, notification_id: int, salon_id: int) -> None:
                 self.retry()
             except MaxRetriesExceededError:
                 mark_notification_failed(notification_id=notification_id, salon=salon)
+
+
+@shared_task
+def send_due_appointment_reminders_task() -> None:
+    """
+    Stage 9 step (e) — the day-before appointment-reminder sweep
+    (docs/DECISIONS.md § Step (e) decisions). Mirrors
+    payments.tasks.flag_stuck_refund_payments: `now` is read once before the
+    loop so every salon in a run is judged against the same instant;
+    tenant_context(salon.id) is bound per iteration so one salon's context
+    can never bleed into the next; each salon's processing is wrapped in its
+    own try/except so one failing salon is logged and skipped, the rest
+    still run.
+    """
+    now = timezone.now()
+    for salon in Salon.objects.all():
+        try:
+            with tenant_context(salon.id):
+                reminded_count = send_due_appointment_reminders(salon=salon, now=now)
+            logger.info(
+                "send_due_appointment_reminders_task: sent %d reminder(s) for salon_id=%s",
+                reminded_count,
+                salon.id,
+            )
+        except Exception:
+            logger.exception(
+                "send_due_appointment_reminders_task: sweep failed for salon_id=%s", salon.id
+            )
