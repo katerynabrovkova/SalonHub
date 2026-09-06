@@ -5059,9 +5059,9 @@ entry, when that text is settled.
   the whole feature; a second same-day reminder is not worth the extra
   sweep, the extra dedup key, and the extra beat entry for the first
   tenant. It can be added later as its own decision if a salon asks for
-  it. The `config/celery.py` `beat_schedule` comment still reads
-  "Reminder tasks (24h/2h)" — that comment is corrected to describe the
-  single reminder in the code phase that implements this.
+  it. The `config/celery.py` `beat_schedule` comment that read
+  "Reminder tasks (24h/2h)" was rewritten to describe the single reminder
+  when the beat entry landed (commit `ecc6cfa`).
 
 - **Model: a model-A time sweep**, mirroring the two existing sweeps
   (`booking.tasks.expire_pending_payment_appointments` /
@@ -5120,10 +5120,12 @@ entry, when that text is settled.
   `dedup_key` formats). One reminder per appointment, ever: a re-run that
   re-selects the same appointment reproduces the identical key, and
   `record_and_dispatch_notification` swallows the resulting
-  `UniqueViolation` as a no-op. **This is the sole guard against
-  duplicate sends** — there is deliberately no `reminder_sent_at` or
-  equivalent flag on `Appointment` (that would be the stored send-state
-  the model-A decision above rejects).
+  `UniqueViolation` as a no-op. The constraint is the guard against a
+  *concurrent* run double-sending; an explicit pre-check keeps the
+  sequential-run count honest (see the two-level-dedup bullet below).
+  Either way there is deliberately no `reminder_sent_at` or equivalent
+  flag on `Appointment` (that would be the stored send-state the model-A
+  decision above rejects).
 
 - **Dispatch: reuse `record_and_dispatch_notification` unchanged.** It
   already binds `notification_id` / `salon_id` into local variables
