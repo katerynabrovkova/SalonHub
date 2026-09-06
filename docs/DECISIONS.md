@@ -5160,3 +5160,47 @@ entry, when that text is settled.
   so the static `APPOINTMENT_REMINDER` tuple in `_MESSAGES` moves to a
   `_build_message` special case. The exact wording is a client-visible
   decision recorded separately; it is **not** specified here.
+
+#### `APPOINTMENT_REMINDER` email content (client-visible)
+
+The counterpart to § Step (d) `BOOKING_CONFIRMED` email content, for the
+reminder trigger. English only — content localization is deferred to
+Stage 11.5 (§ Agreed stage order; § Content localization), and no
+per-guest or per-salon language is stored anywhere yet, so this is one
+fixed English string, the same basis as every other current message.
+
+- **Subject:** `"Reminder: your appointment tomorrow"`. "tomorrow" is
+  safe precisely because the sweep window is `(now + 24h, now + 25h]`
+  (§ Step (e), Window): the reminder always goes out 24–25 hours ahead,
+  which lands on the day before the appointment. The narrow window is
+  what makes "tomorrow" reliably true rather than accidentally-usually
+  true — a wider or lower-bounded window would break the wording.
+- **Body:**
+  ```
+  This is a reminder of your appointment at {salon name} on {date/time}.
+
+  View or cancel your booking: {manage link}
+  ```
+  - `{salon name}` = `appointment.salon.name`.
+  - `{date/time}` = `format_datetime_for_salon(appointment.start_datetime,
+    salon.timezone)` — the same locale-independent formatter and format
+    (`"Sat, 26 Sep 2026, 14:00"` — start time only, 24-hour clock, no
+    timezone label) introduced for `BOOKING_CONFIRMED`. This is that
+    function's second caller, which is what justified putting it in
+    `core` rather than inlining it at the `BOOKING_CONFIRMED` site.
+  - `{manage link}` = the same URL-path form as `BOOKING_CONFIRMED`:
+    `{FRONTEND_URL}/salons/<slug>/appointments/<id>/manage/<token>/`, with
+    the raw token from `derive_guest_token(appointment.id)`.
+  - The blank line (`\n\n`) between the two body sentences follows the
+    same paragraph-break convention as `BOOKING_CONFIRMED`.
+  - The "View or cancel your booking:" framing and wording are
+    deliberately identical to the confirmation email — the two emails link
+    to the same page for the same purpose, so they should read the same.
+- **Mechanism note (mirrors § Step (d)).** Like `BOOKING_CONFIRMED`,
+  `APPOINTMENT_REMINDER` moves out of the static `_MESSAGES` dict into a
+  `_build_message` special case that dereferences
+  `notification.appointment` for the salon name, local start time, slug,
+  id, and token. A reminder notification that somehow has no
+  `appointment` must **fail loud** (`ValueError`), exactly as
+  `BOOKING_CONFIRMED` does — a missing appointment is a bug, not a valid
+  blank send.
