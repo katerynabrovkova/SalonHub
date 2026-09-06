@@ -5153,6 +5153,25 @@ entry, when that text is settled.
     + `record_and_dispatch_notification(...)` + increment a count the
     task logs.
 
+- **Two-level dedup in the sweep (decided and implemented 06.09.2026).**
+  Refines the § Build order placeholder's assumption that dedup was
+  handled solely by the unique constraint inside
+  `record_and_dispatch_notification`. `send_due_appointment_reminders`
+  guards dedup at two levels:
+  - an explicit `Notification.objects.filter(...).exists()` check on the
+    reminder `dedup_key`, performed **under the per-row
+    `select_for_update` lock**, keeps the returned count honest for
+    sequential Beat runs — `record_and_dispatch_notification` returns
+    `None` whether it inserted a row or swallowed a `UniqueViolation`, so
+    the sweep cannot otherwise tell a fresh reminder from an
+    already-recorded one, and its return value (which the task logs) would
+    overcount on every rerun;
+  - `notification_trigger_channel_dedup_uniq` remains the real guard
+    against a *concurrent* run double-sending — the `.exists()` check is
+    not race-proof on its own.
+  This mirrors the "guard stops it, unique-violation branch is defence in
+  depth" split already documented on `record_and_dispatch_notification`.
+
 - **The reminder email text will be dynamic, not the current static
   `_MESSAGES` entry.** Like `BOOKING_CONFIRMED` (§ Step (d) mechanism
   note), the reminder body needs the salon name, the appointment's local

@@ -23,7 +23,7 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from booking.guest_tokens import derive_guest_token
-from booking.models import Appointment
+from booking.models import Appointment, AppointmentStatus
 from core.formatting import format_datetime_for_salon
 from notifications.channels.base import NotificationChannel
 from notifications.models import Notification, NotificationStatus, NotificationTrigger
@@ -260,3 +260,67 @@ def record_and_dispatch_notification(
     notification_id = notification.id
     salon_id = salon.id
     transaction.on_commit(lambda: send_notification_task.delay(notification_id, salon_id))
+
+
+def send_due_appointment_reminders(*, salon: Salon, now: dt.datetime) -> int:
+    """
+    docs/DECISIONS.md § Step (e) decisions — the day-before appointment
+    reminder sweep. Requires tenant context to already be bound
+    (core.tenancy.tenant_context); this function does not bind it itself,
+    the same convention as payments.services.flag_stuck_refunds and
+    booking.services.expire_overdue_appointments. Called once per salon by
+    the Celery task that owns the cross-salon loop and the tenant binding.
+
+    Candidate ids are found with an unlocked query, then each row is locked
+    and rechecked independently under its own transaction.atomic() — not one
+    lock over the whole batch — mirroring flag_stuck_refunds.
+
+    Window: start_datetime in (now + 24h, now + 25h] — lower bound strict,
+    upper bound inclusive. An appointment booked less than 24h before its
+    own start is always closer than 24h away, so it can never enter this
+    window on any run: short-notice bookings get no reminder by
+    construction, with no explicit check.
+
+    Status: CONFIRMED only (not ACTIVE_APPOINTMENT_STATUSES, which also
+    includes unpaid PENDING_PAYMENT holds).
+
+    Dedup: notification_trigger_channel_dedup_uniq remains the real guard
+    against a concurrent run double-sending. The explicit .exists() check
+    below only keeps the returned count honest for sequential runs —
+    record_and_dispatch_notification returns None whether it inserted or
+    swallowed the UniqueViolation, so without the pre-check this function
+    could not tell a fresh reminder from an already-recorded one. This is
+    the same "guard stops it, unique-violation branch is defence in depth"
+    split already documented on record_and_dispatch_notification.
+    """
+    candidate_ids = Appointment.objects.filter(
+        salon=salon,
+        status=AppointmentStatus.CONFIRMED,
+        start_datetime__gt=now + dt.timedelta(hours=24),
+        start_datetime__lte=now + dt.timedelta(hours=25),
+    ).values_list("id", flat=True)
+
+    count = 0
+    for appointment_id in candidate_ids:
+        with transaction.atomic():
+            appointment = Appointment.objects.select_for_update().get(
+                salon=salon, pk=appointment_id
+            )
+            if appointment.status != AppointmentStatus.CONFIRMED:
+                continue
+            dedup_key = f"appointment_reminder:appointment:{appointment.pk}"
+            already_reminded = Notification.objects.filter(
+                trigger_type=NotificationTrigger.APPOINTMENT_REMINDER,
+                channel=ChannelChoices.EMAIL,
+                dedup_key=dedup_key,
+            ).exists()
+            if already_reminded:
+                continue
+            record_and_dispatch_notification(
+                salon=salon,
+                trigger_type=NotificationTrigger.APPOINTMENT_REMINDER,
+                appointment=appointment,
+                dedup_key=dedup_key,
+            )
+            count += 1
+    return count
