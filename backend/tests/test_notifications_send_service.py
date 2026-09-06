@@ -16,7 +16,10 @@ MockNotificationChannel stands in for a real channel.
 import datetime as dt
 
 import pytest
+from django.conf import settings
 
+from booking.guest_tokens import derive_guest_token
+from core.formatting import format_datetime_for_salon
 from core.tenancy import tenant_context
 from notifications.channels.base import NotificationChannel
 from notifications.channels.mock import MockNotificationChannel
@@ -27,14 +30,18 @@ from notifications.services import (
     mark_notification_failed,
     send_notification,
 )
+from tests.conftest import make_appointment
 
 pytestmark = pytest.mark.django_db
 
 NOW = dt.datetime(2026, 9, 3, 12, 0, tzinfo=dt.UTC)
 EARLIER = dt.datetime(2026, 9, 1, 8, 0, tzinfo=dt.UTC)
+APPOINTMENT_START = dt.datetime(2026, 9, 26, 11, 0, tzinfo=dt.UTC)
 
+# BOOKING_CONFIRMED excluded: it is no longer a static _MESSAGES lookup (it
+# now builds a subject/body from a real appointment), so it has its own
+# dedicated tests below instead of running through this generic check.
 _IMPLEMENTED_TRIGGERS = [
-    NotificationTrigger.BOOKING_CONFIRMED,
     NotificationTrigger.BOOKING_CANCELLED,
     NotificationTrigger.APPOINTMENT_REMINDER,
     NotificationTrigger.PAYMENT_SUCCEEDED,
@@ -53,6 +60,7 @@ def _make_notification(
     *,
     trigger=NotificationTrigger.BOOKING_CONFIRMED,
     customer=None,
+    appointment=None,
     status=NotificationStatus.PENDING,
     sent_at=None,
     dedup_key="k",
@@ -61,6 +69,7 @@ def _make_notification(
         return Notification.objects.create(
             salon=salon,
             customer=customer,
+            appointment=appointment,
             trigger_type=trigger,
             channel="email",  # NotificationChannel.EMAIL value; the channel enum isn't under test
             dedup_key=dedup_key,
@@ -104,11 +113,76 @@ def test_build_message_raises_for_an_unimplemented_trigger():
         _build_message(Notification(trigger_type=NotificationTrigger.EMAIL_VERIFICATION))
 
 
+def test_build_message_for_booking_confirmed_builds_subject_body_and_link(
+    salon, customer, specialist, service
+):
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(salon, customer=customer, appointment=appointment)
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Your booking is confirmed"
+    assert salon.name in body
+    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
+    manage_link = (
+        f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+        f"/manage/{derive_guest_token(appointment.id)}/"
+    )
+    assert manage_link in body
+    assert "View or cancel" in body
+
+
+def test_build_message_for_booking_confirmed_link_carries_the_re_derived_token(
+    salon, customer, specialist, service
+):
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(salon, customer=customer, appointment=appointment)
+
+    with tenant_context(salon.id):
+        _subject, body = _build_message(notification)
+
+    expected_token = derive_guest_token(appointment.id)
+    expected_link = (
+        f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+        f"/manage/{expected_token}/"
+    )
+    assert expected_link in body
+
+
+def test_build_message_raises_for_booking_confirmed_without_an_appointment(salon, customer):
+    notification = _make_notification(salon, customer=customer, appointment=None)
+
+    with tenant_context(salon.id), pytest.raises(ValueError, match="appointment"):
+        _build_message(notification)
+
+
 # --- send_notification -------------------------------------------------
 
 
-def test_send_notification_transitions_pending_to_sent_and_delivers_to_the_client(salon, customer):
-    notification = _make_notification(salon, customer=customer)
+def test_send_notification_transitions_pending_to_sent_and_delivers_to_the_client(
+    salon, customer, specialist, service
+):
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(salon, customer=customer, appointment=appointment)
     channel = MockNotificationChannel()
 
     with tenant_context(salon.id):
@@ -121,8 +195,17 @@ def test_send_notification_transitions_pending_to_sent_and_delivers_to_the_clien
     assert channel.sent == [(customer.email, subject, body)]
 
 
-def test_send_notification_delivers_to_salon_contact_email_for_a_salon_recipient(salon):
-    notification = _make_notification(salon, customer=None)
+def test_send_notification_delivers_to_salon_contact_email_for_a_salon_recipient(
+    salon, customer, specialist, service
+):
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(salon, customer=None, appointment=appointment)
     channel = MockNotificationChannel()
 
     with tenant_context(salon.id):
@@ -159,7 +242,12 @@ def test_send_notification_is_a_noop_when_the_row_is_already_failed(salon, custo
 
 
 def test_send_notification_propagates_a_channel_failure_and_leaves_the_row_pending(salon, customer):
-    notification = _make_notification(salon, customer=customer)
+    # PAYMENT_SUCCEEDED, not BOOKING_CONFIRMED: this test is about channel
+    # failure handling, not message building, and PAYMENT_SUCCEEDED stays a
+    # static _MESSAGES lookup that needs no appointment.
+    notification = _make_notification(
+        salon, customer=customer, trigger=NotificationTrigger.PAYMENT_SUCCEEDED
+    )
 
     with tenant_context(salon.id), pytest.raises(RuntimeError, match="smtp down"):
         send_notification(

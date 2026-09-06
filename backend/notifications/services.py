@@ -19,9 +19,12 @@ directly.
 import datetime as dt
 
 import psycopg
+from django.conf import settings
 from django.db import IntegrityError, transaction
 
+from booking.guest_tokens import derive_guest_token
 from booking.models import Appointment
+from core.formatting import format_datetime_for_salon
 from notifications.channels.base import NotificationChannel
 from notifications.models import Notification, NotificationStatus, NotificationTrigger
 from notifications.models import NotificationChannel as ChannelChoices
@@ -48,11 +51,13 @@ def _resolve_recipient(notification: Notification) -> str:
 # The single builder seam (docs/DECISIONS.md § Stage 9 decisions, step
 # (b)). Inline text, one language, no template system. When Stage 11.5
 # localization lands, only _build_message's internals change.
+#
+# BOOKING_CONFIRMED has no entry here: it is built from the notification's
+# appointment in _build_message instead of being a static lookup (see
+# docs/DECISIONS.md § Step (d) decisions, guest-token delivery) — the
+# manage-link URL and the human-readable appointment time can't be fixed
+# strings.
 _MESSAGES: dict[str, tuple[str, str]] = {
-    NotificationTrigger.BOOKING_CONFIRMED.value: (
-        "Your booking is confirmed",
-        "Your booking has been confirmed.",
-    ),
     NotificationTrigger.BOOKING_CANCELLED.value: (
         "Your booking was cancelled",
         "Your booking has been cancelled.",
@@ -82,12 +87,35 @@ def _build_message(notification: Notification) -> tuple[str, str]:
     place the wording lives, so Stage 11.5 localization is a swap of this
     function's internals and nothing else on the send path.
 
-    Bodies are deliberately minimal. Real content — appointment date/time,
-    FRONTEND_URL manage/cancel links, the verification token — is wired in
-    at step (c)/(d) alongside each trigger's call site. A trigger_type with
-    no entry here (EMAIL_VERIFICATION today) raises rather than sending a
-    blank email: a missing message is a bug, not a valid empty send.
+    Every trigger but BOOKING_CONFIRMED is a fixed string from _MESSAGES.
+    BOOKING_CONFIRMED is built from the notification's appointment instead
+    (salon name, human-readable local time, the re-derived guest-access
+    manage link) — see docs/DECISIONS.md § Step (d) decisions. A
+    trigger_type with no entry in _MESSAGES and no special case here
+    (EMAIL_VERIFICATION today) raises rather than sending a blank email: a
+    missing message is a bug, not a valid empty send.
     """
+    if notification.trigger_type == NotificationTrigger.BOOKING_CONFIRMED:
+        appointment = notification.appointment
+        if appointment is None:
+            raise ValueError(
+                "BOOKING_CONFIRMED notification "
+                f"{notification.pk!r} has no appointment to build its message from"
+            )
+        salon = appointment.salon
+        when = format_datetime_for_salon(appointment.start_datetime, salon.timezone)
+        token = derive_guest_token(appointment.id)
+        link = (
+            f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+            f"/manage/{token}/"
+        )
+        subject = "Your booking is confirmed"
+        body = (
+            f"Your booking at {salon.name} on {when} is confirmed.\n\n"
+            f"View or cancel your booking: {link}"
+        )
+        return subject, body
+
     try:
         return _MESSAGES[str(notification.trigger_type)]
     except KeyError:
