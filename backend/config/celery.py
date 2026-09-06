@@ -13,8 +13,11 @@ app.autodiscover_tasks()
 # (docs/DECISIONS.md § Stage 8.G decisions) — 1800s (30 min), not 60s: its
 # 72-hour staleness threshold makes minute-level granularity pointless, and
 # a 30-minute cadence still catches a newly-stuck refund well within the
-# same hour it crosses the threshold. Reminder tasks (24h/2h) land in the
-# notifications stage.
+# same hour it crosses the threshold. Third: Stage 9(e)'s day-before
+# appointment-reminder sweep (docs/DECISIONS.md § Step (e) decisions) —
+# 3600s (hourly), a single reminder per appointment, scanning for CONFIRMED
+# appointments whose start_datetime falls in (now+24h, now+25h]; the 1-hour
+# window width is matched to the 1-hour beat period.
 app.conf.beat_schedule = {
     "expire-pending-payment-appointments": {
         "task": "booking.tasks.expire_pending_payment_appointments",
@@ -23,5 +26,9 @@ app.conf.beat_schedule = {
     "flag-stuck-refund-payments": {
         "task": "payments.tasks.flag_stuck_refund_payments",
         "schedule": 1800.0,
+    },
+    "send-due-appointment-reminders": {
+        "task": "notifications.tasks.send_due_appointment_reminders_task",
+        "schedule": 3600.0,
     },
 }
