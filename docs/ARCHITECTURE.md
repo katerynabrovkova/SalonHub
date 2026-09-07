@@ -125,8 +125,8 @@ Described, not modeled in code:
 - **Notification** — salon FK, recipient (customer or user), channel, trigger type,
   natural key for dedup (see § 9), status, sent timestamp.
 - **Review** — salon FK, appointment FK (**one-to-one** — see § 11), customer FK,
-  rating, text, created_at, `hidden_at` (nullable — staff can hide a review;
-  deletion is not exposed to anyone, see § 11).
+  denormalized specialist FK (grouped-by-specialist read path; snapshot of who
+  performed the visit — see § 11), rating, text, created_at.
 - **AI assistant conversation state is not a persisted entity at all** — held in
   Redis with a TTL, not a database table. See § 10.
 
@@ -490,18 +490,20 @@ malformed parameter must never be able to produce a real, paid appointment.
 
 ## 11. Reviews: eligibility gating
 
-A `Review` may be created only for a `Customer` that (a) is linked to a `User`
-(guests cannot review, per `docs/DECISIONS.md`), and (b) has an `Appointment` in
-`COMPLETED` status. `Review.appointment` is a **one-to-one** FK, not a general
-"has this customer ever visited" flag — this ties a review to a specific service
-experience and caps it at one review per completed visit, rather than one review per
-customer-salon relationship ever.
+A `Review` may be created for any `Customer` — guest or Account-linked — that has
+an `Appointment` in `COMPLETED` status. `Review.appointment` is a **one-to-one** FK,
+not a general "has this customer ever visited" flag — this ties a review to a specific
+service experience and caps it at one review per completed visit, rather than one
+review per customer-salon relationship ever. The one-to-one appointment anchor is also
+the anti-spam barrier, which is why no moderation layer exists.
 
 `COMPLETED` is reached automatically (§ 12), specifically so review eligibility
 never depends on a staff member remembering to mark a visit done; staff retain a
-manual override for correcting mistakes. Reviews are **immutable after posting** and
-the salon cannot post a public reply in v1; staff can hide a review (`hidden_at`),
-but deletion is not exposed to anyone (`docs/DECISIONS.md` § Business rules).
+manual override for correcting mistakes. Reviews are **immutable after posting**, the
+salon cannot post a public reply in v1, and deletion is exposed to no one (`PROTECT`).
+Reviews are displayed grouped by specialist; `Review` carries a denormalized
+`specialist` FK (a snapshot of who performed the visit) so that read path does not
+join through the appointment.
 
 ## 12. Background tasks: scheduled vs. event-driven
 

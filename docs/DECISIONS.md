@@ -192,9 +192,9 @@ on them.
   within the same salon. Never link by phone (reassigned, unverified,
   shared).
 - **Guests manage their appointment through a signed token link** (see
-  Stage 9 § guest-token delivery), not an account login. **Guests cannot
-  review** — review submission requires an authenticated `Account`-linked
-  `Customer`.
+  Stage 9 § guest-token delivery), not an account login. **Both guests and
+  Account-linked customers may leave reviews** — eligibility depends on a
+  `COMPLETED` appointment, not on having an account (see Stage 11).
 - **`AccountJWTAuthentication.get_user` checks the `identity_model:
   "account"` claim *before* the pk lookup.** `User` and `Account` have
   separate auto-increment sequences both starting at 1; the claim is the
@@ -287,13 +287,10 @@ describes the mechanisms; the numbers live here, stated once.
   Stage 19; the data model (Stage 2) and cancellation path (Stage 7/8)
   must support a salon-initiated, always-refunded cancellation.
 - **Reviews require a `COMPLETED` appointment; exactly one per
-  appointment.** Guests cannot review. Immutable once posted; no public
-  salon reply in v1; staff can hide (not delete).
+  appointment.** Immutable once posted; no public salon reply in v1.
 - **Appointment completion is an automatic scheduled transition**
   (`CONFIRMED → COMPLETED` once `end_datetime` passes), staff override in
   admin. Automatic because review eligibility depends on `COMPLETED`.
-  (Note: this transition is **not yet built** — see Stage 9 § Step (e),
-  which is why `REVIEW_REQUEST` has no trigger yet.)
 - **`NO_SHOW` is a staff-marked status with no automatic effects in v1** —
   deposit already forfeited by then. Record-keeping/statistics only.
 - **Booking window: min 3h lead time, max 60 days ahead.**
@@ -719,3 +716,46 @@ Deliberately skipped, not removed from the roadmap. Email remains the only
 channel. Rationale is recorded in § Notifications above. Stage 9 left the
 channel abstraction as the extension point, so the second adapter can be
 added later without reworking the send path. Next work is Stage 11 (Reviews).
+
+## Stage 11. Reviews
+
+- **Review is anchored to the appointment (one-to-one), not to the
+  customer-salon relationship.** The unique appointment anchor is the
+  anti-spam barrier: N reviews require N real `COMPLETED` visits. No
+  moderation layer is needed to keep volume honest.
+- **Both guests and Account-linked customers may submit a review**, gated
+  only on the appointment being `COMPLETED`. A guest who actually attended a
+  visit has as legitimate a basis to review as an account holder; the
+  account requirement from Stage 2 is dropped. At the model level both are a
+  `Customer`, so the write gate — not the model — enforces this.
+- **Public reviews are grouped by specialist**, because the salon is treated
+  as a marketplace of specialists a client returns to, rather than a catalog
+  of interchangeable services. Rejected alternative: grouping by service.
+  Grouping by service would survive a specialist leaving (their review block
+  would stay attached to the service); grouping by specialist means a
+  departed specialist's review block goes dead. Accepted deliberately as a
+  consequence of the marketplace-of-specialists model.
+- **A denormalized `specialist` FK is stored on `Review`** to serve the
+  grouped-by-specialist read path directly, without joining through the
+  appointment on every query. It is a snapshot of fact at review time, not a
+  cache: an appointment may later change its specialist, but the review must
+  remain about whoever actually performed the visit. Same snapshot principle
+  as `service_price` / `blocked_until`.
+- **`text` is optional (empty string, not null) and length-capped
+  (~2000 chars).** The cap is an input-size anti-spam measure living on the
+  field itself — it is not moderation. `rating` is 1–5 (enforced by the
+  existing check constraint).
+- **No moderation.** The Stage 2 `hidden_at` hide mechanism is removed
+  (RemoveField migration). A salon must not be able to hide unfavourable
+  reviews; a review exists precisely to show the truth. No placeholder field
+  is left behind — it can be added by migration if a real need appears.
+  Reviews remain immutable after posting, with no public salon reply in v1
+  and `PROTECT` on delete (Stage 2 decisions, unchanged).
+- **`COMPLETED` is produced by a time-based sweep** mirroring the Stage 7.F
+  expiry sweep and Stage 8.G stuck-refund sweep: an unlocked candidate query
+  (`CONFIRMED` with `end_datetime` in the past), then per-row
+  `atomic` + `select_for_update` + recheck `status == CONFIRMED` under the
+  lock before saving `status` only. Compared against `end_datetime` (not
+  `blocked_until`; precedent `booking/guest_tokens.py`). This is the
+  `CONFIRMED → COMPLETED` transition that Stage 9 deferred, and the point the
+  `REVIEW_REQUEST` trigger now attaches to.
