@@ -30,7 +30,7 @@ current stage. `Stage N` references elsewhere point at this list.
 7. Booking core — creation, statuses, cancellation, concurrency ✓
 8. Payments — provider abstraction, deposit, webhooks, refunds ✓
 9. Celery + notifications (email + channel abstraction) ✓
-10. Telegram adapter
+10. Second notification channel — DEFERRED (see § Notifications)
 11. Reviews — read + submission (completed-appointment gating)
 11.5. Content localization — per-salon language, translatable catalog /
     salon profile / notification templates. Numbered 11.5 so it doesn't
@@ -225,8 +225,18 @@ on them.
 ## Notifications
 
 - **Channel abstraction from day one**, only an email adapter built in
-  Stage 9. Telegram is a second adapter in its own stage (10) behind the
-  same interface.
+  Stage 9. A second adapter is deferred to its own future stage; the
+  channel type is not fixed (both Telegram and WhatsApp were considered).
+- **Why deferred (decided 07.09.2026):** a second channel is not just
+  "another adapter behind the same interface." WhatsApp requires the
+  Business Cloud API and pre-approved message templates — business-initiated
+  messages cannot be sent as free text outside a customer-initiated window,
+  which breaks the dumb-pipe `send(recipient, subject, body)` contract.
+  Both options also expand the booking contract (channel choice + phone
+  number). We do not build channel-selection logic while only one channel
+  actually exists. Stage 9 infrastructure (the NotificationChannel ABC, the
+  `_CHANNELS` registry, the channel enum) is left as the extension point;
+  the second adapter slots in without rewriting the mechanism.
 
 ## Frontend cadence
 
@@ -702,3 +712,10 @@ load-bearing shape.
 - **`REVIEW_REQUEST` trigger is deferred** — no `CONFIRMED → COMPLETED`
   transition exists in the codebase yet to fire it (the automatic
   completion transition in § Business rules is not built).
+
+## Stage 10 (second notification channel) — DEFERRED 07.09.2026
+
+Deliberately skipped, not removed from the roadmap. Email remains the only
+channel. Rationale is recorded in § Notifications above. Stage 9 left the
+channel abstraction as the extension point, so the second adapter can be
+added later without reworking the send path. Next work is Stage 11 (Reviews).
