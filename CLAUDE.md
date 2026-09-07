@@ -7,17 +7,14 @@ abstractions, or anything else that isn't a local implementation detail — read
 `docs/DECISIONS.md` first.** It is the source of truth for *why* the system is shaped the way
 it is. If you make a new architectural decision, record it there in the same change.
 
-**`docs/DECISIONS.md` records what was agreed, not what you concluded.** Never write an
-entry there to notarize a change you already made — if a decision needed approval and
-didn't get it first, the write-up must say so plainly (what changed, what alternative
-existed, that approval came after the fact), not read as if it were agreed in advance.
-
-**An entry records the decision and its date, not a review process.** Don't write that
-an entry "follows a design-analysis proposal that was reviewed and approved," or
-anything describing proposal/review/approval machinery, unless a written proposal
-document actually exists and the entry links to it — decisions here are agreed in
-discussion, not through a formal review pipeline. Describing a process that didn't
-happen is the same class of error as recording a fact that isn't true.
+**A `docs/DECISIONS.md` entry records what was agreed and its date — not what you
+concluded, and not a review process.** Never write an entry to notarize a change you
+already made: if a decision needed approval and didn't get it first, the write-up must
+say so plainly (what changed, what alternative existed, that approval came after the
+fact). Don't describe proposal/review/approval machinery ("reviewed and approved," etc.)
+that didn't happen — decisions here are agreed in discussion, not through a formal
+pipeline. Describing a process that didn't happen is the same error as recording a fact
+that isn't true.
 
 **The two docs split along "what" vs. "why," not by topic.** `docs/ARCHITECTURE.md`
 describes what this system is — domain entities, mechanisms, invariants — and stays at
@@ -61,21 +58,15 @@ When implementing:
 - Don't silently change architecture — if something in `docs/DECISIONS.md`
   needs to change, say so and update it in the same change.
 - Run the relevant tests/checks after implementing and report the results.
-- **An empty `git diff` proves nothing for a file `git status` reports as
-  `??` (untracked).** Git has no tracked baseline to compare against, so the
-  diff comes back empty regardless of the file's actual content — whether or
-  not a revert really happened. This comes up constantly mid-stage, since a
-  substep's new files are usually still untracked when you need to verify an
-  experiment (e.g. a deliberate break-it-to-prove-the-test-works exercise)
-  was fully undone. Verify a revert on an untracked file by reading it
-  directly and/or re-running the tests it affects, or commit (or `git add`)
-  before experimenting so a real baseline exists to diff against. The same
-  caution applies to proving a test goes red: a green (or red) run under
-  `-k`, `-x`, `-m`, or `--lf` only means "for whatever subset got selected,"
-  never the full claim — always confirm the specific test you were asked
-  about was actually collected and executed, by running it unfiltered or by
-  quoting its own verbatim pytest result line, not a summary of a
-  differently-scoped run.
+- **An empty `git diff` proves nothing for an untracked (`??`) file** — Git has no
+  baseline, so the diff is empty regardless of content, whether or not a revert
+  happened. This bites mid-stage, when a substep's new files are still untracked and you
+  need to verify an experiment (e.g. a deliberate break-it-to-prove-the-test exercise)
+  was undone. Verify by reading the file directly or re-running its tests, or `git add`
+  before experimenting so a baseline exists. Same caution for proving a test red/green:
+  a run under `-k`, `-x`, `-m`, or `--lf` only proves it "for whatever subset got
+  selected" — confirm the specific test actually ran, by running it unfiltered or
+  quoting its verbatim pytest result line, not a summary of a differently-scoped run.
 
 ## Project purpose
 
@@ -143,34 +134,23 @@ salons without rework.
   from a URL parameter, which a view could be tricked into using without the
   corresponding object-permission check ever running); `has_object_permission` is only
   a redundant confirmation once the object is fetched.
-- **A DRF `ModelSerializer`'s automatic `UniqueTogetherValidator` (built from
-  `Meta.constraints`, not only the legacy `Meta.unique_together`) silently does
-  nothing for any `(salon, X)` uniqueness constraint** — `salon` is always read-only
-  (it comes from the URL's tenant context, never client input) and carries no
-  Django-level default, and DRF's `get_unique_together_validators()` drops any
-  constraint whose fields aren't all present in the serializer's writable-or-defaulted
-  set, with no error raised. Every `TenantScopedModel` with a `(salon, X)` constraint
-  hits this. Add an explicit `validate_<field>` method that checks the
-  already-tenant-scoped manager instead (see `catalog/serializers.py`) — never rely on
-  the automatic validator for a tenant-scoped uniqueness constraint. That check is
-  check-then-write, not race-proof; the database constraint is the real guarantee, and
-  `core.exceptions.exception_handler` translates a resulting `UniqueViolation` into the
-  same structured 400 as a backstop (see `docs/DECISIONS.md` § Stage 4 decisions for
-  the full account).
-- **A relational serializer field declared with `many=True` is not what ends up in
-  `self.fields`.** DRF's `many_init()` wraps the declared field (e.g.
-  `PrimaryKeyRelatedField(many=True, ...)`) in a `ManyRelatedField`, which has no
-  `queryset` attribute of its own — the actual field instance holding the real
-  `queryset`, the one `to_internal_value()` runs against per item, lives on
-  `.child_relation`. A serializer that rebinds a tenant-scoped queryset in
-  `__init__` for a `many=True` field (the same pattern as `category_id` above, but
-  for a to-many relation) must target `self.fields["<name>"].child_relation.queryset`,
-  never `self.fields["<name>"].queryset` directly — the latter silently sets an
-  unused attribute on the wrapper and leaves validation running against the empty
-  class-body placeholder forever, rejecting every id from every tenant, including
-  the current one. Found via `specialists/serializers.py`'s `services` field (Stage 5
-  sub-step 4) failing its own same-salon test until this was corrected. This will
-  recur on every future `many=True` tenant-scoped relation.
+- **A DRF `ModelSerializer`'s automatic `UniqueTogetherValidator` silently does nothing
+  for any `(salon, X)` uniqueness constraint** — `salon` is read-only with no default,
+  and DRF drops any constraint whose fields aren't all writable-or-defaulted, with no
+  error raised. Every `TenantScopedModel` with a `(salon, X)` constraint hits this.
+  Never rely on the automatic validator: add an explicit `validate_<field>` that checks
+  the already-tenant-scoped manager (see `catalog/serializers.py`). That check isn't
+  race-proof — the DB constraint is the real guarantee, and
+  `core.exceptions.exception_handler` translates the resulting `UniqueViolation` into a
+  structured 400 as a backstop. Full mechanism: `docs/DECISIONS.md` § Stage 4.
+- **A `many=True` relational field is not what ends up in `self.fields`.** DRF wraps it
+  in a `ManyRelatedField`; the instance holding the real `queryset` lives on
+  `.child_relation`. When rebinding a tenant-scoped queryset in `__init__` for a
+  `many=True` field, target `self.fields["<name>"].child_relation.queryset`, never
+  `self.fields["<name>"].queryset` — the latter silently sets an unused attribute and
+  leaves validation running against the empty class-body placeholder, rejecting every id
+  from every tenant. Recurs on every future `many=True` tenant-scoped relation. Full
+  account: `docs/DECISIONS.md` § Stage 5.
 
 ## Coding conventions
 
