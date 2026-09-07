@@ -17,7 +17,12 @@ app.autodiscover_tasks()
 # appointment-reminder sweep (docs/DECISIONS.md § Step (e) decisions) —
 # 3600s (hourly), a single reminder per appointment, scanning for CONFIRMED
 # appointments whose start_datetime falls in (now+24h, now+25h]; the 1-hour
-# window width is matched to the 1-hour beat period.
+# window width is matched to the 1-hour beat period. Fourth: Stage 11's
+# CONFIRMED -> COMPLETED completion sweep — 900s (15 min). Not minute-level
+# like the expiry sweep (completion holds no slot and loses no money — a
+# finished visit just shows COMPLETED and becomes review-eligible slightly
+# later), but tighter than the hourly reminder so the review-eligibility
+# point appears soon after a visit ends.
 app.conf.beat_schedule = {
     "expire-pending-payment-appointments": {
         "task": "booking.tasks.expire_pending_payment_appointments",
@@ -30,5 +35,9 @@ app.conf.beat_schedule = {
     "send-due-appointment-reminders": {
         "task": "notifications.tasks.send_due_appointment_reminders_task",
         "schedule": 3600.0,
+    },
+    "complete-finished-appointments": {
+        "task": "booking.tasks.complete_finished_appointments",
+        "schedule": 900.0,
     },
 }

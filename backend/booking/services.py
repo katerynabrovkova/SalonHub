@@ -233,3 +233,44 @@ def expire_overdue_appointments(*, salon: Salon, now: dt.datetime) -> int:
             appointment.save(update_fields=["status"])
             expired_count += 1
     return expired_count
+
+
+def complete_overdue_appointments(*, salon: Salon, now: dt.datetime) -> int:
+    """
+    docs/DECISIONS.md § Stage 11. Requires tenant context to already be
+    bound (core.tenancy.tenant_context) — this function does not bind it
+    itself, same convention as expire_overdue_appointments. Called once per
+    salon by booking.tasks.complete_finished_appointments, which owns the
+    cross-salon loop and the tenant-context binding.
+
+    Candidate ids are found with an unlocked query, then each row is locked
+    and rechecked independently under its own transaction.atomic() — not one
+    lock over the whole batch — so a single row can't hold up or roll back
+    every other row in the same sweep. A row whose recheck finds it's no
+    longer CONFIRMED (already CANCELLED, or already COMPLETED by an
+    overlapping run) is silently skipped, not raised: same unattended-
+    background-cleanup reasoning as expire_overdue_appointments, and the
+    skip is what makes a redelivered/overlapping run idempotent.
+
+    The COMPLETED status is itself the natural dedup — a row only leaves
+    CONFIRMED once — so this sweep needs no explicit flag or pre-check,
+    unlike flag_stuck_refunds (flagged_for_review) or
+    send_due_appointment_reminders (an .exists() check on the notification
+    journal).
+    """
+    candidate_ids = Appointment.objects.filter(
+        salon=salon, status=AppointmentStatus.CONFIRMED, end_datetime__lte=now
+    ).values_list("id", flat=True)
+
+    completed_count = 0
+    for appointment_id in candidate_ids:
+        with transaction.atomic():
+            appointment = Appointment.objects.select_for_update().get(
+                salon=salon, pk=appointment_id
+            )
+            if appointment.status != AppointmentStatus.CONFIRMED:
+                continue
+            appointment.status = AppointmentStatus.COMPLETED
+            appointment.save(update_fields=["status"])
+            completed_count += 1
+    return completed_count
