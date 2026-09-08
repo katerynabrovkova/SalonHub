@@ -23,9 +23,19 @@ def test_one_review_per_appointment(salon, customer, specialist, service) -> Non
     )
 
     with tenant_context(salon.id):
-        Review.objects.create(salon=salon, appointment=appointment, customer=customer, rating=5)
+        Review.objects.create(
+            salon=salon,
+            appointment=appointment,
+            customer=customer,
+            specialist=specialist,
+            rating=5,
+        )
         with pytest.raises(IntegrityError):
             with transaction.atomic():
                 Review.objects.create(
-                    salon=salon, appointment=appointment, customer=customer, rating=4
+                    salon=salon,
+                    appointment=appointment,
+                    customer=customer,
+                    specialist=specialist,
+                    rating=4,
                 )
