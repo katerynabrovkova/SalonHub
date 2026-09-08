@@ -49,6 +49,32 @@ class InvalidStateTransitionError(DomainError):
     default_message = "This action isn't valid for the current state."
 
 
+class ReviewRequiresCompletedAppointmentError(DomainError):
+    """
+    docs/DECISIONS.md § Stage 11 Part 2: a review may only be left for a
+    COMPLETED visit. 403, not 400 — the request is well-formed and the
+    caller owns the appointment; it is the appointment's state that forbids
+    the action. Raised from ReviewCreateSerializer.validate().
+    """
+
+    code = "review_requires_completed_appointment"
+    status_code = status.HTTP_403_FORBIDDEN
+    default_message = "This appointment is not completed yet; a review requires a completed visit."
+
+
+class DuplicateReviewError(DomainError):
+    """
+    docs/DECISIONS.md § Stage 11 Part 2: one review per appointment. The
+    Review.appointment OneToOne is the real guarantee, but a bare
+    UniqueViolation is translated to 400 by the handler below — this
+    explicit serializer-level check raises the intended 409 instead.
+    """
+
+    code = "duplicate_review"
+    status_code = status.HTTP_409_CONFLICT
+    default_message = "A review for this appointment already exists."
+
+
 class PaymentProviderError(DomainError):
     """
     docs/DECISIONS.md § Stage 8.C decisions: provider.start_payment() raised
