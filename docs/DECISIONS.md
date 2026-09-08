@@ -31,7 +31,7 @@ current stage. `Stage N` references elsewhere point at this list.
 8. Payments — provider abstraction, deposit, webhooks, refunds ✓
 9. Celery + notifications (email + channel abstraction) ✓
 10. Second notification channel — DEFERRED (see § Notifications)
-11. Reviews — read + submission (completed-appointment gating)
+11. Reviews — read + submission (completed-appointment gating) ✓
 11.5. Content localization — per-salon language, translatable catalog /
     salon profile / notification templates. Numbered 11.5 so it doesn't
     renumber every existing `Stage N` reference.
@@ -831,3 +831,12 @@ added later without reworking the send path. Next work is Stage 11 (Reviews).
   never appear anywhere in the response.
 - **No pagination in v1.** A deliberate scope decision, not an oversight — to
   be revisited if a salon accumulates a large volume of reviews per specialist.
+
+### Stage 11 status: closed
+
+Both parts are complete: (1) the `CONFIRMED → COMPLETED` appointment sweep,
+(2) the review write endpoint and the public grouped read endpoint. Review
+update and delete are out of scope — reviews are immutable after posting
+(Stage 2 decision, reaffirmed in the Stage 11 reconciliation). Final gate
+clean: full suite 568/568, `ruff check`, `ruff format --check`, `mypy`, and
+`makemigrations --check` all pass.
