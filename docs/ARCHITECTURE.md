@@ -52,7 +52,10 @@ Described, not modeled in code:
 
 - **Salon** — tenant root. Everything else scopes to it via a `salon` FK. `is_active`
   (default `True`) gates tenant resolution — an inactive or unknown slug resolves the
-  same way, `404` (§ 3, `docs/DECISIONS.md` § Stage 3 decisions).
+  same way, `404` (§ 3, `docs/DECISIONS.md` § Stage 3 decisions). `name` and `about`
+  (salon-profile free text, blank/optional, added in Stage 11.5) are translatable
+  `JSONField`s — `{lang_code: string}` dicts, `en` fallback — per § Content
+  localization.
 - **User** — Django auth identity, platform-wide (not salon-scoped). Post-3-R it
   authenticates only via the session-based Django `/admin/` (platform operators) — it
   is not the customer or salon-staff login. `email_verified_at` (nullable) has no
@@ -67,13 +70,16 @@ Described, not modeled in code:
   Identity. All customer-facing domain rows (appointments, reviews) hang off this, not
   off `User` or `Account`. A registered customer is linked from an `Account` via
   `Account.customer` (above), not via any FK on this model.
-- **ServiceCategory** — salon FK, name, ordering.
+- **ServiceCategory** — salon FK, name, ordering. `name` is a translatable
+  `JSONField` (Stage 11.5, § Content localization).
 - **Service** — salon FK, category FK, name, duration, price, buffer minutes (time
   blocked on the calendar after the appointment for cleanup/room turnaround, never
   itself offered as a bookable start — see § 6–7; kept per-service, not salon-wide,
-  because turnaround differs by service).
+  because turnaround differs by service). `name` is a translatable `JSONField`
+  (Stage 11.5, § Content localization).
 - **Specialist** — salon FK, name, bio, is_active (Stage 5). No login in this build
-  (`docs/DECISIONS.md` § Business rules).
+  (`docs/DECISIONS.md` § Business rules). `bio` is a translatable `JSONField`
+  (Stage 11.5, § Content localization).
 - **`Service` and `Specialist` rows can never be hard-deleted once an `Appointment`
   references them** — the FK would either cascade-delete real booking history or
   require `SET NULL`/`PROTECT` gymnastics that make "delete" mean something
@@ -459,6 +465,13 @@ duplicate trigger (e.g. a webhook firing twice) cannot produce two emails for th
 event. Reusing the same pattern in two independent apps (`payments`, `notifications`)
 is intentional consistency, not coincidence.
 
+**Message language (Stage 11.5):** `_build_message` renders each notification in the
+recipient's language (`Customer.preferred_language`, `en` fallback) — the templates in
+`_MESSAGES` and the dynamic builders become per-language-keyed. Human-readable dates in
+those emails come from `core/formatting.py`, which carries hardcoded English **and**
+Ukrainian weekday/month tables (never the OS locale) and selects one by language; the
+component order is identical across languages. See § Content localization.
+
 ## 10. AI assistant: grounding, session memory, booking handoff
 
 **Grounding:** the assistant is grounded in the salon's real catalog via read-only
@@ -564,6 +577,30 @@ subclasses into the § 13 JSON envelope and the right HTTP status — that trans
 happens once, at the API boundary, not scattered per-view. Unhandled/unexpected
 exceptions become a generic 500 body in production (no stack trace leaked to the
 client); the full traceback is still logged server-side.
+
+---
+
+## Content localization
+
+Salon-authored, client-facing text is translatable (Stage 11.5). Supported languages
+are `en` and `uk` for now, with `en` as the single global fallback; there is no
+per-salon default-language field. Each translatable field is a `JSONField` storing a
+`{lang_code: string}` dict rather than per-language columns or a translation table, so
+adding a language needs no migration. Translatable fields: `ServiceCategory.name`,
+`Service.name`, `Salon.name`, `Salon.about` (new, 2000-char-per-language DB check),
+`Specialist.bio`, and the notification message templates (§ 9). Not translatable —
+customer-authored or internal-only: `Review.text`, `TimeOff.reason`,
+`Appointment.cancellation_reason`.
+
+`(salon, name)` uniqueness on `ServiceCategory` / `Service` is checked per populated
+language key, not against one canonical language — a value shared under the same key
+within a salon is a conflict. The email language a customer receives is
+`Customer.preferred_language` (new field, set at booking, `en` fallback). Date
+rendering for emails lives in `core/formatting.py`, now with English and Ukrainian
+weekday/month tables (still never OS-locale dependent).
+
+Out of scope: frontend UI-string translation (a separate frontend i18n concern) and
+any staff/admin interface language. Full contract: `docs/DECISIONS.md` § Stage 11.5.
 
 ---
 

@@ -448,8 +448,13 @@ describes the mechanisms; the numbers live here, stated once.
 ## Content localization (deferred to Stage 11.5)
 
 - **Deferred to its own stage** (11.5), after the backend model/API stages.
-  Recorded now so the catalog model isn't bolted onto later. Guest language
-  is not stored anywhere yet; all emails are English for now.
+  Recorded early so the catalog model wasn't bolted onto later.
+- **Superseded by § Stage 11.5 (Content localization) below**, which is now
+  the load-bearing contract. The early-placeholder wording here — "guest
+  language is not stored anywhere yet; all emails are English for now" — no
+  longer holds: guest language lives on `Customer.preferred_language` and
+  emails render in `en` or `uk`. Kept only as the pointer to the full
+  section.
 
 ## Stage 5 (specialists API)
 
@@ -840,3 +845,123 @@ update and delete are out of scope — reviews are immutable after posting
 (Stage 2 decision, reaffirmed in the Stage 11 reconciliation). Final gate
 clean: full suite 568/568, `ruff check`, `ruff format --check`, `mypy`, and
 `makemigrations --check` all pass.
+
+## Stage 11.5 (Content localization)
+
+Decided 08.09.2026 — the contract was agreed before any code, per the
+stage-by-stage workflow. This section is the spec the implementation
+sub-steps build to; it supersedes the early-placeholder § Content
+localization note above.
+
+### Languages and fallback
+
+- **English (`en`) and Ukrainian (`uk`) only, for now.** The set is expected
+  to grow; nothing in the storage or API shape may assume exactly these two.
+- **English is the single global fallback language.** A missing or empty
+  translation for the requested language falls back to `en`. There is **no
+  per-salon default-language field** — the demo "universal" salon and every
+  future tenant fall back the same way, through `en`. Rejected: a
+  `Salon.default_language` column — it adds a second fallback axis (salon
+  default vs. global default) with no concrete requirement for it yet, and
+  every salon in scope authors `en` content anyway.
+
+### Storage format: JSONField dict of language code → string
+
+- **Each translatable text field becomes a `JSONField` holding a
+  `{lang_code: string}` dict**, e.g. `{"en": "Haircut", "uk": "Стрижка"}`.
+- Rejected: **one column per language** (`name_en`, `name_uk`, …) — every new
+  language is then a schema migration across every translatable model.
+- Rejected: **a separate per-model translation table** (the
+  `django-modeltranslation` / `django-parler` shape) — more join complexity
+  and more moving parts than the language list's volatility justifies here.
+- The language list is not fixed yet; `JSONField` absorbs a new language with
+  no migration. Trade-off accepted: no DB-level typing of the dict shape, so
+  validation (known language keys, string values, per-language length) lives
+  in the serializer / model `clean`, with DB `CheckConstraint`s only where
+  one is naturally expressible (see `Salon.about`).
+
+### Fields becoming translatable (`JSONField`)
+
+- `catalog.ServiceCategory.name`
+- `catalog.Service.name`
+- `tenants.Salon.name`
+- `tenants.Salon.about` — **new field.** Salon-profile free text; there is no
+  description/bio field on `Salon` today. Blank/optional. Each per-language
+  value is capped at 2000 characters by a DB-level `CheckConstraint`, the
+  same mechanism as `reviews.Review.text`'s `review_text_max_length_2000`
+  (`Length` lookup registered on the field; constraint expressed against the
+  value's `__length__lte`). The cap must hold for every populated language
+  key, not just `en`.
+- `specialists.Specialist.bio`
+- **Notification message templates** — the `(subject, body)` strings
+  currently inline in `notifications._MESSAGES` and built in
+  `notifications._build_message`. The module already anticipates this ("when
+  Stage 11.5 localization lands, only `_build_message`'s internals change").
+  The dynamic builders (`BOOKING_CONFIRMED`, `APPOINTMENT_REMINDER`) keep
+  their structure — only the literal English fragments become
+  per-language-keyed; the interpolated values (`salon.name`, formatted time,
+  manage link) are resolved in the recipient's language.
+
+### Fields explicitly NOT translated
+
+Customer-authored or internal-only text, never salon-authored content:
+
+- `reviews.Review.text` — written by one customer in one language.
+- `specialists.TimeOff.reason` — internal scheduling note.
+- `booking.Appointment.cancellation_reason` — internal audit note.
+
+Recorded so a later reader does not mistake the omission for an oversight.
+
+### Uniqueness on `(salon, name)` translatable fields
+
+- `ServiceCategory.name` and `Service.name` carry `(salon, name)` uniqueness
+  (`servicecategory_salon_name_uniq`, `service_salon_name_uniq`).
+- **Uniqueness is checked per individual populated language key**, not
+  against one canonical language. Two `Service` rows in the same salon that
+  both have `uk: "Стрижка"` collide — even if their `en` values differ or one
+  `en` is empty. Any shared non-empty value under the same language key
+  within a salon is a conflict.
+- This is deliberately stricter than "the `en` values must differ." The
+  concrete enforcement mechanism — serializer-level validation against the
+  tenant-scoped manager (the § Stage 4 `validate_<field>` pattern, which
+  `(salon, X)` constraints already require because DRF drops the automatic
+  `UniqueTogetherValidator`), a DB-level expression constraint, or both — is
+  a design decision for the implementation sub-step, not fixed here. The
+  Stage 4 precedent (explicit serializer check plus the `UniqueViolation →
+  400` backstop in `core.exceptions.exception_handler`) is the starting
+  point.
+
+### Email language: `Customer.preferred_language`
+
+- **New field `accounts.Customer.preferred_language`**, set at booking time.
+  It selects the language a notification email is rendered in.
+- Falls back to `en` when unset (a pre-existing guest row, or a booking flow
+  that did not capture it) — consistent with the global `en` fallback above.
+- This is where guest language now lives — exactly one home, on `Customer` —
+  replacing the deferred "guest language is not stored anywhere yet"
+  placeholder.
+
+### Date formatting in localized emails (`core/formatting.py`)
+
+- `format_datetime_for_salon` currently renders e.g.
+  `"Sat, 26 Sep 2026, 14:00"` from **deliberately hardcoded English weekday /
+  month tables** — never `%a`/`%b`, which follow the server's OS locale
+  (§ Stage 9; the `test_english_names_regardless_of_locale` guard).
+- **Ukrainian weekday / month abbreviation tables are added alongside the
+  English ones**, same hardcoded-table approach — still never OS-locale
+  dependent. The function takes a language argument and selects the table.
+- **Component order is identical across languages** — only the day and month
+  names are translated, not the layout. `"Sat, 26 Sep 2026, 14:00"` →
+  `"Сб, 26 вер. 2026, 14:00"` (24-hour, no timezone label, unchanged).
+
+### Explicitly out of scope for Stage 11.5
+
+- **Frontend UI-string translation** — labels, buttons, static interface
+  copy. That is a separate frontend i18n concern (e.g. `next-intl`), not a
+  backend data concern, and lands with the frontend stages.
+- **Staff / admin-panel interface language** — also a future frontend
+  concern, unrelated to the backend content fields above.
+
+Stage 11.5 is strictly the backend content-data layer: which salon-authored
+text is translatable, how it is stored and queried, and which language an
+email goes out in.
