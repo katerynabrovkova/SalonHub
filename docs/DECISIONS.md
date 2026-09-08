@@ -759,3 +759,45 @@ added later without reworking the send path. Next work is Stage 11 (Reviews).
   `blocked_until`; precedent `booking/guest_tokens.py`). This is the
   `CONFIRMED → COMPLETED` transition that Stage 9 deferred, and the point the
   `REVIEW_REQUEST` trigger now attaches to.
+
+### Part 2: Review CRUD API
+
+**Write endpoint: `POST /api/v1/salons/<slug>/appointments/<appointment_id>/review/`**
+
+- **Auth is a new dedicated permission class**, not `HasValidGuestToken`. It
+  accepts either the guest token (`X-Guest-Token` header, the same
+  appointment-scoped signed-token mechanism as the existing booking endpoints —
+  `booking/guest_tokens.py`) or an authenticated `Account` (JWT). It is not
+  `HasValidGuestToken` because that class is scoped to the retrieve-family
+  actions (`view` / `cancel` / `pay`) on an already-existing object, whereas
+  review-create splits its responsibilities differently: the **identity /
+  ownership check** is the permission class's job, and the **eligibility check**
+  (appointment `status == COMPLETED`) is the serializer's `validate()`, not the
+  permission class. These two checks are kept deliberately separate.
+- **Ownership failure → 404, not 403.** If the appointment does not belong to
+  the caller — wrong guest token, or an `Account` that does not own it — the
+  response is `404`, identical to a nonexistent appointment id. This is an
+  identity/ownership boundary, not a business-rule boundary: a `403` here would
+  let a caller enumerate which appointment ids belong to other customers.
+- **Eligibility failure → 403.** If the appointment belongs to the caller but
+  its `status != COMPLETED`, the response is `403` with a clear message stating
+  that a review requires a completed visit. Raised in the serializer's
+  `validate()`.
+- **Duplicate → 409.** A second review for the same appointment is rejected
+  with `409`, backed by the existing `Review.appointment` one-to-one
+  uniqueness (translated from the `UniqueViolation` by
+  `core.exceptions.exception_handler`, the same backstop pattern as Stage 4).
+- **Success → 201 with the full serialized `Review`** (`id`, `rating`, `text`,
+  `specialist`, `created_at`, and the rest of the row), not a bare confirmation
+  message. Consistent with the other create endpoints, lets a frontend render
+  the posted review without a refetch, and lets tests assert on response
+  content directly.
+
+**Read endpoint: `GET /api/v1/salons/<slug>/reviews/`**
+
+- **Public, no auth.**
+- **Response is grouped by specialist**: a list of `{specialist, reviews}`
+  blocks, matching the Stage 11 decisions above (denormalized `specialist` FK
+  on `Review`, grouped display by specialist rather than by service).
+- **No pagination in v1.** A deliberate scope decision, not an oversight — to
+  be revisited if a salon accumulates a large volume of reviews per specialist.
