@@ -67,7 +67,9 @@ def _reminder_rows(salon):
         )
 
 
-def test_task_calls_service_once_per_salon_with_a_single_shared_now(salon, other_salon, monkeypatch):
+def test_task_calls_service_once_per_salon_with_a_single_shared_now(
+    salon, other_salon, monkeypatch
+):
     calls: list[tuple[int, dt.datetime]] = []
 
     def _fake(*, salon, now):

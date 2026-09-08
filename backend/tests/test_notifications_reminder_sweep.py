@@ -68,7 +68,13 @@ def _new_specialist(salon, name):
         (AT_25H, 1),
         (JUST_OUTSIDE_UPPER, 0),
     ],
-    ids=["at-now+24h-excluded", "now+24h+1min", "mid-window", "at-now+25h-included", "now+25h+1min"],
+    ids=[
+        "at-now+24h-excluded",
+        "now+24h+1min",
+        "mid-window",
+        "at-now+25h-included",
+        "now+25h+1min",
+    ],
 )
 def test_window_bounds_lower_strict_upper_inclusive(
     salon, specialist, service, customer, django_capture_on_commit_callbacks, start, expected
