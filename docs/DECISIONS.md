@@ -780,18 +780,36 @@ added later without reworking the send path. Next work is Stage 11 (Reviews).
   identity/ownership boundary, not a business-rule boundary: a `403` here would
   let a caller enumerate which appointment ids belong to other customers.
 - **Eligibility failure → 403.** If the appointment belongs to the caller but
-  its `status != COMPLETED`, the response is `403` with a clear message stating
-  that a review requires a completed visit. Raised in the serializer's
-  `validate()`.
-- **Duplicate → 409.** A second review for the same appointment is rejected
-  with `409`, backed by the existing `Review.appointment` one-to-one
-  uniqueness (translated from the `UniqueViolation` by
-  `core.exceptions.exception_handler`, the same backstop pattern as Stage 4).
+  its `status != COMPLETED`, the serializer's `validate()` raises
+  `ReviewRequiresCompletedAppointmentError` (`core/exceptions.py`, `403`, code
+  `review_requires_completed_appointment`) with a message stating that a review
+  requires a completed visit.
+- **Duplicate → 409, from an explicit check.** The serializer's `validate()`
+  checks for an existing `Review` on the appointment and raises
+  `DuplicateReviewError` (`core/exceptions.py`, `409`, code `duplicate_review`)
+  before any write is attempted — this is the primary path. The
+  `Review.appointment` one-to-one DB constraint stays purely as a
+  race-condition backstop for the narrow window between that check and the
+  insert: if a concurrent request wins and the constraint fires instead, the
+  `UniqueViolation` surfaces as `400 unique_violation` through the Stage 4
+  `UniqueViolation → 400` translation in `core.exceptions.exception_handler`,
+  not as `409`.
 - **Success → 201 with the full serialized `Review`** (`id`, `rating`, `text`,
   `specialist`, `created_at`, and the rest of the row), not a bare confirmation
   message. Consistent with the other create endpoints, lets a frontend render
   the posted review without a refetch, and lets tests assert on response
   content directly.
+- **New `DomainError` subclasses (`core/exceptions.py`)** carrying this
+  endpoint's non-400 outcomes, each surfaced by `exception_handler` at its own
+  `status_code`: `ReviewRequiresCompletedAppointmentError` (`403`, code
+  `review_requires_completed_appointment`) and `DuplicateReviewError` (`409`,
+  code `duplicate_review`).
+- **`rating` / `text` bounds are enforced at the serializer field level**
+  (`IntegerField(min_value=1, max_value=5)`, `CharField(max_length=2000)`) so an
+  out-of-range value is a `400`, not a `500`: the model `CheckConstraint`s
+  (`review_rating_between_1_and_5`, `review_text_max_length_2000`) surface as a
+  `CheckViolation`, which `exception_handler` does not translate. The DB
+  constraints remain the backstop.
 
 **Read endpoint: `GET /api/v1/salons/<slug>/reviews/`**
 
