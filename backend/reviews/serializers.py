@@ -15,6 +15,31 @@ from rest_framework import serializers
 from booking.models import AppointmentStatus
 from core.exceptions import DuplicateReviewError, ReviewRequiresCompletedAppointmentError
 from reviews.models import REVIEW_TEXT_MAX_LENGTH, Review
+from specialists.models import Specialist
+
+
+class ReviewPublicSerializer(serializers.ModelSerializer):
+    """
+    Public read representation for the grouped list endpoint
+    (docs/DECISIONS.md § Stage 11 Part 2). Deliberately omits `customer`
+    (and every other identifying field) — the list endpoint is
+    unauthenticated. Separate from ReviewCreateSerializer, which is
+    write-oriented and exposes `customer` / `salon` / `appointment`.
+    """
+
+    class Meta:
+        model = Review
+        fields = ["id", "rating", "text", "created_at"]
+        read_only_fields = fields
+
+
+class ReviewSpecialistSerializer(serializers.ModelSerializer):
+    """The `specialist` block of each group in the public list response."""
+
+    class Meta:
+        model = Specialist
+        fields = ["id", "name"]
+        read_only_fields = fields
 
 
 class ReviewCreateSerializer(serializers.ModelSerializer):

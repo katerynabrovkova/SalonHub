@@ -1,5 +1,7 @@
 """
-Review write endpoint (docs/DECISIONS.md § Stage 11 Part 2):
+Review endpoints (docs/DECISIONS.md § Stage 11 Part 2).
+
+Write:
 
     POST /api/v1/salons/<slug>/appointments/<appointment_id>/review/
 
@@ -23,13 +25,20 @@ from django.db.models import QuerySet
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.exceptions import NotFound
+from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from booking.models import Appointment
 from reviews.models import Review
 from reviews.permissions import CanSubmitAppointmentReview
-from reviews.serializers import ReviewCreateSerializer
+from reviews.serializers import (
+    ReviewCreateSerializer,
+    ReviewPublicSerializer,
+    ReviewSpecialistSerializer,
+)
+from specialists.models import Specialist
 
 
 class ReviewCreateView(generics.CreateAPIView):
@@ -63,3 +72,40 @@ class ReviewCreateView(generics.CreateAPIView):
         if appointment.customer_id != self.request.user.customer_id:
             raise NotFound()
         return appointment
+
+
+class ReviewListView(APIView):
+    """
+    GET /api/v1/salons/<slug>/reviews/ — public, unpaginated, grouped by
+    specialist (docs/DECISIONS.md § Stage 11 Part 2). Returns a bare list of
+    ``{"specialist": {...}, "reviews": [...]}`` groups, one per specialist
+    with at least one review, ordered by review count descending (tie:
+    lower specialist id first). Reviews within a group are newest-first.
+
+    One query: every tenant review with its specialist joined; grouping and
+    ordering happen in Python (per-salon review volume is assumed modest —
+    the same premise that made pagination unnecessary). Tenant scoping is
+    the ambient TenantResolutionMiddleware context, like every view here.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request, *args: object, **kwargs: object) -> Response:
+        reviews = Review.objects.select_related("specialist").order_by("-created_at", "-id")
+
+        grouped: dict[int, list[Review]] = {}
+        specialists: dict[int, Specialist] = {}
+        for review in reviews:
+            grouped.setdefault(review.specialist_id, []).append(review)
+            specialists.setdefault(review.specialist_id, review.specialist)
+
+        ordered = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
+
+        payload = [
+            {
+                "specialist": ReviewSpecialistSerializer(specialists[specialist_id]).data,
+                "reviews": ReviewPublicSerializer(rows, many=True).data,
+            }
+            for specialist_id, rows in ordered
+        ]
+        return Response(payload)
