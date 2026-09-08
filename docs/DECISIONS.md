@@ -816,6 +816,18 @@ added later without reworking the send path. Next work is Stage 11 (Reviews).
 - **Public, no auth.**
 - **Response is grouped by specialist**: a list of `{specialist, reviews}`
   blocks, matching the Stage 11 decisions above (denormalized `specialist` FK
-  on `Review`, grouped display by specialist rather than by service).
+  on `Review`, grouped display by specialist rather than by service). A
+  specialist with no reviews does not appear.
+- **Group ordering** is by review count descending — the most-reviewed
+  specialist first. Ties (equal review counts) break by lower `specialist` id
+  first, so ordering is deterministic rather than incidental DB order.
+- **Within a group**, reviews are ordered by `created_at` descending (newest
+  first).
+- **Per-review shape** is `id`, `rating`, `text`, `created_at` (the GREEN-phase
+  serializer may add further non-identifying fields; these four are the
+  guaranteed minimum).
+- **No customer-identifying data is exposed.** This is a public, unauthenticated
+  endpoint: the `customer` FK/id and the customer's `name` / `email` / `phone`
+  never appear anywhere in the response.
 - **No pagination in v1.** A deliberate scope decision, not an oversight — to
   be revisited if a salon accumulates a large volume of reviews per specialist.
