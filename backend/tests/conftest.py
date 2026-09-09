@@ -59,7 +59,7 @@ def other_salon(db):
 @pytest.fixture
 def service_category(salon):
     with tenant_context(salon.id):
-        return ServiceCategory.objects.create(salon=salon, name="Nails")
+        return ServiceCategory.objects.create(salon=salon, name={"en": "Nails"})
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def service(salon, service_category):
         return Service.objects.create(
             salon=salon,
             category=service_category,
-            name="Manicure",
+            name={"en": "Manicure"},
             duration_minutes=60,
             price="500.00",
             buffer_minutes=15,

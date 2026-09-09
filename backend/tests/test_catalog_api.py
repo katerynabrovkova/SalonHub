@@ -8,7 +8,7 @@ from django.db import IntegrityError
 from rest_framework.test import APIClient
 
 from catalog.models import Service, ServiceCategory
-from catalog.serializers import ServiceCategorySerializer
+from catalog.serializers import ServiceCategoryWriteSerializer
 from core.exceptions import exception_handler
 from core.tenancy import tenant_context
 
@@ -148,7 +148,9 @@ def test_duplicate_category_name_returns_400_via_validate_name(
     client, salon, admin_account, service_category
 ):
     client.force_authenticate(user=admin_account)
-    response = client.post(_category_list_url(salon), {"name": service_category.name})
+    response = client.post(
+        _category_list_url(salon), {"name": service_category.name}, format="json"
+    )
 
     assert response.status_code == 400
     assert response.data["error"]["details"]["name"] == [
@@ -167,10 +169,12 @@ def test_race_that_slips_past_validate_name_still_returns_structured_400(
     core.exceptions.exception_handler's UniqueViolation branch — not
     validate_name — is what produces the 400.
     """
-    monkeypatch.setattr(ServiceCategorySerializer, "validate_name", lambda self, value: value)
+    monkeypatch.setattr(ServiceCategoryWriteSerializer, "validate_name", lambda self, value: value)
     client.force_authenticate(user=admin_account)
 
-    response = client.post(_category_list_url(salon), {"name": service_category.name})
+    response = client.post(
+        _category_list_url(salon), {"name": service_category.name}, format="json"
+    )
 
     assert response.status_code == 400
     assert response.data["error"]["code"] == "unique_violation"
@@ -191,6 +195,106 @@ def test_unique_violation_is_translated_to_a_structured_400_not_a_500():
     assert response.data["error"]["code"] == "unique_violation"
 
 
+# --- Stage 11.5: translatable name read/write contract ---------------------
+
+
+def test_category_name_resolves_to_requested_language(client, salon, admin_account):
+    with tenant_context(salon.id):
+        category = ServiceCategory.objects.create(
+            salon=salon, name={"en": "Haircut", "uk": "Стрижка"}
+        )
+
+    uk = client.get(_category_detail_url(salon, category) + "?lang=uk")
+    assert uk.status_code == 200
+    assert uk.data["name"] == "Стрижка"
+
+    en = client.get(_category_detail_url(salon, category) + "?lang=en")
+    assert en.data["name"] == "Haircut"
+
+
+def test_category_name_falls_back_to_english_without_lang_param(client, salon):
+    with tenant_context(salon.id):
+        category = ServiceCategory.objects.create(
+            salon=salon, name={"en": "Haircut", "uk": "Стрижка"}
+        )
+
+    response = client.get(_category_detail_url(salon, category))
+    assert response.status_code == 200
+    assert response.data["name"] == "Haircut"
+
+
+def test_category_name_falls_back_to_other_language_when_english_empty(client, salon):
+    with tenant_context(salon.id):
+        category = ServiceCategory.objects.create(salon=salon, name={"uk": "Стрижка"})
+
+    # requested "en" is absent, so it falls through to the only populated key
+    response = client.get(_category_detail_url(salon, category) + "?lang=en")
+    assert response.status_code == 200
+    assert response.data["name"] == "Стрижка"
+
+
+def test_category_list_resolves_name_per_lang(client, salon):
+    with tenant_context(salon.id):
+        ServiceCategory.objects.create(salon=salon, name={"en": "Haircut", "uk": "Стрижка"})
+
+    response = client.get(_category_list_url(salon) + "?lang=uk")
+    assert response.status_code == 200
+    assert response.data["results"][0]["name"] == "Стрижка"
+
+
+def test_create_category_with_unsupported_language_key_returns_400(client, salon, admin_account):
+    client.force_authenticate(user=admin_account)
+    response = client.post(
+        _category_list_url(salon), {"name": {"en": "Beard", "fr": "Barbe"}}, format="json"
+    )
+
+    assert response.status_code == 400
+    assert "name" in response.data["error"]["details"]
+
+
+def test_patch_category_with_unsupported_language_key_returns_400(
+    client, salon, admin_account, service_category
+):
+    client.force_authenticate(user=admin_account)
+    response = client.patch(
+        _category_detail_url(salon, service_category),
+        {"name": {"en": "Nails", "fr": "Ongles"}},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "name" in response.data["error"]["details"]
+
+
+def test_create_category_colliding_on_uk_only_returns_400(client, salon, admin_account):
+    with tenant_context(salon.id):
+        ServiceCategory.objects.create(salon=salon, name={"en": "Haircut", "uk": "Стрижка"})
+
+    client.force_authenticate(user=admin_account)
+    # Different "en", same "uk" -> the per-language check must reject this.
+    response = client.post(
+        _category_list_url(salon),
+        {"name": {"en": "Trim", "uk": "Стрижка"}},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["error"]["details"]["name"] == [
+        "A category with this name already exists."
+    ]
+
+
+def test_create_category_with_partial_dict_and_no_collision_succeeds(client, salon, admin_account):
+    with tenant_context(salon.id):
+        ServiceCategory.objects.create(salon=salon, name={"en": "Haircut", "uk": "Стрижка"})
+
+    client.force_authenticate(user=admin_account)
+    response = client.post(_category_list_url(salon), {"name": {"uk": "Манікюр"}}, format="json")
+
+    assert response.status_code == 201
+    assert response.data["name"] == {"uk": "Манікюр"}
+
+
 # --- cross-salon FK / server-assigned salon ---------------------------------
 
 
@@ -198,7 +302,7 @@ def test_posting_a_category_id_from_another_salon_returns_400(
     client, salon, other_salon, admin_account
 ):
     with tenant_context(other_salon.id):
-        foreign_category = ServiceCategory.objects.create(salon=other_salon, name="Foreign")
+        foreign_category = ServiceCategory.objects.create(salon=other_salon, name={"en": "Foreign"})
 
     client.force_authenticate(user=admin_account)
     response = client.post(
@@ -217,7 +321,11 @@ def test_posting_a_category_id_from_another_salon_returns_400(
 
 def test_client_supplied_salon_in_body_is_ignored(client, salon, other_salon, admin_account):
     client.force_authenticate(user=admin_account)
-    response = client.post(_category_list_url(salon), {"name": "New Cat", "salon": other_salon.id})
+    response = client.post(
+        _category_list_url(salon),
+        {"name": {"en": "New Cat"}, "salon": other_salon.id},
+        format="json",
+    )
 
     assert response.status_code == 201
     assert response.data["salon"] == salon.id
@@ -234,7 +342,7 @@ def test_service_list_select_related_avoids_n_plus_one(
             Service.objects.create(
                 salon=salon,
                 category=service_category,
-                name=f"Service {i}",
+                name={"en": f"Service {i}"},
                 duration_minutes=30,
                 price="100.00",
             )
@@ -250,7 +358,7 @@ def test_service_list_select_related_avoids_n_plus_one(
 def test_category_list_query_count(client, salon, django_assert_num_queries):
     with tenant_context(salon.id):
         for i in range(5):
-            ServiceCategory.objects.create(salon=salon, name=f"Category {i}")
+            ServiceCategory.objects.create(salon=salon, name={"en": f"Category {i}"})
 
     # 1 Salon lookup (TenantResolutionMiddleware) + 1 COUNT (pagination) + 1 SELECT
     with django_assert_num_queries(3):

@@ -10,32 +10,77 @@ from typing import Any
 from rest_framework import serializers
 
 from catalog.models import Service, ServiceCategory
+from core.i18n import SUPPORTED_LANGUAGES, resolve_translation
 
 
-class ServiceCategorySerializer(serializers.ModelSerializer):
+class ServiceCategoryWriteSerializer(serializers.ModelSerializer):
+    """
+    Write representation (docs/DECISIONS.md § Stage 11.5 "Read/write
+    serializer split for catalog and specialists"): `name` is the full
+    ``{lang_code: string}`` dict, echoed back as-is. Read requests use
+    ServiceCategoryReadSerializer instead, which resolves `name` to a plain
+    string.
+    """
+
     class Meta:
         model = ServiceCategory
         fields = ["id", "salon", "name", "ordering", "is_active", "created_at", "updated_at"]
         read_only_fields = ["id", "salon", "created_at", "updated_at"]
 
-    def validate_name(self, value: str) -> str:
+    def validate_name(self, value: dict[str, str]) -> dict[str, str]:
         """
-        DRF's automatic UniqueTogetherValidator for the (salon, name)
-        constraint (catalog/models.py) is silently skipped — `salon` is
-        read-only with no default, so get_unique_together_validators()'s own
-        `issuperset` guard drops it with no error (docs/DECISIONS.md § Stage
-        4 decisions). Validated explicitly instead; needs no access to
-        `salon` since ServiceCategory.objects is already tenant-scoped. This
-        is a check-then-write, not a race-proof guarantee — the database
-        constraint is that guarantee; core.exceptions.exception_handler
-        turns a concurrent violation of it into the same 400 shape.
+        Two checks, both serializer-level (docs/DECISIONS.md § Stage 11.5):
+
+        1. Every key is a supported language code. An unsupported key is
+           rejected, never silently dropped — this is a write path and a
+           dropped key would look like a successful save (§ "Write-side
+           language key validation").
+        2. Per-language ``(salon, name)`` uniqueness: for each populated key,
+           another category in this salon must not already use that exact
+           string under that same key. The message is deliberately generic —
+           it does not name the colliding language.
+
+        DRF's automatic UniqueTogetherValidator is silently skipped for the
+        ``(salon, name)`` constraint — `salon` is read-only with no default
+        (docs/DECISIONS.md § Stage 4 decisions) — so this is the only
+        serializer-level guard. It is check-then-write, not race-proof: the
+        per-language DB UniqueConstraints (catalog/models.py, sub-step 1) are
+        the real guarantee, and core.exceptions.exception_handler turns a
+        concurrent violation into the same 400 shape.
         """
+        for lang in value:
+            if lang not in SUPPORTED_LANGUAGES:
+                raise serializers.ValidationError(f"Unsupported language code: {lang!r}")
+
         queryset = ServiceCategory.objects.all()
         if self.instance is not None:
             queryset = queryset.exclude(pk=self.instance.pk)
-        if queryset.filter(name=value).exists():
-            raise serializers.ValidationError("A category with this name already exists.")
+        for lang, text in value.items():
+            if not text:
+                continue
+            if queryset.filter(**{f"name__{lang}": text}).exists():
+                raise serializers.ValidationError("A category with this name already exists.")
         return value
+
+
+class ServiceCategoryReadSerializer(serializers.ModelSerializer):
+    """
+    Read representation: `name` resolved to a plain string for the request's
+    ``?lang=`` (docs/DECISIONS.md § Stage 11.5 "API language contract"),
+    never the raw dict.
+    """
+
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServiceCategory
+        fields = ["id", "salon", "name", "ordering", "is_active", "created_at", "updated_at"]
+        read_only_fields = fields
+
+    def get_name(self, obj: ServiceCategory) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
 
 
 class ServiceCategoryMiniSerializer(serializers.ModelSerializer):

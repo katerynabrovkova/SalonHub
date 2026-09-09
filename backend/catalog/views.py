@@ -15,7 +15,11 @@ from rest_framework.request import Request
 from rest_framework.serializers import BaseSerializer
 
 from catalog.models import Service, ServiceCategory
-from catalog.serializers import ServiceCategorySerializer, ServiceSerializer
+from catalog.serializers import (
+    ServiceCategoryReadSerializer,
+    ServiceCategoryWriteSerializer,
+    ServiceSerializer,
+)
 from catalog.services import soft_delete_category, soft_delete_service
 from core.permissions import IsSalonStaff
 from core.tenancy import get_current_salon_id
@@ -71,9 +75,24 @@ class _CatalogViewMixin:
         return queryset
 
 
-class ServiceCategoryListCreateView(_CatalogViewMixin, generics.ListCreateAPIView):
-    serializer_class = ServiceCategorySerializer
+class _ServiceCategorySerializerMixin:
+    """
+    Read/write serializer split (docs/DECISIONS.md § Stage 11.5 "Read/write
+    serializer split for catalog and specialists"): GET resolves `name` to a
+    plain string for ``?lang=``; writes take/echo the full language dict.
+    """
 
+    request: Request  # set by DRF's APIView.dispatch
+
+    def get_serializer_class(self) -> type[BaseSerializer]:
+        if self.request.method in SAFE_METHODS:
+            return ServiceCategoryReadSerializer
+        return ServiceCategoryWriteSerializer
+
+
+class ServiceCategoryListCreateView(
+    _ServiceCategorySerializerMixin, _CatalogViewMixin, generics.ListCreateAPIView
+):
     def get_queryset(self) -> QuerySet[ServiceCategory]:
         return self._apply_visibility(ServiceCategory.objects.all())
 
@@ -81,9 +100,9 @@ class ServiceCategoryListCreateView(_CatalogViewMixin, generics.ListCreateAPIVie
         serializer.save(salon_id=get_current_salon_id())
 
 
-class ServiceCategoryDetailView(_CatalogViewMixin, generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = ServiceCategorySerializer
-
+class ServiceCategoryDetailView(
+    _ServiceCategorySerializerMixin, _CatalogViewMixin, generics.RetrieveUpdateDestroyAPIView
+):
     def get_queryset(self) -> QuerySet[ServiceCategory]:
         return self._apply_visibility(ServiceCategory.objects.all())
 
