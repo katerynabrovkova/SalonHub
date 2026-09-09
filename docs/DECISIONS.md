@@ -1091,6 +1091,47 @@ resolving per-request rather than from any cached or default value — it can
 differ from what a direct `ServiceCategory` endpoint call for the same category
 under a different `?lang=` would return.
 
+### Wiring `?lang=` into the Reviews read endpoint
+
+Decided 09.09.2026 — closes the gap left when the catalog/specialists
+implementation section above did not enumerate reviews. Reviews already has
+its own separate read view (a plain `APIView`, `reviews.ReviewListView`),
+unlike catalog/specialists, so the `get_serializer_class()` override
+described in § "Read/write serializer split for catalog and specialists"
+never touched it.
+
+- **`ReviewSpecialistSerializer` (`reviews/serializers.py`), embedded as the
+  `specialist` block of each `{specialist, reviews}` group in the public
+  list response, resolves `name` against `?lang=` exactly per the general
+  "API language contract" above.** No new resolution rule — this is the
+  existing contract applied to a previously-unwired endpoint. Being reached
+  through a non-generic `APIView` is not an exemption, the same precedent
+  `scheduling.SpecialistsAtTimeView` / `SpecialistAtTimeSerializer` already
+  established.
+- **Two-part wiring, both required.** (1) `reviews/serializers.py` gains a
+  `name = serializers.SerializerMethodField()` + `get_name` on
+  `ReviewSpecialistSerializer`, mirroring
+  `specialists.SpecialistReadSerializer._resolved` / `get_name`
+  (`core.i18n.resolve_translation` against
+  `context["request"].query_params.get("lang")`). (2) `reviews/views.py`
+  must pass `context={"request": request}` into the
+  `ReviewSpecialistSerializer(...)` call in `ReviewListView.get` — unlike a
+  nested serializer instantiated declaratively (which inherits the parent's
+  context), this one is constructed by hand and has no context otherwise,
+  so `get_name` would have no `?lang=` to read.
+- **Nothing else in the § Stage 11 Part 2 read-endpoint contract changes.**
+  Grouping, group ordering (review count desc, lower `specialist` id as
+  tiebreak), within-group ordering (`created_at` desc), and the per-review
+  minimum shape (`id`, `rating`, `text`, `created_at`) are all unaffected.
+- **Test adaptation (mechanical, no contract change).**
+  `tests/test_review_list_endpoint.py`'s two file-local specialist fixtures
+  (`specialist2`, `o_specialist`) move to dict-shaped names
+  (`{"en": "Zoe"}` / `{"en": "Otto"}`) — the shared `conftest.specialist`
+  fixture is already dict-shaped from earlier Stage 11.5 work and needs no
+  change — and the `groups[...]["specialist"]["name"]` assertion compares
+  against the resolved plain string rather than the raw `Specialist.name`
+  dict.
+
 ### Sub-step 1 (model changes) — decided 09.09.2026
 
 The concrete model-layer shape, agreed and then implemented in the same
