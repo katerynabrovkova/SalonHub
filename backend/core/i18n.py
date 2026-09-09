@@ -45,6 +45,27 @@ def resolve_translation(value: dict[str, str], requested_lang: str | None) -> st
     return ""
 
 
+def resolve_language_code(requested_lang: str | None) -> str:
+    """
+    Resolve a plain language *preference* to a supported language *code*
+    (docs/DECISIONS.md § "Notification message builder: language
+    resolution").
+
+    Unlike ``resolve_translation``, which resolves a ``{lang: string}``
+    dict to a display string, this picks the code itself — needed to
+    select which ``(subject, body)`` tuple to use from a per-language
+    message-template mapping.
+
+    ``requested_lang`` being None, ``""``, or an unsupported code all mean
+    "no valid request" → English. No "first non-empty among remaining
+    languages" fallthrough: a caller selecting by code is expected to have
+    every supported language populated.
+    """
+    if requested_lang is not None and requested_lang in SUPPORTED_LANGUAGES:
+        return requested_lang
+    return "en"
+
+
 def resolve_display_name(value: dict[str, str], fallback: str) -> str:
     """
     Resolve a translatable name for a staff/admin context (no ``?lang=``

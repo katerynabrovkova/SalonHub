@@ -11,7 +11,7 @@ file is expected to fail on collection (ImportError: cannot import name
 same two-step-red shape as test_core_formatting.py's docstring describes.
 """
 
-from core.i18n import resolve_translation
+from core.i18n import resolve_language_code, resolve_translation
 
 _DICT = {"en": "Haircut", "uk": "Стрижка"}
 
@@ -46,3 +46,19 @@ def test_returns_empty_string_when_all_languages_empty():
 
 def test_returns_empty_string_when_dict_has_no_supported_keys():
     assert resolve_translation({}, "uk") == ""
+
+
+# --- resolve_language_code (docs/DECISIONS.md § "Notification message
+# builder: language resolution") — resolves a plain language preference to
+# a supported language CODE, for selecting a (subject, body) tuple.
+
+
+def test_resolve_language_code_returns_a_supported_request_unchanged():
+    assert resolve_language_code("uk") == "uk"
+    assert resolve_language_code("en") == "en"
+
+
+def test_resolve_language_code_falls_back_to_english_for_none_empty_or_unsupported():
+    assert resolve_language_code(None) == "en"
+    assert resolve_language_code("") == "en"
+    assert resolve_language_code("fr") == "en"

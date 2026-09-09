@@ -34,7 +34,7 @@ def test_binds_salon_id_for_a_matching_active_slug(salon) -> None:
 @pytest.mark.django_db
 def test_clears_salon_id_after_the_response() -> None:
     salon = Salon.objects.create(
-        name="Clears Salon",
+        name={"en": "Clears Salon"},
         slug="clears-salon",
         currency="UAH",
         contact_email="owner@clears-salon.example",
@@ -53,7 +53,7 @@ def test_clears_salon_id_even_when_the_view_raises() -> None:
         raise RuntimeError("view exploded")
 
     salon = Salon.objects.create(
-        name="Raises Salon",
+        name={"en": "Raises Salon"},
         slug="raises-salon",
         currency="UAH",
         contact_email="owner@raises-salon.example",
@@ -83,7 +83,7 @@ def test_unknown_slug_returns_404_and_binds_no_context() -> None:
 @pytest.mark.django_db
 def test_inactive_slug_returns_404() -> None:
     salon = Salon.objects.create(
-        name="Inactive Salon",
+        name={"en": "Inactive Salon"},
         slug="inactive-salon",
         is_active=False,
         currency="UAH",

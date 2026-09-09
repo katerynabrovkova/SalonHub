@@ -39,7 +39,7 @@ def _clear_cache():
 @pytest.fixture
 def salon(db):
     return Salon.objects.create(
-        name="Bella Demo Salon",
+        name={"en": "Bella Demo Salon"},
         slug="bella-demo",
         currency="UAH",
         contact_email="owner@bella-demo.example",
@@ -49,7 +49,7 @@ def salon(db):
 @pytest.fixture
 def other_salon(db):
     return Salon.objects.create(
-        name="Other Salon",
+        name={"en": "Other Salon"},
         slug="other-salon",
         currency="UAH",
         contact_email="owner@other-salon.example",

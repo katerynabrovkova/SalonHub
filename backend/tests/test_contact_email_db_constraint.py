@@ -27,7 +27,7 @@ pytestmark = pytest.mark.django_db
 
 def test_salon_contact_email_valid_value_succeeds():
     salon = Salon.objects.create(
-        name="Valid Contact Email Salon",
+        name={"en": "Valid Contact Email Salon"},
         slug="valid-contact-email-salon",
         currency="UAH",
         contact_email="owner@valid-contact-email-salon.example",
@@ -39,7 +39,7 @@ def test_salon_contact_email_empty_string_rejected():
     with pytest.raises(IntegrityError) as exc_info:
         with transaction.atomic():
             Salon.objects.create(
-                name="Empty Contact Email Salon",
+                name={"en": "Empty Contact Email Salon"},
                 slug="empty-contact-email-salon",
                 currency="UAH",
                 contact_email="",

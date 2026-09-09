@@ -18,6 +18,7 @@ import datetime as dt
 import pytest
 from django.conf import settings
 
+from accounts.models import Customer
 from booking.guest_tokens import derive_guest_token
 from core.formatting import format_datetime_for_salon
 from core.tenancy import tenant_context
@@ -129,7 +130,7 @@ def test_build_message_for_booking_confirmed_builds_subject_body_and_link(
         subject, body = _build_message(notification)
 
     assert subject == "Your booking is confirmed"
-    assert salon.name in body
+    assert "Bella Demo Salon" in body
     assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
     manage_link = (
         f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
@@ -193,7 +194,7 @@ def test_build_message_for_appointment_reminder_builds_subject_body_and_link(
         subject, body = _build_message(notification)
 
     assert subject == "Reminder: your appointment tomorrow"
-    assert salon.name in body
+    assert "Bella Demo Salon" in body
     assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
     manage_link = (
         f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
@@ -202,9 +203,10 @@ def test_build_message_for_appointment_reminder_builds_subject_body_and_link(
     assert manage_link in body
     assert "View or cancel your booking:" in body
     # The exact body, including the required blank line between the two
-    # sentences (docs/DECISIONS.md § Step (e), email text).
+    # sentences (docs/DECISIONS.md § Step (e), email text). `salon.name`
+    # resolves to its English value for a customer with no preferred_language.
     expected_body = (
-        f"This is a reminder of your appointment at {salon.name} on "
+        f"This is a reminder of your appointment at Bella Demo Salon on "
         f"{format_datetime_for_salon(appointment.start_datetime, salon.timezone)}.\n\n"
         f"View or cancel your booking: {manage_link}"
     )
@@ -249,6 +251,74 @@ def test_build_message_raises_for_appointment_reminder_without_an_appointment(sa
 
     with tenant_context(salon.id), pytest.raises(ValueError, match="appointment"):
         _build_message(notification)
+
+
+# --- _build_message language resolution (docs/DECISIONS.md § "Notification
+# message builder: language resolution") ------------------------------------
+
+
+def _uk_customer(salon):
+    with tenant_context(salon.id):
+        return Customer.objects.create(
+            salon=salon,
+            name="Оля",
+            email="olya@example.com",
+            phone="+380000000000",
+            preferred_language="uk",
+        )
+
+
+def test_build_message_static_trigger_renders_in_customer_preferred_language(salon):
+    customer = _uk_customer(salon)
+    notification = _make_notification(
+        salon, customer=customer, trigger=NotificationTrigger.BOOKING_CANCELLED
+    )
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Ваш запис скасовано"
+    assert body == "Ваш запис було скасовано."
+
+
+def test_build_message_dynamic_branch_renders_in_customer_preferred_language(
+    salon, specialist, service
+):
+    customer = _uk_customer(salon)
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(
+        salon,
+        customer=customer,
+        appointment=appointment,
+        trigger=NotificationTrigger.BOOKING_CONFIRMED,
+    )
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Ваш запис підтверджено"
+    assert "підтверджено" in body
+    assert "Переглянути або скасувати запис:" in body
+    # The interpolated datetime is rendered with the Ukrainian tables too.
+    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang="uk") in body
+
+
+def test_build_message_customer_less_notification_builds_in_english(salon):
+    notification = _make_notification(
+        salon, customer=None, trigger=NotificationTrigger.PAYMENT_SUCCEEDED
+    )
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Payment received"
+    assert body == "We have received your deposit payment."
 
 
 # --- send_notification -------------------------------------------------

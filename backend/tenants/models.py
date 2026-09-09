@@ -3,6 +3,7 @@ from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Length
 from django.db.models.lookups import LessThanOrEqual
 
+from core.i18n import resolve_display_name
 from core.models import TimeStamped
 from core.validators import ISO_4217_PATTERN, iso_4217_validator
 
@@ -103,4 +104,9 @@ class Salon(TimeStamped):
         ]
 
     def __str__(self) -> str:
-        return str(self.name)
+        # `name` is a {lang: str} dict (Stage 11.5). Resolve like an API read
+        # with no `?lang=` — English, then any populated language — with an
+        # identifying fallback so a fully-untranslated row is still findable
+        # in admin (docs/DECISIONS.md § "Admin display of translatable
+        # fields"; § "Notification message builder: language resolution").
+        return resolve_display_name(self.name, f"Salon #{self.pk}")

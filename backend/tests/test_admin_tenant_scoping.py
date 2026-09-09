@@ -17,6 +17,7 @@ from booking.models import Appointment
 from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
 from specialists.models import Specialist
+from tenants.models import Salon
 from tests.conftest import make_appointment
 
 pytestmark = pytest.mark.django_db
@@ -75,6 +76,38 @@ def test_specialist_changelist_name_column_resolves_not_raw_dict(client, superus
     assert response.status_code == 200
     assert b"Jane" in response.content
     assert "Джейн".encode() not in response.content
+
+
+def test_salon_changelist_name_column_resolves_not_raw_dict(client, superuser, salon):
+    salon.name = {"en": "Bella Demo Salon", "uk": "Белла Демо Салон"}
+    salon.save(update_fields=["name"])
+
+    client.force_login(superuser)
+    response = client.get("/admin/tenants/salon/")
+
+    assert response.status_code == 200
+    assert b"Bella Demo Salon" in response.content
+    assert "Белла Демо Салон".encode() not in response.content
+
+
+def test_salon_str_resolves_populated_translatable_name(db):
+    salon = Salon.objects.create(
+        name={"en": "Brows Bar"},
+        slug="brows-bar",
+        currency="UAH",
+        contact_email="owner@brows-bar.example",
+    )
+    assert str(salon) == "Brows Bar"
+
+
+def test_salon_str_falls_back_to_model_and_pk_when_all_languages_empty(db):
+    salon = Salon.objects.create(
+        name={},
+        slug="empty-name-salon",
+        currency="UAH",
+        contact_email="owner@empty-name-salon.example",
+    )
+    assert str(salon) == f"Salon #{salon.pk}"
 
 
 def test_str_resolves_populated_translatable_name(salon):
