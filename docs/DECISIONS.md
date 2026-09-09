@@ -997,6 +997,34 @@ code exists.
   languages at once. This mirrors the read/write serializer split
   established in § Stage 11 (Reviews).
 
+### Write-side language key validation
+
+Decided and implemented 09.09.2026 — the write-path counterpart to the read-side
+fallback chain above.
+
+- **Write serializers for translatable fields** (`ServiceCategory.name`,
+  `Service.name`, `Salon.name`, `Salon.about`, `Specialist.name`,
+  `Specialist.bio`) **validate the keys of the incoming dict against the same
+  fixed supported-language list the read-side fallback chain iterates**
+  (currently `en`, `uk` — read from that one list, not hardcoded to exactly two
+  here).
+- **Any key outside that list is rejected with a 400** (`ValidationError`). It
+  is **not** silently dropped and **not** silently accepted.
+- **Rationale.** This is a write path — data the client is trying to persist.
+  Silently dropping an unsupported key (e.g. `"fr"`) would present as a
+  successful save while quietly discarding what the client entered — the worst
+  kind of bug, because nothing signals the loss. This is deliberately *unlike*
+  the `?lang=` read-side contract (decided 09.09.2026), where an
+  unsupported or missing `lang` silently falls back to English: that is a
+  per-request display parameter driven by the frontend's own language switcher,
+  not a durable write, so a bad value there signals a frontend bug rather than
+  user-entered data being lost.
+- **One source of truth for "what languages exist."** The allowlist check lives
+  at the serializer level, in the same place as the per-language
+  `validate_name` / `validate_bio` uniqueness checks, and reuses the same
+  supported-language list as the `resolve_translation` fallback chain — not a
+  second copy that could drift.
+
 ### Sub-step 1 (model changes) — decided 09.09.2026
 
 The concrete model-layer shape, agreed and then implemented in the same
