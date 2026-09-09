@@ -618,6 +618,14 @@ load-bearing shape.
   `account:{id}` — a deliberate "resend" is a new event, not a technical
   duplicate.
 
+  **Correction, recorded 09.09.2026:** this bullet was never implemented.
+  accounts/tasks.py's send_verification_email / send_password_reset_email
+  still call django.core.mail.send_mail directly, bypass the Notification
+  journal entirely, and have no dedup_key. No commit after Stage 3-R
+  touched the file. The design above remains the intended target but is
+  unbuilt; reconciling it is unscheduled work, not covered by any
+  currently-numbered stage.
+
 ### Step (d) — guest-token delivery
 
 - **The `"token"` key is removed from the 201 booking response.** Contract
