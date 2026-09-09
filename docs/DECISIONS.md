@@ -1328,6 +1328,11 @@ admin resolves through the **no-`?lang=` fallback chain** —
   `notifications/services.py` `{salon.name}` fix, in the step that does that
   work. Until then `Salon.__str__` stays `str(self.name)` and
   `SalonAdmin.list_display` keeps the bare `"name"` string.
+  - **Closed 09.09.2026** by § "Notification message builder: language
+    resolution" above: `Salon.__str__`, `SalonAdmin`, the `conftest`
+    fixture migration (extended to all scalar `Salon.objects.create`
+    sites), and the `{salon.name}` fix all land in that step, with `Salon`
+    test coverage matching the other three models.
 
 - **`Salon.about` and `Specialist.bio`** are referenced in no `list_display`
   and no `__str__` today — no admin change is needed for them. Recorded here
@@ -1337,10 +1342,12 @@ The one existing admin-changelist render test
 (`test_admin_tenant_scoping.py::test_admin_changelist_reaches_across_tenants`)
 is updated for the resolved `name` column; changelist-render coverage for
 `Service` and `Specialist` and `__str__`-fallback coverage for all three
-in-scope models is added. `Salon` gets no new test here (deferred with the
-rest of its work). No test currently asserts on `str()` of these models.
-All test changes land in the implementation follow-up commit; this
-DECISIONS.md correction lands first, on its own.
+in-scope models is added. `Salon` gets no new test *in this sub-step* — its
+`__str__`-fallback and changelist-render coverage lands with the
+notification-builder step (§ "Notification message builder: language
+resolution"), which pulls `Salon` into scope. No test currently asserts on
+`str()` of these models. All test changes land in the implementation
+follow-up commit; this DECISIONS.md correction lands first, on its own.
 
 ### Explicitly out of scope for Stage 11.5
 
