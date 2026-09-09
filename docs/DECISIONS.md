@@ -938,8 +938,17 @@ Recorded so a later reader does not mistake the omission for an oversight.
   Stage 4 precedent (explicit serializer check plus the `UniqueViolation →
   400` backstop in `core.exceptions.exception_handler`) is the starting
   point.
+- **Landed (09.09.2026):** both. The DB-level mechanism is Sub-step 1's
+  "Per-language uniqueness" bullet (two functional unique constraints per
+  model, one per supported language); the serializer-level per-language
+  `validate_<field>` checks are in § "Read/write serializer split for
+  catalog and specialists" ("Uniqueness error message stays generic").
 
 ### Email language: `Customer.preferred_language`
+
+Decided and implemented 09.09.2026 — the field landed with Sub-step 1
+(migration `accounts.0007`); the send-path wiring landed with § "Notification
+message builder: language resolution" below.
 
 - **New field `accounts.Customer.preferred_language`**, set at booking time.
   It selects the language a notification email is rendered in.
@@ -950,6 +959,11 @@ Recorded so a later reader does not mistake the omission for an oversight.
   placeholder.
 
 ### Date formatting in localized emails (`core/formatting.py`)
+
+Decided and implemented 09.09.2026 — the `lang` argument and the Ukrainian
+tables landed in `core/formatting.py` (Stage 11.5 step 9a); the send path
+passes the resolved language code per § "Notification message builder:
+language resolution" below.
 
 - `format_datetime_for_salon` currently renders e.g.
   `"Sat, 26 Sep 2026, 14:00"` from **deliberately hardcoded English weekday /
@@ -964,8 +978,8 @@ Recorded so a later reader does not mistake the omission for an oversight.
 
 ### Notification message builder: language resolution
 
-Decided 09.09.2026 — wires the "Notification message templates" bullet
-(§ "Fields becoming translatable") and the "Email language:
+Decided and implemented 09.09.2026 — wires the "Notification message
+templates" bullet (§ "Fields becoming translatable") and the "Email language:
 `Customer.preferred_language`" bullet into `notifications._build_message`.
 Neither specified the exact data shape or the resolution call chain; both
 are fixed here.
@@ -1260,6 +1274,15 @@ the migration is a plain `AlterField`/`AddField`/`RemoveConstraint`/
   (which now compare a dict), admin `list_display`, and the notification
   message builder. Existing tests that treat these fields as scalars fail
   after this sub-step by design.
+  - **All five closed 09.09.2026.** Read-side `?lang=` resolution:
+    § "API language contract for translatable fields". Read/write
+    serializer split: § "Read/write serializer split for catalog and
+    specialists" and § "Wiring `?lang=` into the Reviews read endpoint".
+    Dict-aware `validate_<field>` / per-language uniqueness:
+    § "Write-side language key validation" and the "Per-language
+    uniqueness" bullet above. Admin `list_display`: § "Admin display of
+    translatable fields". Notification message builder: § "Notification
+    message builder: language resolution".
 
 ### Admin display of translatable fields
 
@@ -1272,7 +1295,8 @@ admin resolves through the **no-`?lang=` fallback chain** —
 
 **Scope corrected 09.09.2026, before implementation:** this step covers
 **three** models — `ServiceCategory`, `Service`, `Specialist`. The fourth,
-`Salon`, is deferred (see the "`Salon` deferred" bullet below).
+`Salon`, was deferred to the notification-builder step and **closed there
+09.09.2026** (see the "`Salon` deferred" bullet below).
 
 **`__str__` gets an identifying fallback; `list_display` columns do not.**
 
@@ -1340,14 +1364,14 @@ admin resolves through the **no-`?lang=` fallback chain** —
 
 The one existing admin-changelist render test
 (`test_admin_tenant_scoping.py::test_admin_changelist_reaches_across_tenants`)
-is updated for the resolved `name` column; changelist-render coverage for
+was updated for the resolved `name` column; changelist-render coverage for
 `Service` and `Specialist` and `__str__`-fallback coverage for all three
-in-scope models is added. `Salon` gets no new test *in this sub-step* — its
-`__str__`-fallback and changelist-render coverage lands with the
-notification-builder step (§ "Notification message builder: language
-resolution"), which pulls `Salon` into scope. No test currently asserts on
-`str()` of these models. All test changes land in the implementation
-follow-up commit; this DECISIONS.md correction lands first, on its own.
+in-scope models was added in the same step. `Salon` got no new test in the
+admin-display step — its `__str__`-fallback and changelist-render coverage
+was added with the notification-builder step (§ "Notification message
+builder: language resolution"), which pulled `Salon` into scope. The
+DECISIONS.md correction landed first, on its own; the implementation and its
+test changes followed.
 
 ### Explicitly out of scope for Stage 11.5
 
