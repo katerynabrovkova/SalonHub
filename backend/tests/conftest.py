@@ -78,7 +78,7 @@ def service(salon, service_category):
 @pytest.fixture
 def specialist(salon):
     with tenant_context(salon.id):
-        return Specialist.objects.create(salon=salon, name="Jane")
+        return Specialist.objects.create(salon=salon, name={"en": "Jane"})
 
 
 @pytest.fixture

@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 from accounts.models import Account, AccountRole, Customer
 from booking.models import AppointmentStatus
 from core.tenancy import tenant_context
+from specialists.models import Specialist
 from tests.conftest import make_appointment
 
 pytestmark = pytest.mark.django_db
@@ -55,7 +56,9 @@ def test_guest_can_retrieve_a_specialist_without_auth(client, salon, specialist)
 
 
 def test_guest_cannot_create_a_specialist(client, salon):
-    response = client.post(_specialist_list_url(salon), {"name": "New Specialist"})
+    response = client.post(
+        _specialist_list_url(salon), {"name": {"en": "New Specialist"}}, format="json"
+    )
 
     assert response.status_code == 401
 
@@ -63,7 +66,9 @@ def test_guest_cannot_create_a_specialist(client, salon):
 def test_client_supplied_salon_in_body_is_ignored(client, salon, other_salon, admin_account):
     client.force_authenticate(user=admin_account)
     response = client.post(
-        _specialist_list_url(salon), {"name": "New Specialist", "salon": other_salon.id}
+        _specialist_list_url(salon),
+        {"name": {"en": "New Specialist"}, "salon": other_salon.id},
+        format="json",
     )
 
     assert response.status_code == 201
@@ -253,3 +258,110 @@ def test_deactivate_then_reactivate_round_trip(client, salon, admin_account, spe
 
     visible_again = client.get(_specialist_detail_url(salon, specialist))
     assert visible_again.status_code == 200
+
+
+# --- Stage 11.5: translatable name/bio read/write contract ----------------
+
+
+def _make_specialist(salon, *, name, bio=None):
+    with tenant_context(salon.id):
+        return Specialist.objects.create(salon=salon, name=name, bio={} if bio is None else bio)
+
+
+def test_specialist_name_and_bio_resolve_to_requested_language(client, salon):
+    sp = _make_specialist(
+        salon,
+        name={"en": "Jane", "uk": "Джейн"},
+        bio={"en": "Nail artist", "uk": "Майстриня манікюру"},
+    )
+
+    uk = client.get(_specialist_detail_url(salon, sp) + "?lang=uk")
+    assert uk.status_code == 200
+    assert uk.data["name"] == "Джейн"
+    assert uk.data["bio"] == "Майстриня манікюру"
+
+    en = client.get(_specialist_detail_url(salon, sp) + "?lang=en")
+    assert en.data["name"] == "Jane"
+    assert en.data["bio"] == "Nail artist"
+
+
+def test_specialist_name_falls_back_to_english_without_lang_param(client, salon):
+    sp = _make_specialist(salon, name={"en": "Jane", "uk": "Джейн"})
+
+    response = client.get(_specialist_detail_url(salon, sp))
+    assert response.status_code == 200
+    assert response.data["name"] == "Jane"
+
+
+def test_specialist_list_resolves_name_per_lang(client, salon):
+    _make_specialist(salon, name={"en": "Jane", "uk": "Джейн"})
+
+    response = client.get(_specialist_list_url(salon) + "?lang=uk")
+    assert response.status_code == 200
+    assert response.data["results"][0]["name"] == "Джейн"
+
+
+def test_create_specialist_with_unsupported_language_key_returns_400(client, salon, admin_account):
+    client.force_authenticate(user=admin_account)
+    response = client.post(
+        _specialist_list_url(salon),
+        {"name": {"en": "Jane", "fr": "Jeanne"}},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "name" in response.data["error"]["details"]
+
+
+def test_patch_specialist_with_unsupported_language_bio_key_returns_400(
+    client, salon, admin_account, specialist
+):
+    client.force_authenticate(user=admin_account)
+    response = client.patch(
+        _specialist_detail_url(salon, specialist),
+        {"bio": {"en": "Bio", "fr": "Biographie"}},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "bio" in response.data["error"]["details"]
+
+
+def test_create_specialist_with_services_is_unaffected_by_the_split(
+    client, salon, admin_account, service
+):
+    client.force_authenticate(user=admin_account)
+    response = client.post(
+        _specialist_list_url(salon),
+        {"name": {"en": "Jane"}, "services": [service.id]},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert response.data["services"] == [service.id]
+
+
+def test_posting_a_service_from_another_salon_returns_400(
+    client, salon, other_salon, admin_account
+):
+    with tenant_context(other_salon.id):
+        from catalog.models import Service, ServiceCategory
+
+        cat = ServiceCategory.objects.create(salon=other_salon, name={"en": "Foreign"})
+        foreign_service = Service.objects.create(
+            salon=other_salon,
+            category=cat,
+            name={"en": "Foreign Service"},
+            duration_minutes=30,
+            price="100.00",
+        )
+
+    client.force_authenticate(user=admin_account)
+    response = client.post(
+        _specialist_list_url(salon),
+        {"name": {"en": "Jane"}, "services": [foreign_service.id]},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "services" in response.data["error"]["details"]

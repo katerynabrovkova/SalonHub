@@ -4,8 +4,8 @@ Specialist API views (docs/ARCHITECTURE.md § 4, § 13; Stage 5 sub-step 5).
 Reads are public (AllowAny); writes require IsSalonStaff for the resolved
 tenant, same read/write split as catalog (docs/DECISIONS.md § Stage 4
 decisions, § Stage 5 decisions). `salon` is assigned server-side only, from
-the URL's bound tenant context — never from client input (SpecialistSerializer
-keeps it read-only, see specialists/serializers.py).
+the URL's bound tenant context — never from client input (both serializers
+keep it read-only, see specialists/serializers.py).
 """
 
 from django.db.models import QuerySet
@@ -17,8 +17,24 @@ from rest_framework.serializers import BaseSerializer
 from core.permissions import IsSalonStaff
 from core.tenancy import get_current_salon_id
 from specialists.models import Specialist
-from specialists.serializers import SpecialistSerializer
+from specialists.serializers import SpecialistReadSerializer, SpecialistWriteSerializer
 from specialists.services import soft_delete_specialist
+
+
+class _SpecialistSerializerMixin:
+    """
+    Read/write serializer split (docs/DECISIONS.md § Stage 11.5 "Read/write
+    serializer split for catalog and specialists"): GET resolves `name`/`bio`
+    to a plain string for ``?lang=``; writes take/echo the full language dict.
+    Mirrors catalog's `_ServiceSerializerMixin`.
+    """
+
+    request: Request  # set by DRF's APIView.dispatch
+
+    def get_serializer_class(self) -> type[BaseSerializer]:
+        if self.request.method in SAFE_METHODS:
+            return SpecialistReadSerializer
+        return SpecialistWriteSerializer
 
 
 class _SpecialistViewMixin:
@@ -56,9 +72,9 @@ class _SpecialistViewMixin:
         return queryset
 
 
-class SpecialistListCreateView(_SpecialistViewMixin, generics.ListCreateAPIView):
-    serializer_class = SpecialistSerializer
-
+class SpecialistListCreateView(
+    _SpecialistSerializerMixin, _SpecialistViewMixin, generics.ListCreateAPIView
+):
     def get_queryset(self) -> QuerySet[Specialist]:
         return self._apply_visibility(Specialist.objects.all())
 
@@ -66,9 +82,9 @@ class SpecialistListCreateView(_SpecialistViewMixin, generics.ListCreateAPIView)
         serializer.save(salon_id=get_current_salon_id())
 
 
-class SpecialistDetailView(_SpecialistViewMixin, generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = SpecialistSerializer
-
+class SpecialistDetailView(
+    _SpecialistSerializerMixin, _SpecialistViewMixin, generics.RetrieveUpdateDestroyAPIView
+):
     def get_queryset(self) -> QuerySet[Specialist]:
         return self._apply_visibility(Specialist.objects.all())
 

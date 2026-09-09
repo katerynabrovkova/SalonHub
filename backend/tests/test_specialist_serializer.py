@@ -1,5 +1,5 @@
 """
-SpecialistSerializer tests (docs/DECISIONS.md § Stage 5 decisions).
+SpecialistWriteSerializer tests (docs/DECISIONS.md § Stage 5 decisions).
 
 Serializer-level only — no views/urls exist yet for specialists (Stage 5
 sub-step 5.D covers the serializer alone). Exercises the serializer directly,
@@ -13,7 +13,7 @@ import pytest
 from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
 from specialists.models import Specialist
-from specialists.serializers import SpecialistSerializer
+from specialists.serializers import SpecialistWriteSerializer
 
 pytestmark = pytest.mark.django_db
 
@@ -41,8 +41,8 @@ def test_attaching_a_service_from_another_salon_returns_400_under_services(
     salon, other_salon_service
 ):
     with tenant_context(salon.id):
-        serializer = SpecialistSerializer(
-            data={"name": "Jane", "services": [other_salon_service.id]}
+        serializer = SpecialistWriteSerializer(
+            data={"name": {"en": "Jane"}, "services": [other_salon_service.id]}
         )
 
         assert not serializer.is_valid()
@@ -54,7 +54,9 @@ def test_attaching_a_service_from_another_salon_returns_400_under_services(
 
 def test_attaching_a_service_from_the_same_salon_succeeds(salon, service):
     with tenant_context(salon.id):
-        serializer = SpecialistSerializer(data={"name": "Jane", "services": [service.id]})
+        serializer = SpecialistWriteSerializer(
+            data={"name": {"en": "Jane"}, "services": [service.id]}
+        )
 
         assert serializer.is_valid(), serializer.errors
         instance = serializer.save(salon_id=salon.id)
@@ -69,12 +71,12 @@ def test_two_specialists_in_the_same_salon_may_share_a_name(salon):
     one salon may legitimately share a name.
     """
     with tenant_context(salon.id):
-        first = SpecialistSerializer(data={"name": "Jane"})
+        first = SpecialistWriteSerializer(data={"name": {"en": "Jane"}})
         assert first.is_valid(), first.errors
         first.save(salon_id=salon.id)
 
-        second = SpecialistSerializer(data={"name": "Jane"})
+        second = SpecialistWriteSerializer(data={"name": {"en": "Jane"}})
         assert second.is_valid(), second.errors
         second.save(salon_id=salon.id)
 
-        assert Specialist.objects.filter(name="Jane").count() == 2
+        assert Specialist.objects.filter(name={"en": "Jane"}).count() == 2
