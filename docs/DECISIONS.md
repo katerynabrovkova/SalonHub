@@ -954,6 +954,36 @@ Recorded so a later reader does not mistake the omission for an oversight.
   names are translated, not the layout. `"Sat, 26 Sep 2026, 14:00"` →
   `"Сб, 26 вер. 2026, 14:00"` (24-hour, no timezone label, unchanged).
 
+### API language contract for translatable fields
+
+Decided 09.09.2026 — part of the same Stage 11.5 contract, agreed before any
+code exists.
+
+- **Read endpoints** (listing services, salon profile, and any other endpoint
+  exposing a translatable field) **accept an optional `?lang=en|uk` query
+  parameter.** The response returns the **resolved plain string** for that
+  field, not the full JSON dict — e.g. `{"name": "Стрижка"}`, never
+  `{"name": {"en": "...", "uk": "..."}}`. Rationale: the backend already
+  resolves language + `en` fallback, so it returns ready-to-display text
+  rather than pushing fallback logic into every frontend component.
+- **A missing `?lang=`, a language with no value for that field, or an
+  unsupported language code all silently fall back to English.** No 400 for a
+  missing or unsupported `lang` value. Rationale: the frontend controls this
+  parameter through its language switcher — users do not hand-edit the URL —
+  so a bad value only ever signals a frontend bug, not a real user-facing
+  edge case worth hard-erroring on, and it keeps fallback uniform with the
+  "field not translated into the requested language" case.
+- **`?lang=` is a per-request choice, independent of
+  `Customer.preferred_language`.** `preferred_language` controls only the
+  language a notification email is rendered in (see § Email language above)
+  and is not read or written by this parameter.
+- **Write endpoints** (creating or editing a translatable field — e.g. a
+  salon editing a service name) **use a separate serializer that
+  accepts and returns the full language dict**, e.g.
+  `{"en": "Haircut", "uk": "Стрижка"}`, so the editor sees and edits all
+  languages at once. This mirrors the read/write serializer split
+  established in § Stage 11 (Reviews).
+
 ### Explicitly out of scope for Stage 11.5
 
 - **Frontend UI-string translation** — labels, buttons, static interface
