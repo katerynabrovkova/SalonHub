@@ -100,7 +100,7 @@ def _make_specialist(*, salon, name: str, is_active: bool = True) -> Specialist:
     is a single fixed specialist ("Jane"), not a factory for several.
     """
     with tenant_context(salon.id):
-        return Specialist.objects.create(salon=salon, name=name, is_active=is_active)
+        return Specialist.objects.create(salon=salon, name={"en": name}, is_active=is_active)
 
 
 def _link_specialist_service(*, salon, specialist: Specialist, service: Service) -> None:
@@ -547,8 +547,8 @@ def test_merge_specialist_availability_sorts_keys_and_unions_overlap():
     insertion-order luck — plain dicts preserve insertion order but do not
     sort themselves (docs/DECISIONS.md § Stage 6.H decisions).
     """
-    a = Specialist(name="A")
-    b = Specialist(name="B")
+    a = Specialist(name={"en": "A"})
+    b = Specialist(name={"en": "B"})
     pairs = [
         (a, [_t(11), _t(9), _t(10)]),
         (b, [_t(10)]),
@@ -1192,7 +1192,7 @@ def test_compute_open_windows_appointment_for_a_different_specialist_does_not_bl
         end_time=dt.time(18, 0),
     )
     with tenant_context(salon.id):
-        other_specialist = Specialist.objects.create(salon=salon, name="Other Specialist")
+        other_specialist = Specialist.objects.create(salon=salon, name={"en": "Other Specialist"})
     make_appointment(
         salon=salon,
         customer=customer,
@@ -1399,16 +1399,16 @@ def test_compute_open_windows_ignores_appointment_from_a_different_salon(
         end_time=dt.time(18, 0),
     )
     with tenant_context(other_salon.id):
-        other_category = ServiceCategory.objects.create(salon=other_salon, name="Nails")
+        other_category = ServiceCategory.objects.create(salon=other_salon, name={"en": "Nails"})
         other_service = Service.objects.create(
             salon=other_salon,
             category=other_category,
-            name="Manicure",
+            name={"en": "Manicure"},
             duration_minutes=60,
             price="500.00",
             buffer_minutes=15,
         )
-        other_specialist = Specialist.objects.create(salon=other_salon, name="Jane")
+        other_specialist = Specialist.objects.create(salon=other_salon, name={"en": "Jane"})
         other_customer = Customer.objects.create(
             salon=other_salon, name="Bob", email="bob@example.com", phone="+10000000001"
         )

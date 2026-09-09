@@ -21,7 +21,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def other_salon_service_category(other_salon):
     with tenant_context(other_salon.id):
-        return ServiceCategory.objects.create(salon=other_salon, name="Nails")
+        return ServiceCategory.objects.create(salon=other_salon, name={"en": "Nails"})
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def other_salon_service(other_salon, other_salon_service_category):
         return Service.objects.create(
             salon=other_salon,
             category=other_salon_service_category,
-            name="Foreign Manicure",
+            name={"en": "Foreign Manicure"},
             duration_minutes=60,
             price="500.00",
             buffer_minutes=15,

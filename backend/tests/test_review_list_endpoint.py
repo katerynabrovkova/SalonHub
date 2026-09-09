@@ -220,11 +220,11 @@ def test_reviews_from_a_different_salon_never_appear(
     mine = _make_review(salon=salon, specialist=specialist, customer=customer, service=service)
 
     with tenant_context(other_salon.id):
-        o_category = ServiceCategory.objects.create(salon=other_salon, name="Hair")
+        o_category = ServiceCategory.objects.create(salon=other_salon, name={"en": "Hair"})
         o_service = Service.objects.create(
             salon=other_salon,
             category=o_category,
-            name="Cut",
+            name={"en": "Cut"},
             duration_minutes=30,
             price="150.00",
             buffer_minutes=0,

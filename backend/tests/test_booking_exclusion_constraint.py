@@ -55,7 +55,7 @@ def test_overlapping_appointments_for_different_specialists_are_allowed(
     salon, customer, specialist, service
 ) -> None:
     with tenant_context(salon.id):
-        other_specialist = Specialist.objects.create(salon=salon, name="Other Specialist")
+        other_specialist = Specialist.objects.create(salon=salon, name={"en": "Other Specialist"})
 
     start = timezone.now() + dt.timedelta(days=1)
     make_appointment(

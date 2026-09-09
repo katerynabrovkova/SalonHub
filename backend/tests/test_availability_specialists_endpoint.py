@@ -306,11 +306,11 @@ def test_cross_tenant_service_id_returns_400_not_404(client, salon, other_salon)
     URL-addressed resource).
     """
     with tenant_context(other_salon.id):
-        other_category = ServiceCategory.objects.create(salon=other_salon, name="Nails")
+        other_category = ServiceCategory.objects.create(salon=other_salon, name={"en": "Nails"})
         other_service = Service.objects.create(
             salon=other_salon,
             category=other_category,
-            name="Manicure",
+            name={"en": "Manicure"},
             duration_minutes=60,
             price="500.00",
         )

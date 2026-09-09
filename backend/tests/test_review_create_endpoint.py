@@ -102,16 +102,16 @@ def other_salon_completed_appointment(other_salon):
     """A COMPLETED appointment living entirely under ``other_salon`` — used
     for the cross-tenant isolation case."""
     with tenant_context(other_salon.id):
-        category = ServiceCategory.objects.create(salon=other_salon, name="Hair")
+        category = ServiceCategory.objects.create(salon=other_salon, name={"en": "Hair"})
         svc = Service.objects.create(
             salon=other_salon,
             category=category,
-            name="Cut",
+            name={"en": "Cut"},
             duration_minutes=30,
             price="200.00",
             buffer_minutes=0,
         )
-        spec = Specialist.objects.create(salon=other_salon, name="Sam")
+        spec = Specialist.objects.create(salon=other_salon, name={"en": "Sam"})
         cust = Customer.objects.create(
             salon=other_salon, name="Otto", email="otto@example.com", phone="+10000000009"
         )

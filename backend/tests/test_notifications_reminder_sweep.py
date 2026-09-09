@@ -53,7 +53,7 @@ def _reminder_rows(salon):
 
 def _new_specialist(salon, name):
     with tenant_context(salon.id):
-        return Specialist.objects.create(salon=salon, name=name)
+        return Specialist.objects.create(salon=salon, name={"en": name})
 
 
 # --- window boundary tests ---------------------------------------------------

@@ -1373,6 +1373,18 @@ builder: language resolution"), which pulled `Salon` into scope. The
 DECISIONS.md correction landed first, on its own; the implementation and its
 test changes followed.
 
+### Bare-string test fixtures on translatable fields — swept
+
+Decided and implemented 09.09.2026 — 39 test call sites (36 direct + 3
+helper functions) across 15 files (booking / availability / scheduling /
+payments / reviews-model tests) passed a bare string to
+ServiceCategory.name / Service.name / Specialist.name instead of the
+{lang: text} dict shape. None of these tests routed the field through
+resolve_translation, resolve_display_name, or any serializer/admin path,
+so they passed regardless. Swept to dict shape for consistency across the
+codebase, rather than left as a latent inconsistency relying on
+resolve_display_name's fail-loud design to catch it later.
+
 ### Explicitly out of scope for Stage 11.5
 
 - **Frontend UI-string translation** — labels, buttons, static interface

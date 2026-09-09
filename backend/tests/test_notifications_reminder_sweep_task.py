@@ -41,16 +41,16 @@ pytestmark = pytest.mark.django_db
 
 def _entities(salon, *, suffix):
     with tenant_context(salon.id):
-        category = ServiceCategory.objects.create(salon=salon, name=f"Nails {suffix}")
+        category = ServiceCategory.objects.create(salon=salon, name={"en": f"Nails {suffix}"})
         service = Service.objects.create(
             salon=salon,
             category=category,
-            name=f"Manicure {suffix}",
+            name={"en": f"Manicure {suffix}"},
             duration_minutes=60,
             price="500.00",
             buffer_minutes=15,
         )
-        specialist = Specialist.objects.create(salon=salon, name=f"Jane {suffix}")
+        specialist = Specialist.objects.create(salon=salon, name={"en": f"Jane {suffix}"})
         customer = Customer.objects.create(
             salon=salon,
             name=f"Alice {suffix}",

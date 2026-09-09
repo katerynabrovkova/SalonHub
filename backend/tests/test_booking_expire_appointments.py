@@ -80,16 +80,16 @@ def _make_overdue_appointment(
     which need a second, fully independent salon rather than the shared
     `salon` fixture's own service/specialist/customer."""
     with tenant_context(salon.id):
-        category = ServiceCategory.objects.create(salon=salon, name="Nails")
+        category = ServiceCategory.objects.create(salon=salon, name={"en": "Nails"})
         service = Service.objects.create(
             salon=salon,
             category=category,
-            name="Manicure",
+            name={"en": "Manicure"},
             duration_minutes=60,
             price="500.00",
             buffer_minutes=15,
         )
-        specialist = Specialist.objects.create(salon=salon, name="Specialist")
+        specialist = Specialist.objects.create(salon=salon, name={"en": "Specialist"})
         customer = Customer.objects.create(
             salon=salon,
             name="Customer",

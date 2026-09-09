@@ -119,16 +119,16 @@ def _make_stuck_refund_payment_for_salon(
     own service/specialist/customer — same reasoning as
     test_booking_expire_appointments.py's own _make_overdue_appointment."""
     with tenant_context(salon.id):
-        category = ServiceCategory.objects.create(salon=salon, name="Nails")
+        category = ServiceCategory.objects.create(salon=salon, name={"en": "Nails"})
         service = Service.objects.create(
             salon=salon,
             category=category,
-            name="Manicure",
+            name={"en": "Manicure"},
             duration_minutes=60,
             price="500.00",
             buffer_minutes=15,
         )
-        specialist = Specialist.objects.create(salon=salon, name="Specialist")
+        specialist = Specialist.objects.create(salon=salon, name={"en": "Specialist"})
         customer = Customer.objects.create(
             salon=salon,
             name="Customer",

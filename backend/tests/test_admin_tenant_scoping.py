@@ -148,9 +148,9 @@ def test_str_falls_back_to_model_and_pk_when_all_languages_empty(salon):
 
 def test_tenant_scoped_admin_get_queryset_does_not_require_bound_tenant_context(salon, other_salon):
     with tenant_context(salon.id):
-        ServiceCategory.objects.create(salon=salon, name="Cat A")
+        ServiceCategory.objects.create(salon=salon, name={"en": "Cat A"})
     with tenant_context(other_salon.id):
-        ServiceCategory.objects.create(salon=other_salon, name="Cat B")
+        ServiceCategory.objects.create(salon=other_salon, name={"en": "Cat B"})
 
     model_admin = admin.site._registry[ServiceCategory]
     request = factory.get("/admin/catalog/servicecategory/")

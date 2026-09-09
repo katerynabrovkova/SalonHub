@@ -103,7 +103,7 @@ def test_review_specialist_from_a_different_salon_raises_integrity_error(
     _require_specialist_field()
     appointment = _make_completed_appointment(salon, customer, specialist, service)
     with tenant_context(other_salon.id):
-        foreign_specialist = Specialist.objects.create(salon=other_salon, name="Outsider")
+        foreign_specialist = Specialist.objects.create(salon=other_salon, name={"en": "Outsider"})
 
     with tenant_context(salon.id), pytest.raises(IntegrityError):
         with transaction.atomic():
