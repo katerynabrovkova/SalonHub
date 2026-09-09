@@ -1,6 +1,7 @@
 from django.db import models
 
 from catalog.models import Service
+from core.i18n import resolve_display_name
 from core.models import TenantScopedModel, TimeStamped
 
 
@@ -29,7 +30,7 @@ class Specialist(TenantScopedModel, TimeStamped):
         ordering = ["created_at", "id"]
 
     def __str__(self) -> str:
-        return str(self.name)
+        return resolve_display_name(self.name, f"Specialist #{self.pk}")
 
 
 class SpecialistService(TenantScopedModel, TimeStamped):

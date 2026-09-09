@@ -43,3 +43,17 @@ def resolve_translation(value: dict[str, str], requested_lang: str | None) -> st
             return resolved
 
     return ""
+
+
+def resolve_display_name(value: dict[str, str], fallback: str) -> str:
+    """
+    Resolve a translatable name for a staff/admin context (no ``?lang=``
+    equivalent — docs/DECISIONS.md § "Admin display of translatable
+    fields") to a non-empty display string.
+
+    Same fallback chain as ``resolve_translation(value, None)``, but a
+    row whose every language key is empty or absent yields ``fallback``
+    (e.g. ``"Specialist #7"``) instead of ``""`` — an empty admin
+    changelist link / FK dropdown entry would make the row unfindable.
+    """
+    return resolve_translation(value, None) or fallback

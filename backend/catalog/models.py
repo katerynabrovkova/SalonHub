@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models import Func, Value
 from django.db.models.fields.json import KeyTextTransform
 
+from core.i18n import resolve_display_name
 from core.models import TenantScopedModel, TimeStamped
 
 
@@ -53,7 +54,7 @@ class ServiceCategory(TenantScopedModel, TimeStamped):
         ordering = ["ordering", "id"]
 
     def __str__(self) -> str:
-        return str(self.name)
+        return resolve_display_name(self.name, f"ServiceCategory #{self.pk}")
 
 
 class Service(TenantScopedModel, TimeStamped):
@@ -89,4 +90,4 @@ class Service(TenantScopedModel, TimeStamped):
         ordering = ["ordering", "id"]
 
     def __str__(self) -> str:
-        return str(self.name)
+        return resolve_display_name(self.name, f"Service #{self.pk}")

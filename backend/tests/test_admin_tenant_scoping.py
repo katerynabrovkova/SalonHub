@@ -14,8 +14,9 @@ from django.test import RequestFactory
 from booking.admin import AppointmentAdmin
 from booking.guest_tokens import issue_guest_token
 from booking.models import Appointment
-from catalog.models import ServiceCategory
+from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
+from specialists.models import Specialist
 from tests.conftest import make_appointment
 
 pytestmark = pytest.mark.django_db
@@ -25,16 +26,91 @@ factory = RequestFactory()
 
 def test_admin_changelist_reaches_across_tenants(client, superuser, salon, other_salon):
     with tenant_context(salon.id):
-        ServiceCategory.objects.create(salon=salon, name="Salon A Category")
+        ServiceCategory.objects.create(
+            salon=salon, name={"en": "Salon A Category", "uk": "Категорія А"}
+        )
     with tenant_context(other_salon.id):
-        ServiceCategory.objects.create(salon=other_salon, name="Salon B Category")
+        ServiceCategory.objects.create(salon=other_salon, name={"en": "Salon B Category"})
 
     client.force_login(superuser)
     response = client.get("/admin/catalog/servicecategory/")
 
     assert response.status_code == 200
+    # cross-tenant reach: both salons' rows render
     assert b"Salon A Category" in response.content
     assert b"Salon B Category" in response.content
+    # the `name` column resolves to a plain string (no `?lang=` -> English),
+    # not the raw {lang: value} dict — the unrequested language must not leak
+    assert "Категорія А".encode() not in response.content
+
+
+def test_service_changelist_name_column_resolves_not_raw_dict(
+    client, superuser, salon, service_category
+):
+    with tenant_context(salon.id):
+        Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure", "uk": "Манікюр"},
+            duration_minutes=60,
+            price="500.00",
+            buffer_minutes=15,
+        )
+
+    client.force_login(superuser)
+    response = client.get("/admin/catalog/service/")
+
+    assert response.status_code == 200
+    assert b"Manicure" in response.content
+    assert "Манікюр".encode() not in response.content
+
+
+def test_specialist_changelist_name_column_resolves_not_raw_dict(client, superuser, salon):
+    with tenant_context(salon.id):
+        Specialist.objects.create(salon=salon, name={"en": "Jane", "uk": "Джейн"})
+
+    client.force_login(superuser)
+    response = client.get("/admin/specialists/specialist/")
+
+    assert response.status_code == 200
+    assert b"Jane" in response.content
+    assert "Джейн".encode() not in response.content
+
+
+def test_str_resolves_populated_translatable_name(salon):
+    with tenant_context(salon.id):
+        cat = ServiceCategory.objects.create(salon=salon, name={"en": "Brows"})
+        svc = Service.objects.create(
+            salon=salon,
+            category=cat,
+            name={"en": "Lamination"},
+            duration_minutes=30,
+            price="100.00",
+            buffer_minutes=0,
+        )
+        spec = Specialist.objects.create(salon=salon, name={"en": "Jane"})
+
+    assert str(cat) == "Brows"
+    assert str(svc) == "Lamination"
+    assert str(spec) == "Jane"
+
+
+def test_str_falls_back_to_model_and_pk_when_all_languages_empty(salon):
+    with tenant_context(salon.id):
+        cat = ServiceCategory.objects.create(salon=salon, name={})
+        svc = Service.objects.create(
+            salon=salon,
+            category=cat,
+            name={},
+            duration_minutes=30,
+            price="100.00",
+            buffer_minutes=0,
+        )
+        spec = Specialist.objects.create(salon=salon, name={})
+
+    assert str(cat) == f"ServiceCategory #{cat.pk}"
+    assert str(svc) == f"Service #{svc.pk}"
+    assert str(spec) == f"Specialist #{spec.pk}"
 
 
 def test_tenant_scoped_admin_get_queryset_does_not_require_bound_tenant_context(salon, other_salon):
