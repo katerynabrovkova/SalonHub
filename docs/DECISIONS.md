@@ -1078,6 +1078,19 @@ Stage 11 (Reviews).
   own translation while adding nothing the frontend can't already infer from
   which field (`name`) the error is attached to.
 
+Concretely, for `Service` (09.09.2026): `ServiceReadSerializer`'s nested
+`category` block — a `ServiceCategoryMiniSerializer` — returns `category.name`
+as a plain string already resolved for the request's `?lang=`, exactly like the
+top-level `name` field, never the raw `{"en": ..., "uk": ...}` dict. This works
+because `ServiceCategoryMiniSerializer.name` is its own `SerializerMethodField`
+calling `core.i18n.resolve_translation`, and the nested serializer inherits
+`self.context` (hence the `request`) from the parent `ServiceReadSerializer`
+when instantiated the ordinary declarative way. Confirmed empirically by test:
+a `Service` response's `category.name` follows the `?lang=` on *that* request,
+resolving per-request rather than from any cached or default value — it can
+differ from what a direct `ServiceCategory` endpoint call for the same category
+under a different `?lang=` would return.
+
 ### Sub-step 1 (model changes) — decided 09.09.2026
 
 The concrete model-layer shape, agreed and then implemented in the same
