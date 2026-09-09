@@ -1,7 +1,34 @@
 from django.db import models
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Length
+from django.db.models.lookups import LessThanOrEqual
 
 from core.models import TimeStamped
 from core.validators import ISO_4217_PATTERN, iso_4217_validator
+
+SALON_ABOUT_MAX_LENGTH = 2000
+
+# Enumerated per-language length checks for the translatable `about` dict
+# (docs/DECISIONS.md § Stage 11.5 sub-step 1). A dict of arbitrary keys can't
+# be length-checked as a whole at the DB level, so each supported language
+# key is checked individually as `length(about ->> '<lang>') <= N`
+# (KeyTextTransform is the `->>` text extraction). A missing key makes
+# `about ->> '<lang>'` SQL NULL, so `LENGTH(NULL) <= N` is NULL — not false —
+# and an untranslated language passes the constraint. Adding a language means
+# adding its check here in a migration.
+_ABOUT_LENGTH_LANGUAGES = ("en", "uk")
+
+
+def _about_length_condition() -> models.Q:
+    return models.Q(
+        *(
+            LessThanOrEqual(
+                Length(KeyTextTransform(lang, "about")),
+                models.Value(SALON_ABOUT_MAX_LENGTH),
+            )
+            for lang in _ABOUT_LENGTH_LANGUAGES
+        )
+    )
 
 
 class Salon(TimeStamped):
@@ -11,8 +38,18 @@ class Salon(TimeStamped):
     TenantScopedModel — a Salon doesn't belong to a tenant, it is one.
     """
 
-    name = models.CharField(max_length=255)
+    # Translatable: {lang_code: string}, e.g. {"en": "Bella", "uk": "Белла"}.
+    # Empty dict is the "no translations yet" state (docs/DECISIONS.md
+    # § Stage 11.5). Resolution + English fallback is a serializer concern
+    # (sub-step 2), not done here.
+    name = models.JSONField(default=dict)
     slug = models.SlugField(unique=True)
+
+    # Salon-profile free text, translatable: {lang_code: string}. New in
+    # Stage 11.5; there was no bio/description field before. Optional — empty
+    # dict when unset. Each populated language value is capped by the
+    # salon_about_max_length_2000_per_language CheckConstraint below.
+    about = models.JSONField(default=dict, blank=True)
 
     # Drives the Stage 3 tenant-resolution middleware's 404 for a deactivated
     # tenant (docs/DECISIONS.md § Stage 3 decisions) — deliberately not a
@@ -47,7 +84,9 @@ class Salon(TimeStamped):
     slot_granularity_minutes = models.PositiveIntegerField(default=15)
 
     class Meta:
-        ordering = ["name"]
+        # `name` is a JSON dict now, not a scalar — it can't be a meaningful
+        # ORDER BY key (was `["name"]`).
+        ordering = ["created_at"]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(currency__regex=ISO_4217_PATTERN),
@@ -57,7 +96,11 @@ class Salon(TimeStamped):
                 condition=models.Q(contact_email__gt=""),
                 name="salon_contact_email_not_empty",
             ),
+            models.CheckConstraint(
+                condition=_about_length_condition(),
+                name="salon_about_max_length_2000_per_language",
+            ),
         ]
 
     def __str__(self) -> str:
-        return self.name
+        return str(self.name)

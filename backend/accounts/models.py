@@ -88,6 +88,17 @@ class Customer(TenantScopedModel, TimeStamped):
     email = models.EmailField()
     phone = models.CharField(max_length=32)
 
+    # Language a notification email to this customer is rendered in, set at
+    # booking time (docs/DECISIONS.md § Stage 11.5 "Email language"). Blank/
+    # "" means unset -> the send path falls back to English, same as the
+    # global `en` fallback. Deliberately NOT `choices=[("en",...),("uk",...)]`:
+    # § Stage 11.5 requires that "nothing in the storage or API shape may
+    # assume exactly these two [languages]", and a choices= list bakes that
+    # assumption into a migration and a validator. A short CharField keeps the
+    # column language-list-agnostic, matching the JSONField translatable
+    # fields.
+    preferred_language = models.CharField(max_length=8, blank=True, default="")
+
     class Meta(TenantScopedModel.Meta):
         abstract = False
         constraints = [

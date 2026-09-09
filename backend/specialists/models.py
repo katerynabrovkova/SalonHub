@@ -5,8 +5,11 @@ from core.models import TenantScopedModel, TimeStamped
 
 
 class Specialist(TenantScopedModel, TimeStamped):
-    name = models.CharField(max_length=255)
-    bio = models.TextField(blank=True)
+    # Translatable: {lang_code: string}. Empty dict is the "no translations
+    # yet" state (docs/DECISIONS.md § Stage 11.5). Resolution + English
+    # fallback is a serializer concern (sub-step 2), not done here.
+    name = models.JSONField(default=dict)
+    bio = models.JSONField(default=dict, blank=True)
     # Employment status only: True = currently employed, False = no longer
     # employed. Not a general availability/visibility flag — temporary
     # absence (vacation, sick leave, parental leave) is TimeOff rows, never
@@ -20,10 +23,13 @@ class Specialist(TenantScopedModel, TimeStamped):
 
     class Meta(TenantScopedModel.Meta):
         abstract = False
-        ordering = ["name", "id"]
+        # `name` is a JSON dict now, not a scalar — it can't be a meaningful
+        # ORDER BY key (was `["name", "id"]`). `id` stays as the deterministic
+        # tiebreak, the same role it played before.
+        ordering = ["created_at", "id"]
 
     def __str__(self) -> str:
-        return self.name
+        return str(self.name)
 
 
 class SpecialistService(TenantScopedModel, TimeStamped):

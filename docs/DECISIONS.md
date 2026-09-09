@@ -984,6 +984,69 @@ code exists.
   languages at once. This mirrors the read/write serializer split
   established in § Stage 11 (Reviews).
 
+### Sub-step 1 (model changes) — decided 09.09.2026
+
+The concrete model-layer shape, agreed and then implemented in the same
+change. Migrations: `catalog.0003`, `tenants.0006`, `specialists.0004`,
+`accounts.0007`. All five affected tables were empty in every environment, so
+the migration is a plain `AlterField`/`AddField`/`RemoveConstraint`/
+`AddConstraint` set with no data step.
+
+- **Storage.** `ServiceCategory.name`, `Service.name`, `Salon.name`,
+  `Specialist.name`, `Specialist.bio` become `JSONField(default=dict)`
+  (`bio` keeps `blank=True`). `default=dict` — empty dict is the
+  "untranslated" state, mirroring `blank=""` elsewhere; not `null=True`.
+  A bare string is still valid JSON, so pre-existing rows / string-shaped
+  input round-trip until the serializer layer (sub-step 2) enforces the dict.
+- **`Salon.about`** — new `JSONField(default=dict, blank=True)`. Per-language
+  length cap enforced by `CheckConstraint`
+  `salon_about_max_length_2000_per_language`:
+  `LENGTH(about ->> 'en') <= 2000 AND LENGTH(about ->> 'uk') <= 2000`
+  (built from `Length(KeyTextTransform(lang, "about"))` per language). A
+  missing key makes `about ->> lang` SQL NULL, so that language's check is
+  NULL, not false — an untranslated language passes. Adding a language = add
+  its clause here in a migration. Same intent as
+  `reviews.Review.text`'s `review_text_max_length_2000`, adapted from a
+  scalar field to per-key.
+- **`Customer.preferred_language`** — new
+  `CharField(max_length=8, blank=True, default="")`. **Deliberately no
+  `choices=`**: § "Languages and fallback" requires that nothing in the
+  storage or API shape assume exactly `{en, uk}`, and a `choices` list bakes
+  that assumption into a migration + a validator. `""` = unset → the send
+  path falls back to `en`.
+- **`Meta.ordering`** (each a required consequence — the old key `name` is
+  now a dict and cannot be a meaningful `ORDER BY`):
+  `ServiceCategory` and `Service` `["ordering", "name"]` → `["ordering", "id"]`
+  (`id` chosen over dropping the tiebreak entirely: the list endpoints
+  paginate and need a deterministic order); `Salon` `["name"]` →
+  `["created_at"]`; `Specialist` `["name", "id"]` → `["created_at", "id"]`
+  (`id` keeps its prior tiebreak role).
+- **Per-language uniqueness.** The single
+  `UniqueConstraint(fields=["salon", "name"])` on each of `ServiceCategory`
+  and `Service` (`servicecategory_salon_name_uniq`, `service_salon_name_uniq`)
+  is replaced by **two functional unique constraints per model, one per
+  supported language**: `servicecategory_salon_name_en_uniq` /
+  `servicecategory_salon_name_uk_uniq` and the `service_…` pair. Each is
+  `UniqueConstraint("salon", NullIf(KeyTextTransform(lang, "name"), Value("")))`
+  →
+  `CREATE UNIQUE INDEX … ON … ("salon_id", (NULLIF(("name" ->> 'lang'), '')))`.
+  `NULLIF(…, '')` folds an absent *or* empty value to SQL NULL, and Postgres
+  treats NULLs as distinct, so any number of rows still lacking a translation
+  for that language never collide — only a shared non-empty value under the
+  same language key within a salon does. This is the mechanism behind
+  § "Uniqueness on `(salon, name)` translatable fields". `NullIf` is a
+  two-arg `Func` subclass in `catalog/models.py`.
+- **`core/exceptions.py` needs no change.** Its handler already maps *every*
+  `psycopg.errors.UniqueViolation` to a generic `unique_violation` 400 and
+  deliberately does not parse constraint names (the boundary note in that
+  file) — so the four new names are covered with no edit, and the two old
+  names appeared nowhere outside `catalog/` anyway.
+- **Not done here** (later sub-steps): serializer resolution / `?lang=` /
+  the read-write serializer split, the `catalog` `validate_<field>` checks
+  (which now compare a dict), admin `list_display`, and the notification
+  message builder. Existing tests that treat these fields as scalars fail
+  after this sub-step by design.
+
 ### Explicitly out of scope for Stage 11.5
 
 - **Frontend UI-string translation** — labels, buttons, static interface
