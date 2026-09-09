@@ -14,6 +14,7 @@ from rest_framework import serializers
 
 from booking.models import AppointmentStatus
 from core.exceptions import DuplicateReviewError, ReviewRequiresCompletedAppointmentError
+from core.i18n import resolve_translation
 from reviews.models import REVIEW_TEXT_MAX_LENGTH, Review
 from specialists.models import Specialist
 
@@ -34,12 +35,28 @@ class ReviewPublicSerializer(serializers.ModelSerializer):
 
 
 class ReviewSpecialistSerializer(serializers.ModelSerializer):
-    """The `specialist` block of each group in the public list response."""
+    """
+    The `specialist` block of each group in the public list response.
+
+    `name` is resolved to a plain string for the request's ``?lang=`` per
+    the read-side language contract (docs/DECISIONS.md § "Wiring ?lang= into
+    the Reviews read endpoint"), never the raw ``{lang: text}`` dict —
+    mirrors specialists.SpecialistReadSerializer. ReviewListView constructs
+    this serializer by hand, so it must pass ``context={"request": request}``
+    for ``get_name`` to see the parameter.
+    """
+
+    name = serializers.SerializerMethodField()
 
     class Meta:
         model = Specialist
         fields = ["id", "name"]
         read_only_fields = fields
+
+    def get_name(self, obj: Specialist) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
 
 
 class ReviewCreateSerializer(serializers.ModelSerializer):

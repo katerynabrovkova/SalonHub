@@ -55,7 +55,7 @@ def client() -> APIClient:
 @pytest.fixture
 def specialist2(salon):
     with tenant_context(salon.id):
-        return Specialist.objects.create(salon=salon, name="Zoe")
+        return Specialist.objects.create(salon=salon, name={"en": "Zoe"})
 
 
 def _reviews_url(salon) -> str:
@@ -126,7 +126,10 @@ def test_reviews_are_grouped_one_entry_per_specialist_with_correct_counts(
     assert set(groups) == {specialist.id, specialist2.id}
     assert len(groups[specialist.id]["reviews"]) == 2
     assert len(groups[specialist2.id]["reviews"]) == 1
-    assert groups[specialist.id]["specialist"]["name"] == specialist.name
+    # `name` is resolved to a plain string per the ?lang= read contract
+    # (docs/DECISIONS.md § "Wiring ?lang= into the Reviews read endpoint"),
+    # never the raw {"en": "Jane"} dict.
+    assert groups[specialist.id]["specialist"]["name"] == "Jane"
 
 
 # --- 2. more reviews ranks first ---------------------------------------
@@ -226,7 +229,7 @@ def test_reviews_from_a_different_salon_never_appear(
             price="150.00",
             buffer_minutes=0,
         )
-        o_specialist = Specialist.objects.create(salon=other_salon, name="Otto")
+        o_specialist = Specialist.objects.create(salon=other_salon, name={"en": "Otto"})
         o_customer = Customer.objects.create(
             salon=other_salon, name="Olga", email="olga@example.com", phone="+10000000007"
         )
@@ -286,3 +289,41 @@ def test_response_does_not_leak_customer_identifying_fields(
     assert customer.name not in blob
     assert customer.email not in blob
     assert customer.phone not in blob
+
+
+# --- 9. ?lang= resolution on the specialist name --------------------
+#
+# docs/DECISIONS.md § "Wiring ?lang= into the Reviews read endpoint": the
+# specialist block's `name` follows the same ?lang= contract as the catalog
+# and specialist endpoints. Mirrors test_specialist_api.py's
+# test_specialist_name_and_bio_resolve_to_requested_language / _falls_back_.
+
+
+def _bilingual_specialist(salon):
+    with tenant_context(salon.id):
+        return Specialist.objects.create(salon=salon, name={"en": "Jane", "uk": "Джейн"})
+
+
+def test_specialist_name_resolves_to_requested_language(client, salon, customer, service):
+    sp = _bilingual_specialist(salon)
+    _make_review(salon=salon, specialist=sp, customer=customer, service=service)
+
+    response = client.get(_reviews_url(salon) + "?lang=uk")
+
+    assert response.status_code == 200
+    assert response.data[0]["specialist"]["name"] == "Джейн"
+
+
+def test_specialist_name_falls_back_to_english_when_lang_absent_or_unsupported(
+    client, salon, customer, service
+):
+    sp = _bilingual_specialist(salon)
+    _make_review(salon=salon, specialist=sp, customer=customer, service=service)
+
+    no_lang = client.get(_reviews_url(salon))
+    bad_lang = client.get(_reviews_url(salon) + "?lang=fr")
+
+    assert no_lang.status_code == 200
+    assert bad_lang.status_code == 200
+    assert no_lang.data[0]["specialist"]["name"] == "Jane"
+    assert bad_lang.data[0]["specialist"]["name"] == "Jane"

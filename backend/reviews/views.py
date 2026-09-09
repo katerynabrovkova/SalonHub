@@ -103,7 +103,9 @@ class ReviewListView(APIView):
 
         payload = [
             {
-                "specialist": ReviewSpecialistSerializer(specialists[specialist_id]).data,
+                "specialist": ReviewSpecialistSerializer(
+                    specialists[specialist_id], context={"request": request}
+                ).data,
                 "reviews": ReviewPublicSerializer(rows, many=True).data,
             }
             for specialist_id, rows in ordered
