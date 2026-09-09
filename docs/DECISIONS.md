@@ -1068,6 +1068,15 @@ Stage 11 (Reviews).
   language they are thinking in; restricting the match to one language
   (English, or the requested `?lang=`) would be an arbitrary limit with no
   upside.
+- **Uniqueness error message stays generic (09.09.2026).**
+  `ServiceCategoryWriteSerializer.validate_name`'s per-language check raises
+  the same `"A category with this name already exists."` whichever language
+  key collided — it does not name the language (no "already exists in
+  Ukrainian"). This matches the pre-existing Stage 4 message for the old
+  whole-dict check. Rationale: the frontend has its own localized copy for
+  displaying errors, and a language-specific backend string would need its
+  own translation while adding nothing the frontend can't already infer from
+  which field (`name`) the error is attached to.
 
 ### Sub-step 1 (model changes) — decided 09.09.2026
 
