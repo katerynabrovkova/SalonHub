@@ -1025,6 +1025,50 @@ fallback chain above.
   supported-language list as the `resolve_translation` fallback chain — not a
   second copy that could drift.
 
+### Read/write serializer split for catalog and specialists
+
+Decided and implemented 09.09.2026 — how the read/write contract above is wired
+into the catalog and specialists endpoints, which are shaped differently from
+Stage 11 (Reviews).
+
+- **No separate read/write view classes.** Reviews split the two directions
+  into distinct view classes on distinct URLs. Catalog (`ServiceCategory`,
+  `Service`) and specialists (`Specialist`) can't: those endpoints are
+  `ListCreateAPIView` / `RetrieveUpdateDestroyAPIView`, and a single class
+  serves GET and POST/PATCH on the *same* URL through DRF's built-in
+  method dispatch. The split is therefore an override of
+  `get_serializer_class()` on each existing view class —
+  `request.method in SAFE_METHODS` → the read serializer (each translatable
+  field resolved to a plain string via `core.i18n.resolve_translation`
+  against `?lang=`), otherwise → the write serializer (the full
+  `{"en": ..., "uk": ...}` dict, keys validated against
+  `core.i18n.SUPPORTED_LANGUAGES` per § "Write-side language key
+  validation"). `get_queryset()`, the permission split, and the
+  `_apply_visibility` mixins are untouched and stay shared across both
+  methods on the one class.
+- **Nested serializers resolve too.** `ServiceCategoryMiniSerializer`,
+  embedded as the `category` block inside `ServiceSerializer`'s read
+  representation, resolves its `name` exactly as the top-level read
+  serializer does. Being nested is not an exemption from the read contract.
+- **`scheduling.SpecialistsAtTimeView` also resolves.** `GET
+  .../availability/specialists/` calls `SpecialistAtTimeSerializer`
+  directly — a plain `APIView`, no `get_serializer_class()` — and still
+  applies `?lang=` resolution to `name` / `bio`. A field read directly
+  rather than through a generic view is still a read and still bound by the
+  read contract.
+- **`?search=` fixed for the JSONField shape.**
+  `_CatalogViewMixin._apply_visibility` did
+  `queryset.filter(name__icontains=search)`, which only worked while `name`
+  was a plain `CharField`. Against a `JSONField` that same lookup matches
+  the JSON's literal serialized text — keys, quotes, commas and all —
+  instead of the translated values, i.e. nonsensical search. Replaced by an
+  OR'd `Q` filter over `name__<lang>__icontains=search` for every `lang` in
+  `core.i18n.SUPPORTED_LANGUAGES` (Django's JSONField key-transform
+  lookup), not hardcoded to two. Rationale: a caller searches in whichever
+  language they are thinking in; restricting the match to one language
+  (English, or the requested `?lang=`) would be an arbitrary limit with no
+  upside.
+
 ### Sub-step 1 (model changes) — decided 09.09.2026
 
 The concrete model-layer shape, agreed and then implemented in the same
