@@ -962,6 +962,64 @@ Recorded so a later reader does not mistake the omission for an oversight.
   names are translated, not the layout. `"Sat, 26 Sep 2026, 14:00"` →
   `"Сб, 26 вер. 2026, 14:00"` (24-hour, no timezone label, unchanged).
 
+### Notification message builder: language resolution
+
+Decided 09.09.2026 — wires the "Notification message templates" bullet
+(§ "Fields becoming translatable") and the "Email language:
+`Customer.preferred_language`" bullet into `notifications._build_message`.
+Neither specified the exact data shape or the resolution call chain; both
+are fixed here.
+
+- **New `core.i18n.resolve_language_code(requested: str | None) -> str`:**
+  `requested` if `requested in SUPPORTED_LANGUAGES` else `"en"`. Distinct
+  from `resolve_translation` (which resolves a `{lang: str}` dict to a
+  string) — this resolves a plain language *preference* to a language
+  *code*, needed to select which `(subject, body)` tuple to use from
+  `_MESSAGES`. Message templates use plain → `en` fallback only (no
+  "first non-empty among remaining languages" fallthrough), since every
+  template is fully populated in both supported languages.
+- **`_MESSAGES` becomes `dict[str, dict[str, tuple[str, str]]]`** —
+  `{trigger: {lang_code: (subject, body)}}`. All four static entries
+  (`BOOKING_CANCELLED`, `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`,
+  `REVIEW_REQUEST`) plus the two dynamic branches' subject/body literals
+  get an `"en"` and a `"uk"` entry.
+- **Resolution source:** `notification.customer.preferred_language` if
+  `notification.customer` is set, else `None` — resolved via
+  `resolve_language_code`, reusing `core.i18n` rather than a new
+  mechanism. `notification.customer` is the canonical FK (already used by
+  `_resolve_recipient`), not `notification.appointment.customer`, though
+  the two coincide for appointment-scoped triggers today.
+- **Customer-less (salon-directed) notifications render in English** — the
+  natural extension of "falls back to `en` when unset," now covering "no
+  `Customer` at all" as well as "`Customer` with an empty
+  `preferred_language`."
+- **The two dynamic branches (`BOOKING_CONFIRMED`, `APPOINTMENT_REMINDER`)
+  keep their current structure:** `salon.name` resolves via
+  `resolve_translation` against the same recipient language;
+  `format_datetime_for_salon` receives the same language code;
+  link / token / slug pass through unchanged. No shared appointment-email
+  helper — that refactor stays deferred (§ Step (e) decisions).
+- **`send_notification`'s locked fetch adds `select_related("customer")`**
+  — a safe, local addition avoiding an extra query per send inside the
+  transaction, consistent with the appointment access the same branches
+  already trigger.
+- **`Salon` lands in this step** (closes the "`Salon` deferred to the
+  notification-builder step" bullet under § "Admin display of translatable
+  fields"): `Salon.__str__` → `resolve_display_name(self.name,
+  f"Salon #{self.pk}")`, matching `ServiceCategory` / `Service` /
+  `Specialist`; `SalonAdmin.list_display` gets the same
+  `@admin.display`-decorated `resolve_translation(obj.name, None)` pattern
+  (no `admin_order_field`) as the catalog / specialists admin. `Salon`
+  gets the same `__str__`-fallback and changelist-render test coverage as
+  the other three models — the earlier "`Salon` gets no new test here
+  (deferred)" note is superseded.
+- **All `Salon.objects.create(name=...)` scalar-string test sites** (not
+  only `tests/conftest.py`) migrate to dict-shaped names in this step, for
+  consistency: leaving any scalar `Salon` fixture in place would silently
+  reintroduce the same `AttributeError` risk `resolve_translation`'s
+  fail-loud design is meant to surface immediately, the next time
+  something calls `str(salon)` against it.
+
 ### API language contract for translatable fields
 
 Decided 09.09.2026 — part of the same Stage 11.5 contract, agreed before any
