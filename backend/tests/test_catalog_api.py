@@ -295,6 +295,146 @@ def test_create_category_with_partial_dict_and_no_collision_succeeds(client, sal
     assert response.data["name"] == {"uk": "Манікюр"}
 
 
+# --- Stage 11.5: Service translatable name + nested category read/write ----
+
+
+def _make_service(salon, category, name):
+    with tenant_context(salon.id):
+        return Service.objects.create(
+            salon=salon, category=category, name=name, duration_minutes=30, price="100.00"
+        )
+
+
+def _make_category(salon, name):
+    with tenant_context(salon.id):
+        return ServiceCategory.objects.create(salon=salon, name=name)
+
+
+def test_service_name_resolves_to_requested_language(client, salon):
+    category = _make_category(salon, {"en": "Hair"})
+    svc = _make_service(salon, category, {"en": "Haircut", "uk": "Стрижка"})
+
+    uk = client.get(_service_detail_url(salon, svc) + "?lang=uk")
+    assert uk.status_code == 200
+    assert uk.data["name"] == "Стрижка"
+    assert client.get(_service_detail_url(salon, svc) + "?lang=en").data["name"] == "Haircut"
+
+
+def test_service_name_falls_back_to_english_without_lang_param(client, salon):
+    category = _make_category(salon, {"en": "Hair"})
+    svc = _make_service(salon, category, {"en": "Haircut", "uk": "Стрижка"})
+
+    response = client.get(_service_detail_url(salon, svc))
+    assert response.status_code == 200
+    assert response.data["name"] == "Haircut"
+
+
+def test_service_list_resolves_name_per_lang(client, salon):
+    category = _make_category(salon, {"en": "Hair"})
+    _make_service(salon, category, {"en": "Haircut", "uk": "Стрижка"})
+
+    response = client.get(_service_list_url(salon) + "?lang=uk")
+    assert response.status_code == 200
+    assert response.data["results"][0]["name"] == "Стрижка"
+
+
+def test_service_detail_nested_category_name_resolves_per_lang(client, salon):
+    category = _make_category(salon, {"en": "Hair", "uk": "Волосся"})
+    svc = _make_service(salon, category, {"en": "Haircut", "uk": "Стрижка"})
+
+    uk = client.get(_service_detail_url(salon, svc) + "?lang=uk")
+    assert uk.status_code == 200
+    assert uk.data["category"]["name"] == "Волосся"
+    en = client.get(_service_detail_url(salon, svc) + "?lang=en")
+    assert en.data["category"]["name"] == "Hair"
+
+
+def test_service_list_nested_category_name_resolves_per_lang(client, salon):
+    category = _make_category(salon, {"en": "Hair", "uk": "Волосся"})
+    _make_service(salon, category, {"en": "Haircut", "uk": "Стрижка"})
+
+    response = client.get(_service_list_url(salon) + "?lang=uk")
+    assert response.status_code == 200
+    assert response.data["results"][0]["category"]["name"] == "Волосся"
+
+
+def test_create_service_with_unsupported_language_key_returns_400(
+    client, salon, admin_account, service_category
+):
+    client.force_authenticate(user=admin_account)
+    response = client.post(
+        _service_list_url(salon),
+        {
+            "category_id": service_category.id,
+            "name": {"en": "Wax", "fr": "Cire"},
+            "duration_minutes": 30,
+            "price": "100.00",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "name" in response.data["error"]["details"]
+
+
+def test_patch_service_with_unsupported_language_key_returns_400(
+    client, salon, admin_account, service
+):
+    client.force_authenticate(user=admin_account)
+    response = client.patch(
+        _service_detail_url(salon, service),
+        {"name": {"en": "Wax", "fr": "Cire"}},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "name" in response.data["error"]["details"]
+
+
+def test_create_service_colliding_on_uk_only_returns_400(
+    client, salon, admin_account, service_category
+):
+    _make_service(salon, service_category, {"en": "Haircut", "uk": "Стрижка"})
+
+    client.force_authenticate(user=admin_account)
+    # Different "en", same "uk" -> per-language check must reject this.
+    response = client.post(
+        _service_list_url(salon),
+        {
+            "category_id": service_category.id,
+            "name": {"en": "Trim", "uk": "Стрижка"},
+            "duration_minutes": 30,
+            "price": "100.00",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["error"]["details"]["name"] == ["A service with this name already exists."]
+
+
+def test_create_service_with_partial_dict_and_no_collision_succeeds(
+    client, salon, admin_account, service_category
+):
+    _make_service(salon, service_category, {"en": "Haircut", "uk": "Стрижка"})
+
+    client.force_authenticate(user=admin_account)
+    response = client.post(
+        _service_list_url(salon),
+        {
+            "category_id": service_category.id,
+            "name": {"uk": "Манікюр"},
+            "duration_minutes": 30,
+            "price": "100.00",
+        },
+        format="json",
+    )
+
+    # POST echoes the write serializer -> raw dict, like the ServiceCategory case.
+    assert response.status_code == 201
+    assert response.data["name"] == {"uk": "Манікюр"}
+
+
 # --- cross-salon FK / server-assigned salon ---------------------------------
 
 

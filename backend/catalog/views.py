@@ -18,7 +18,8 @@ from catalog.models import Service, ServiceCategory
 from catalog.serializers import (
     ServiceCategoryReadSerializer,
     ServiceCategoryWriteSerializer,
-    ServiceSerializer,
+    ServiceReadSerializer,
+    ServiceWriteSerializer,
 )
 from catalog.services import soft_delete_category, soft_delete_service
 from core.permissions import IsSalonStaff
@@ -90,6 +91,21 @@ class _ServiceCategorySerializerMixin:
         return ServiceCategoryWriteSerializer
 
 
+class _ServiceSerializerMixin:
+    """
+    Read/write serializer split (docs/DECISIONS.md § Stage 11.5): GET
+    resolves `name` (and the nested `category.name`) to a plain string for
+    ``?lang=``; writes take/echo the full language dict via `category_id`.
+    """
+
+    request: Request  # set by DRF's APIView.dispatch
+
+    def get_serializer_class(self) -> type[BaseSerializer]:
+        if self.request.method in SAFE_METHODS:
+            return ServiceReadSerializer
+        return ServiceWriteSerializer
+
+
 class ServiceCategoryListCreateView(
     _ServiceCategorySerializerMixin, _CatalogViewMixin, generics.ListCreateAPIView
 ):
@@ -110,9 +126,7 @@ class ServiceCategoryDetailView(
         soft_delete_category(instance)
 
 
-class ServiceListCreateView(_CatalogViewMixin, generics.ListCreateAPIView):
-    serializer_class = ServiceSerializer
-
+class ServiceListCreateView(_ServiceSerializerMixin, _CatalogViewMixin, generics.ListCreateAPIView):
     def get_queryset(self) -> QuerySet[Service]:
         queryset = self._apply_visibility(Service.objects.select_related("category"))
         category_id = self.request.query_params.get("category")
@@ -124,9 +138,9 @@ class ServiceListCreateView(_CatalogViewMixin, generics.ListCreateAPIView):
         serializer.save(salon_id=get_current_salon_id())
 
 
-class ServiceDetailView(_CatalogViewMixin, generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = ServiceSerializer
-
+class ServiceDetailView(
+    _ServiceSerializerMixin, _CatalogViewMixin, generics.RetrieveUpdateDestroyAPIView
+):
     def get_queryset(self) -> QuerySet[Service]:
         return self._apply_visibility(Service.objects.select_related("category"))
 

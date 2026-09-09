@@ -84,18 +84,35 @@ class ServiceCategoryReadSerializer(serializers.ModelSerializer):
 
 
 class ServiceCategoryMiniSerializer(serializers.ModelSerializer):
-    """Nested read-only summary of a Service's category — see ServiceSerializer."""
+    """
+    Nested read-only summary of a Service's category (see
+    ServiceReadSerializer). `name` resolves per the request's ``?lang=`` just
+    like ServiceCategoryReadSerializer.get_name — a nested serializer
+    inherits `self.context` from its parent when instantiated the normal
+    declarative way, so the request reaches this `get_name` too.
+    """
+
+    name = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceCategory
         fields = ["id", "name"]
         read_only_fields = fields
 
+    def get_name(self, obj: ServiceCategory) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
 
-class ServiceSerializer(serializers.ModelSerializer):
+
+class ServiceWriteSerializer(serializers.ModelSerializer):
     """
-    `category` is a nested read-only summary; `category_id` is the writable
-    FK. Its real queryset can't be built at class-body/import time —
+    Write representation (docs/DECISIONS.md § Stage 11.5 "Read/write
+    serializer split for catalog and specialists"): `name` is the full
+    ``{lang_code: string}`` dict, echoed back as-is; `category_id` is the
+    writable FK. Read requests use ServiceReadSerializer instead.
+
+    `category_id`'s real queryset can't be built at class-body/import time —
     TenantScopedManager.get_queryset() raises immediately if no tenant is
     bound, and nothing is bound at module import — so the class body wires
     it to a harmless, always-empty placeholder
@@ -139,12 +156,56 @@ class ServiceSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         self.fields["category_id"].queryset = ServiceCategory.objects.all()
 
-    def validate_name(self, value: str) -> str:
-        """See ServiceCategorySerializer.validate_name — same DRF gotcha,
-        same (salon, name) constraint, same fix."""
+    def validate_name(self, value: dict[str, str]) -> dict[str, str]:
+        """Mirrors ServiceCategoryWriteSerializer.validate_name exactly: every
+        key must be a supported language code (rejected, not dropped), and
+        per-language ``(salon, name)`` uniqueness against the tenant-scoped
+        manager. The message is deliberately generic — it does not name the
+        colliding language (docs/DECISIONS.md § Stage 11.5)."""
+        for lang in value:
+            if lang not in SUPPORTED_LANGUAGES:
+                raise serializers.ValidationError(f"Unsupported language code: {lang!r}")
+
         queryset = Service.objects.all()
         if self.instance is not None:
             queryset = queryset.exclude(pk=self.instance.pk)
-        if queryset.filter(name=value).exists():
-            raise serializers.ValidationError("A service with this name already exists.")
+        for lang, text in value.items():
+            if not text:
+                continue
+            if queryset.filter(**{f"name__{lang}": text}).exists():
+                raise serializers.ValidationError("A service with this name already exists.")
         return value
+
+
+class ServiceReadSerializer(serializers.ModelSerializer):
+    """
+    Read representation: `name` resolved to a plain string for the request's
+    ``?lang=`` (docs/DECISIONS.md § Stage 11.5), and the nested `category`
+    (ServiceCategoryMiniSerializer) resolves its own `name` the same way.
+    The writable `category_id` is absent here — read shows the nested object.
+    """
+
+    category = ServiceCategoryMiniSerializer(read_only=True)
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Service
+        fields = [
+            "id",
+            "salon",
+            "category",
+            "name",
+            "duration_minutes",
+            "price",
+            "buffer_minutes",
+            "ordering",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_name(self, obj: Service) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
