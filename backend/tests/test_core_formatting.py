@@ -68,3 +68,17 @@ def test_english_names_regardless_of_locale():
 
     assert result == "Sat, 26 Sep 2026, 14:00"
     assert "Sep" in result
+
+
+def test_ukrainian_tables_selected_by_lang():
+    result = format_datetime_for_salon(WHEN, "Europe/Kyiv", lang="uk")
+
+    assert result == "Сб, 26 вер. 2026, 14:00"
+
+
+def test_none_and_unsupported_lang_fall_back_to_english():
+    english = format_datetime_for_salon(WHEN, "Europe/Kyiv", lang="en")
+
+    assert format_datetime_for_salon(WHEN, "Europe/Kyiv", lang=None) == english
+    assert format_datetime_for_salon(WHEN, "Europe/Kyiv", lang="fr") == english
+    assert english == "Sat, 26 Sep 2026, 14:00"
