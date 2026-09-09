@@ -135,4 +135,10 @@ class SpecialistsAtTimeView(APIView):
         # (e.g. a booking race between the two steps) — a valid empty
         # answer, not an error (§ Stage 6.K decisions).
         specialists = mapping.get(submitted_at, [])
-        return Response({"specialists": SpecialistAtTimeSerializer(specialists, many=True).data})
+        return Response(
+            {
+                "specialists": SpecialistAtTimeSerializer(
+                    specialists, many=True, context={"request": request}
+                ).data
+            }
+        )

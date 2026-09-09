@@ -59,8 +59,16 @@ def _freeze_now(monkeypatch: pytest.MonkeyPatch, value: dt.datetime = FROZEN_NOW
 
 
 def _make_specialist(*, salon, name: str, bio: str = "", is_active: bool = True) -> Specialist:
+    # Stage 11.5: `name`/`bio` are translatable JSONFields. The helper still
+    # takes plain strings for brevity and wraps them as the English entry;
+    # an empty `bio` stays an empty dict (the "no translations yet" state).
     with tenant_context(salon.id):
-        return Specialist.objects.create(salon=salon, name=name, bio=bio, is_active=is_active)
+        return Specialist.objects.create(
+            salon=salon,
+            name={"en": name},
+            bio={"en": bio} if bio else {},
+            is_active=is_active,
+        )
 
 
 def _link_specialist_service(*, salon, specialist: Specialist, service: Service) -> None:
@@ -347,12 +355,12 @@ def test_specialist_photo_field_is_null(client, monkeypatch, salon, service):
     assert response.data["specialists"][0]["photo"] is None
 
 
-def test_specialist_order_follows_name_ordering(client, monkeypatch, salon, service):
+def test_specialist_order_follows_creation_order(client, monkeypatch, salon, service):
     """
-    Zoe is created before Amy — insertion order is deliberately the reverse
-    of alphabetical — so a response that merely preserved creation/query
-    order would list Zoe first. Specialist.Meta.ordering is ["name", "id"],
-    so the correct response lists Amy first. Kept separate from the
+    Specialist.Meta.ordering is ["created_at", "id"] (Stage 11.5 sub-step 1:
+    `name` became a translatable JSON dict and can no longer be an ORDER BY
+    key). Zoe is created before Amy, so the correct response lists Zoe first
+    — creation order, not name-alphabetical. Kept separate from the
     happy-path test above for the same failure-attribution reason as
     test_specialist_photo_field_is_null.
     """
@@ -376,7 +384,7 @@ def test_specialist_order_follows_name_ordering(client, monkeypatch, salon, serv
     )
 
     assert response.status_code == 200
-    assert [entry["name"] for entry in response.data["specialists"]] == ["Amy", "Zoe"]
+    assert [entry["name"] for entry in response.data["specialists"]] == ["Zoe", "Amy"]
 
 
 # --- (f) AllowAny --------------------------------------------------------------

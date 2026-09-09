@@ -11,6 +11,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from catalog.models import Service
+from core.i18n import resolve_translation
 from specialists.models import Specialist
 
 
@@ -95,8 +96,29 @@ class SpecialistAtTimeSerializer(serializers.ModelSerializer):
     exactly photo/name/bio, nothing else. A ModelSerializer here, unlike the
     query serializers above — this one does serialize a real `Specialist`
     instance, not just validate query params.
+
+    `name`/`bio` are translatable JSONFields (Stage 11.5): resolved to a
+    plain string for the request's ``?lang=`` via
+    `core.i18n.resolve_translation`, mirroring
+    `specialists.serializers.SpecialistReadSerializer._resolved`. The view
+    must build this serializer with ``context={"request": request}`` for the
+    ``?lang=`` lookup to work.
     """
+
+    name = serializers.SerializerMethodField()
+    bio = serializers.SerializerMethodField()
 
     class Meta:
         model = Specialist
         fields = ["photo", "name", "bio"]
+
+    def _resolved(self, value: dict[str, str]) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(value, requested_lang)
+
+    def get_name(self, obj: Specialist) -> str:
+        return self._resolved(obj.name)
+
+    def get_bio(self, obj: Specialist) -> str:
+        return self._resolved(obj.bio)
