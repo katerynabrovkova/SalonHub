@@ -48,19 +48,19 @@ import datetime as dt
 import logging
 from decimal import Decimal
 
-import payments.tasks as payments_tasks
 import pytest
 from django.db import transaction
 from django.db.models.query import QuerySet
 from django.utils import timezone
-from payments.tasks import flag_stuck_refund_payments
 
+import payments.tasks as payments_tasks
 from accounts.models import Customer
 from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
 from payments.constants import STUCK_REFUND_THRESHOLD
 from payments.models import Payment, PaymentStatus
 from payments.services import flag_stuck_refunds
+from payments.tasks import flag_stuck_refund_payments
 from specialists.models import Specialist
 from tests.conftest import make_appointment
 
