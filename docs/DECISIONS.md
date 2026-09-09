@@ -1195,6 +1195,63 @@ the migration is a plain `AlterField`/`AddField`/`RemoveConstraint`/
   message builder. Existing tests that treat these fields as scalars fail
   after this sub-step by design.
 
+### Admin display of translatable fields
+
+Decided 09.09.2026 — Django admin has no per-request language equivalent
+(staff / admin-panel interface language was already marked out of scope for
+Stage 11.5, § "Explicitly out of scope"). Every translatable field shown in
+admin resolves through the **no-`?lang=` fallback chain** —
+`resolve_translation(value, None)`: requested language (none here) → English
+→ first non-empty supported language → `""` — with no language selector.
+
+**`__str__` gets an identifying fallback; `list_display` columns do not.**
+
+- **`__str__`** on `ServiceCategory`, `Service`, `Salon`, `Specialist` (the
+  only four models whose `__str__` touches a translatable field) now returns
+  `core.i18n.resolve_display_name(self.<field>, f"<Model> #{self.pk}")`.
+  `resolve_display_name(value, fallback)` is a thin wrapper —
+  `resolve_translation(value, None) or fallback` — living beside
+  `resolve_translation` in `core/i18n.py` so the fallback rule has one home
+  and isn't copied into four model files.
+  - **Why a fallback here:** `__str__` renders the admin changelist **link**
+    column and every FK / M2M column, `list_filter` dropdown, and
+    autocomplete entry that points at these models. A row whose every
+    language key is empty would otherwise render as an empty clickable cell
+    and become effectively unfindable / unselectable — a functional
+    regression, not a cosmetic one. `"<Model> #<pk>"` keeps the row
+    identifiable. This is a deliberate, admin-only divergence from the plain
+    API `?lang=` behaviour, where a fully-empty field correctly resolves to
+    `""`.
+  - This single change per model fixes every **indirect** exposure across the
+    app at once — no other `admin.py` file is touched for the `__str__` path.
+    `Customer.__str__` / `Account.__str__` / `Appointment.__str__` etc. that
+    interpolate one of these objects inherit the fix for free.
+
+- **`list_display`** columns that name a translatable field directly
+  (`SalonAdmin` `name`, `ServiceCategoryAdmin` `name`, `ServiceAdmin` `name`,
+  `SpecialistAdmin` `name`) are resolved via a small per-admin
+  `@admin.display`-decorated method returning
+  `resolve_translation(obj.<field>, None)` — **no fallback string**. Django
+  formats a direct field-name column through the field's own formatter, not
+  through `__str__`, so these four need their own method; an empty cell for a
+  fully-untranslated row is acceptable in a data column (it already rendered
+  as `{}` before this change) and matches the API contract exactly.
+  - No `admin_order_field` on these methods: a `{lang_code: string}` dict is
+    not a meaningful `ORDER BY` key, consistent with the `Meta.ordering →
+    id` decision in the storage sub-step.
+
+- **`Salon.about` and `Specialist.bio`** are referenced in no `list_display`
+  and no `__str__` today — no admin change is needed for them. Recorded here
+  so their absence from this change isn't later read as an oversight.
+
+The one existing admin-changelist render test
+(`test_admin_tenant_scoping.py::test_admin_changelist_reaches_across_tenants`)
+is updated for the resolved `name` column; changelist-render coverage for the
+other three models and all `__str__`-fallback coverage is added. No test
+currently asserts on `str()` of these four models. All test changes land in
+the implementation follow-up commit; this DECISIONS.md entry lands first, on
+its own.
+
 ### Explicitly out of scope for Stage 11.5
 
 - **Frontend UI-string translation** — labels, buttons, static interface
