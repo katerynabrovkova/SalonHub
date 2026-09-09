@@ -973,6 +973,19 @@ code exists.
   so a bad value only ever signals a frontend bug, not a real user-facing
   edge case worth hard-erroring on, and it keeps fallback uniform with the
   "field not translated into the requested language" case.
+- **Full fallback chain (refines the rule above — decided 09.09.2026).** When
+  resolving a translatable field for a read response: try the requested
+  language; then English. If English is also empty/absent for that field,
+  resolution does **not** stop — it falls through to the first non-empty value
+  found among the remaining language keys, checked in a fixed deterministic
+  order by iterating the supported-language list (no special-casing of exactly
+  two languages, so adding a third later needs no change here). Only when
+  **every** language key is empty or absent does the field resolve to `""`.
+  Rationale: showing text in an unrequested language is a smaller UX cost than
+  showing a blank field when the data actually exists — a salon that has
+  translated a field into only one language should still have that text
+  visible to every visitor, not a gap, and salons naturally fill in more
+  languages over time.
 - **`?lang=` is a per-request choice, independent of
   `Customer.preferred_language`.** `preferred_language` controls only the
   language a notification email is rendered in (see § Email language above)
