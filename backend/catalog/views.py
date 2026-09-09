@@ -8,7 +8,7 @@ never from client input (both serializers keep it read-only, see
 catalog/serializers.py).
 """
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from rest_framework import generics
 from rest_framework.permissions import SAFE_METHODS, AllowAny, BasePermission
 from rest_framework.request import Request
@@ -22,6 +22,7 @@ from catalog.serializers import (
     ServiceWriteSerializer,
 )
 from catalog.services import soft_delete_category, soft_delete_service
+from core.i18n import SUPPORTED_LANGUAGES
 from core.permissions import IsSalonStaff
 from core.tenancy import get_current_salon_id
 
@@ -72,7 +73,17 @@ class _CatalogViewMixin:
             queryset = queryset.filter(is_active=True)
         search = request.query_params.get("search")
         if search:
-            queryset = queryset.filter(name__icontains=search)
+            # `name` is a translatable JSONField (Stage 11.5 sub-step 1): a
+            # plain `name__icontains` matches the serialized JSON text —
+            # language keys, quotes, punctuation and all — not the translated
+            # values (docs/DECISIONS.md § "Read/write serializer split"). OR
+            # the per-language key-transform lookup across every supported
+            # language instead; a caller searches in whichever language they
+            # are thinking in.
+            q = Q()
+            for lang in SUPPORTED_LANGUAGES:
+                q |= Q(**{f"name__{lang}__icontains": search})
+            queryset = queryset.filter(q)
         return queryset
 
 

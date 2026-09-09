@@ -513,3 +513,40 @@ def test_service_list_response_has_paginated_shape(client, salon, service):
     assert response.status_code == 200
     assert set(response.data.keys()) == {"count", "next", "previous", "results"}
     assert response.data["results"][0]["id"] == service.id
+
+
+# --- Stage 11.5: ?search= against the translatable JSONField name ----------
+
+
+def test_search_matches_english_name(client, salon):
+    _make_category(salon, {"en": "Haircut", "uk": "Стрижка"})
+
+    response = client.get(_category_list_url(salon) + "?search=Haircut")
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+
+
+def test_search_matches_ukrainian_name(client, salon):
+    _make_category(salon, {"en": "Haircut", "uk": "Стрижка"})
+
+    response = client.get(_category_list_url(salon) + "?search=Стрижка")
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+
+
+def test_search_does_not_match_language_keys_or_json_punctuation(client, salon):
+    _make_category(salon, {"en": "Haircut", "uk": "Стрижка"})
+
+    for term in ("en", "uk"):
+        response = client.get(_category_list_url(salon) + f"?search={term}")
+        assert response.status_code == 200
+        assert response.data["count"] == 0, f"?search={term} leaked a match"
+
+
+def test_search_matches_across_service_and_category(client, salon):
+    category = _make_category(salon, {"en": "Hair"})
+    _make_service(salon, category, {"en": "Deep Tissue", "uk": "Глибокий масаж"})
+
+    response = client.get(_service_list_url(salon) + "?search=Глибокий")
+    assert response.status_code == 200
+    assert response.data["count"] == 1
