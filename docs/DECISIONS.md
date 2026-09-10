@@ -1549,10 +1549,91 @@ continuation of that deferral, not a breach of the "don't reopen a closed
 stage" rule. The stage-order constraint is about not implementing *ahead*;
 finishing a deliberately-deferred piece of an earlier stage is expected.
 
+### CSRF protection resolved
+
+Decided 2026-09-10. Closes the "CSRF cookie/header names and check location"
+open question below. Contract agreed before code, per the stage-by-stage
+workflow.
+
+- **Reuse Django's built-in CSRF engine (`django.middleware.csrf`), not a
+  hand-rolled double-submit check.** Django's token is signed and per-request
+  masked (BREACH-resistant) and is compared in constant time; a bespoke
+  double-submit would re-implement all of that worse. DRF's own
+  `SessionAuthentication.enforce_csrf()` is the reference pattern to follow: it
+  instantiates a `CsrfViewMiddleware`, calls its `process_request()` then
+  `process_view()` manually, and raises `PermissionDenied` on failure. Our
+  check mirrors that shape.
+- **The check is wired into
+  `accounts.authentication.AccountJWTCookieAuthentication.authenticate()`**,
+  not middleware and not a DRF permission class. It runs the
+  `enforce_csrf`-style logic only when **both**:
+  1. the request method is unsafe (`POST` / `PUT` / `PATCH` / `DELETE`), and
+  2. the access token was read from the **cookie**, not the
+     `Authorization: Bearer` header.
+
+  A non-browser client presenting a Bearer header is therefore exempt — it is
+  not subject to ambient-credential CSRF, the same cookie-vs-header split
+  rationale already used for the transport decision. `AccountJWTAuthentication`
+  (the header class) gets no CSRF check.
+- **Scope — endpoints protected:** every endpoint listed as an
+  "Account-authenticated write endpoint" in the Stage 12 recon inventory
+  (catalog category/service create + update + delete, specialist create +
+  update + delete, appointment review create), **plus** `auth/login/`,
+  `auth/refresh/` and `auth/logout/` explicitly. Login-CSRF **is** in scope
+  (decided 2026-09-10): the cost is one extra bootstrap `GET` before the login
+  form renders, and that is accepted against the real risk of a forged
+  cross-site login that logs a victim into an attacker-controlled account.
+  `auth/login/` and `auth/refresh/` are `AllowAny` and cookie-driven rather
+  than access-cookie-authenticated, so their CSRF check is wired at the view
+  level following the same `enforce_csrf` pattern, not via the authentication
+  class.
+- **New endpoint: `GET /api/v1/salons/<slug>/auth/csrf/`** — `AllowAny`. Calls
+  `django.middleware.csrf.get_token(request)` to force the CSRF cookie onto the
+  response, returns `204` with no body. The frontend calls this once before
+  rendering the login form (and any time it needs to (re)prime the token).
+- **`CSRF_COOKIE_HTTPONLY` stays `False`** (Django default). The frontend JS
+  must read this cookie's value to echo it in the request header, so it cannot
+  be httpOnly. This is **not** in tension with the access/refresh cookies being
+  httpOnly: the CSRF cookie is not a credential on its own — possessing it
+  grants nothing; it only demonstrates that the request was issued by a
+  same-origin script that could read a same-origin cookie. The session tokens
+  remain unreadable to JS.
+- **`CSRF_COOKIE_SAMESITE = "Lax"`** — matches the auth cookies.
+  **`CSRF_COOKIE_SECURE`** follows the existing settings-module split (already
+  `True` in `production.py`, unset/`False` in development).
+- **Header name: Django's default `X-CSRFToken`** — no reason to diverge. The
+  frontend API client reads the `csrftoken` cookie and sets `X-CSRFToken` on
+  every unsafe-method request. `CSRF_HEADER_NAME` / `CSRF_COOKIE_NAME` stay at
+  their defaults.
+- **Explicitly out of scope for this sub-step:**
+  - Guest-token-authenticated endpoints (`bookings/`,
+    `guest/appointments/<id>/cancel/`, `.../pay/`, and the guest path of
+    review-create). `X-Guest-Token` is a custom request header, not an ambient
+    cookie — a cross-site page cannot set it without a CORS preflight the API
+    will not grant, so these are already immune to CSRF (per the recon
+    inventory).
+  - The payment webhook (`/api/v1/webhooks/payments/`). HMAC-signature
+    verified, not cookie-authenticated, called by an external system.
+  - The other `AllowAny` unauthenticated `auth/` endpoints (`register/`,
+    `verify-email/`, `password-reset/`, `password-reset/confirm/`,
+    `resend-verification/`) — no ambient credential to abuse; a forged POST
+    achieves nothing an attacker could not do directly.
+
+**What this requires (implementation, not yet done):**
+
+1. CSRF settings block in `config/settings/base.py` (`CSRF_COOKIE_SAMESITE`,
+   `CSRF_COOKIE_HTTPONLY` explicit-`False`; `CSRF_COOKIE_SECURE` in
+   `production.py` already present).
+2. The `enforce_csrf`-style check in
+   `AccountJWTCookieAuthentication.authenticate()`, gated on unsafe method +
+   cookie-sourced token, plus the equivalent guard on `LoginView` /
+   `RefreshView` / `LogoutView`.
+3. `AuthCsrfView` (`GET auth/csrf/`) and its route in `accounts/salon_urls.py`.
+4. Frontend API client: prime via `auth/csrf/`, read `csrftoken`, send
+   `X-CSRFToken` on unsafe methods (lands with the frontend client sub-step).
+
 ### Open questions — resolve in the next sub-step, not decided here
 
 - **CORS allowed-origins list, dev vs prod** — the concrete origin values,
   whether they come from an env var, and how many prod origins (apex +
   per-salon subdomains?) must be allowed.
-- **CSRF cookie/header names and check location** — see the CSRF bullet above;
-  the mechanism is agreed, the concrete parameters are not.
