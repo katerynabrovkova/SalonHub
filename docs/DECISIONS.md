@@ -1488,14 +1488,71 @@ Decided 10.09.2026.
   revisited when TypeScript 7.1 stabilizes the toolchain, or if project
   requirements change before then.
 
+### Cookie mechanism resolved
+
+Decided 2026-09-10. Closes the "exact cookie name(s)" and "exact `SameSite`
+value" open questions below; the CORS allowed-origins list stays open.
+
+- **Django itself sets the session as two separate httpOnly cookies on the
+  response** — one for the access token, one for the refresh token. Tokens are
+  no longer returned in the JSON body, and there is no Next.js proxy / route
+  handler layer mediating the cookies: the browser talks to the Django API
+  directly and the `Set-Cookie` comes straight from the DRF view.
+- **Two cookies, not one shared cookie**, because their scopes differ:
+  - **Access token cookie** — no `Path` restriction (effectively `Path=/`), so
+    it rides every request to the API. This is what the authentication class
+    reads on normal authenticated calls.
+  - **Refresh token cookie** — `Path=/api/v1/salons/<slug>/auth/refresh/`, so
+    the browser only attaches it to the refresh endpoint itself. It never
+    reaches any other view, shrinking the surface on which a long-lived
+    credential is exposed. (One consequence: the path is per-salon, so a
+    browser session is scoped to the salon it logged into — consistent with the
+    tenant-scoped login.)
+
+  Note explicitly: because the access cookie has no `Path` restriction and
+  shares one name per domain, logging into salon B overwrites the salon-A
+  session cookie in the same browser. This is accepted as intentional — a user
+  is expected to be logged into one salon at a time. Do not treat this as a bug
+  to fix later.
+- **`SameSite=Lax`** on both. `Strict` was rejected because it drops the cookie
+  on top-level cross-site navigation into an authenticated view (e.g. following
+  a link from an email into a booking-management page), which is a flow this
+  product has. `Lax` is the standard compromise and still blocks the
+  cross-site subrequests that matter for CSRF.
+- **`Secure=True` in production only.** `production.py` already forces
+  `SESSION_COOKIE_SECURE` / `CSRF_COOKIE_SECURE`; the JWT cookies follow the
+  same rule (env- or settings-module-driven), off in dev so `localhost` over
+  plain HTTP works.
+- **CSRF for state-changing requests rides a separate non-httpOnly CSRF cookie
+  plus a matching request header**, checked on unsafe methods. `SameSite=Lax`
+  already blocks the classic cross-site form POST; the cookie+header check is
+  the defense-in-depth layer for the cases `Lax` does not cover (same-site
+  subdomains, `Lax`'s top-level POST allowance). Exact cookie name, header
+  name, and where the check lives (DRF-level vs middleware) are detailed when
+  this is implemented.
+
+**What this requires (implementation, not yet done):**
+
+1. **`LoginView` / `RefreshView` set cookies** instead of (or alongside)
+   returning JSON tokens — the response writes `Set-Cookie` for the access and
+   refresh cookies with the attributes above, and `LogoutView` clears them.
+2. **A custom DRF authentication class** that reads the JWT from the access
+   cookie rather than the `Authorization: Bearer` header, slotted into
+   `DEFAULT_AUTHENTICATION_CLASSES` (or per-view) alongside / replacing the
+   stock `JWTAuthentication`.
+
+**This decision reopens `accounts/` — Stage 3 / Stage 9 territory — and that is
+intentional.** The cookie transport was explicitly deferred to Stage 12 (see
+the transport decision at the top of this section), so touching `LoginView`,
+`RefreshView`, `LogoutView` and adding an auth class now is the planned
+continuation of that deferral, not a breach of the "don't reopen a closed
+stage" rule. The stage-order constraint is about not implementing *ahead*;
+finishing a deliberately-deferred piece of an earlier stage is expected.
+
 ### Open questions — resolve in the next sub-step, not decided here
 
-- **Exact cookie name(s)** — and whether access and refresh tokens share one
-  cookie or use two with different paths/lifetimes.
-- **Exact `SameSite` value** — `Lax` vs `Strict`. `Strict` is stronger against
-  CSRF but breaks top-level cross-site navigation into an authenticated view;
-  `Lax` is the usual compromise. Depends on whether any authenticated deep
-  link is reached by cross-site navigation.
 - **CORS allowed-origins list, dev vs prod** — the concrete origin values,
   whether they come from an env var, and how many prod origins (apex +
   per-salon subdomains?) must be allowed.
+- **CSRF cookie/header names and check location** — see the CSRF bullet above;
+  the mechanism is agreed, the concrete parameters are not.
