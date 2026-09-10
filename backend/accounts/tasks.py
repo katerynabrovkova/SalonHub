@@ -17,10 +17,12 @@ from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
 
+from core.urls import build_salon_frontend_url
+
 
 @shared_task
 def send_verification_email(recipient_email: str, token: str, salon_slug: str) -> None:
-    link = f"{settings.FRONTEND_URL}/salons/{salon_slug}/verify-email#token={token}"
+    link = build_salon_frontend_url(salon_slug, "/verify-email") + f"#token={token}"
     send_mail(
         subject="Confirm your email",
         message=f"Confirm your email by visiting: {link}\n\nThis link expires in 48 hours.",
@@ -31,7 +33,7 @@ def send_verification_email(recipient_email: str, token: str, salon_slug: str) -
 
 @shared_task
 def send_password_reset_email(recipient_email: str, uid: str, token: str, salon_slug: str) -> None:
-    link = f"{settings.FRONTEND_URL}/salons/{salon_slug}/reset-password#uid={uid}&token={token}"
+    link = build_salon_frontend_url(salon_slug, "/reset-password") + f"#uid={uid}&token={token}"
     send_mail(
         subject="Reset your password",
         message=f"Reset your password by visiting: {link}\n\nThis link expires in 1 hour.",

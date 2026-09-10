@@ -19,13 +19,13 @@ directly.
 import datetime as dt
 
 import psycopg
-from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from booking.guest_tokens import derive_guest_token
 from booking.models import Appointment, AppointmentStatus
 from core.formatting import format_datetime_for_salon
 from core.i18n import resolve_language_code, resolve_translation
+from core.urls import build_salon_frontend_url
 from notifications.channels.base import NotificationChannel
 from notifications.models import Notification, NotificationStatus, NotificationTrigger
 from notifications.models import NotificationChannel as ChannelChoices
@@ -148,9 +148,8 @@ def _build_message(notification: Notification) -> tuple[str, str]:
         }[lang_code]
         when = format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang=lang_code)
         token = derive_guest_token(appointment.id)
-        link = (
-            f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
-            f"/manage/{token}/"
+        link = build_salon_frontend_url(
+            salon.slug, f"/appointments/{appointment.id}/manage/{token}/"
         )
         body = body_template.format(
             salon=resolve_translation(salon.name, preferred), when=when, link=link
@@ -179,9 +178,8 @@ def _build_message(notification: Notification) -> tuple[str, str]:
         }[lang_code]
         when = format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang=lang_code)
         token = derive_guest_token(appointment.id)
-        link = (
-            f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
-            f"/manage/{token}/"
+        link = build_salon_frontend_url(
+            salon.slug, f"/appointments/{appointment.id}/manage/{token}/"
         )
         body = body_template.format(
             salon=resolve_translation(salon.name, preferred), when=when, link=link

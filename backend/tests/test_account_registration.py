@@ -21,6 +21,7 @@ The verify endpoint that consumes the token is D.4; login is 3-R.E.
 """
 
 import pytest
+from django.conf import settings
 from django.core import mail
 from rest_framework.test import APIClient
 
@@ -34,6 +35,15 @@ STRONG_PASSWORD = "a-strong-passw0rd!"
 @pytest.fixture
 def client() -> APIClient:
     return APIClient()
+
+
+@pytest.fixture(autouse=True)
+def _subdomain_frontend_url(settings):
+    # Credential-email links are subdomain-based: FRONTEND_URL carries a
+    # `{slug}` placeholder filled per salon via `.format(slug=...)` — see
+    # docs/DECISIONS.md § "Frontend routing: subdomain-based". Mirrors the
+    # production `.env` pattern (`FRONTEND_URL=http://{slug}.localhost:3000`).
+    settings.FRONTEND_URL = "http://{slug}.testserver"
 
 
 def _register_url(slug: str) -> str:
@@ -65,7 +75,7 @@ def test_register_creates_unverified_client_account_and_sends_salon_aware_email(
     assert len(mail.outbox) == 1
     sent = mail.outbox[0]
     assert sent.to == ["new-client@example.com"]
-    assert f"/salons/{salon.slug}/verify-email#token=" in sent.body
+    assert f"{settings.FRONTEND_URL.format(slug=salon.slug)}/verify-email#token=" in sent.body
 
 
 # --- 2. cross-salon isolation (no-enumeration, level 1) ------------------

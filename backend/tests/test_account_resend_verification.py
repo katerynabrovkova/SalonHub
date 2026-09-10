@@ -27,6 +27,7 @@ The contract under test (docs/DECISIONS.md § Stage 3-R.D.5):
 """
 
 import pytest
+from django.conf import settings
 from django.core import mail
 from rest_framework.test import APIClient
 
@@ -42,6 +43,15 @@ STRONG_PASSWORD = "a-strong-passw0rd!"
 @pytest.fixture
 def client() -> APIClient:
     return APIClient()
+
+
+@pytest.fixture(autouse=True)
+def _subdomain_frontend_url(settings):
+    # Credential-email links are subdomain-based: FRONTEND_URL carries a
+    # `{slug}` placeholder filled per salon via `.format(slug=...)` — see
+    # docs/DECISIONS.md § "Frontend routing: subdomain-based". Mirrors the
+    # production `.env` pattern (`FRONTEND_URL=http://{slug}.localhost:3000`).
+    settings.FRONTEND_URL = "http://{slug}.testserver"
 
 
 def _resend_url(slug: str) -> str:
@@ -80,7 +90,7 @@ def test_resend_for_unverified_account_returns_202_empty_and_sends_one_verificat
     assert len(mail.outbox) == 1
     sent = mail.outbox[0]
     assert sent.to == [account.email]
-    assert f"/salons/{salon.slug}/verify-email#token=" in sent.body
+    assert f"{settings.FRONTEND_URL.format(slug=salon.slug)}/verify-email#token=" in sent.body
 
     # The emailed link carries a fresh, working verification token for this
     # account.

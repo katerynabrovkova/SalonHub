@@ -84,6 +84,15 @@ def _reload(salon, notification_id):
         return Notification.objects.get(pk=notification_id)
 
 
+@pytest.fixture(autouse=True)
+def _subdomain_frontend_url(settings):
+    # Guest links are subdomain-based: FRONTEND_URL carries a `{slug}`
+    # placeholder filled per salon via `.format(slug=...)` — see
+    # docs/DECISIONS.md § "Frontend routing: subdomain-based". Mirrors the
+    # production `.env` pattern (`FRONTEND_URL=http://{slug}.localhost:3000`).
+    settings.FRONTEND_URL = "http://{slug}.testserver"
+
+
 # --- _resolve_recipient --------------------------------------------------
 
 
@@ -133,7 +142,7 @@ def test_build_message_for_booking_confirmed_builds_subject_body_and_link(
     assert "Bella Demo Salon" in body
     assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
     manage_link = (
-        f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
         f"/manage/{derive_guest_token(appointment.id)}/"
     )
     assert manage_link in body
@@ -157,7 +166,7 @@ def test_build_message_for_booking_confirmed_link_carries_the_re_derived_token(
 
     expected_token = derive_guest_token(appointment.id)
     expected_link = (
-        f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
         f"/manage/{expected_token}/"
     )
     assert expected_link in body
@@ -197,7 +206,7 @@ def test_build_message_for_appointment_reminder_builds_subject_body_and_link(
     assert "Bella Demo Salon" in body
     assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
     manage_link = (
-        f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
         f"/manage/{derive_guest_token(appointment.id)}/"
     )
     assert manage_link in body
@@ -235,7 +244,7 @@ def test_build_message_for_appointment_reminder_link_carries_the_re_derived_toke
 
     expected_token = derive_guest_token(appointment.id)
     expected_link = (
-        f"{settings.FRONTEND_URL}/salons/{salon.slug}/appointments/{appointment.id}"
+        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
         f"/manage/{expected_token}/"
     )
     assert expected_link in body
