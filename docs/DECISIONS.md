@@ -1721,15 +1721,18 @@ Decided 2026-09-10. Supersedes the "separate, unresolved decision" note in
   - prod: `^https://[\w-]+\.salonhub\.com$`
   - dev: `^http://[\w-]+\.localhost:3000$`
 
-  `CORS_ALLOW_CREDENTIALS = True` is unchanged. **Not yet implemented in
-  settings** — `config/settings/base.py` still has the hardcoded
-  `CORS_ALLOWED_ORIGINS`. This entry is the decision record; the settings
-  change is a separate implementation step.
-- **CSRF: `CSRF_TRUSTED_ORIGINS` will need wildcard-subdomain entries.** It is
-  currently unset anywhere in the settings modules. Once subdomain routing
-  lands it must include `https://*.salonhub.com` (and the dev equivalent) so
+  `CORS_ALLOW_CREDENTIALS = True` is unchanged. **Implemented 2026-09-10:**
+  `CORS_ALLOWED_ORIGIN_REGEXES` in `config/settings/base.py` replaces the
+  hardcoded `CORS_ALLOWED_ORIGINS`, with both dev and prod patterns fully
+  anchored (`^...$`) so a suffix-spoofed host cannot slip through. The prod
+  pattern is built from the `PLATFORM_DOMAIN` env var via `re.escape`. Covered
+  by `tests/test_cors_csrf_settings.py`.
+- **CSRF: `CSRF_TRUSTED_ORIGINS` will need wildcard-subdomain entries.**
+  **Implemented 2026-09-10:** `CSRF_TRUSTED_ORIGINS = ["https://*.{PLATFORM_DOMAIN}"]`
+  in `config/settings/base.py`, built from the new `PLATFORM_DOMAIN` env var
+  (default `salonhub.com`, a placeholder — same caveat as `FRONTEND_URL`), so
   Django's CSRF origin check accepts unsafe requests coming from a salon
-  subdomain. **Not yet implemented.**
+  subdomain. Covered by `tests/test_cors_csrf_settings.py`.
 - **Apex domain (`salonhub.com`, or `localhost:3000` with no subdomain) serves
   a minimal placeholder for now**, not a full marketing landing page. The full
   landing-page design is deferred to the frontend polish stages (18–21).
