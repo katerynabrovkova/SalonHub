@@ -163,11 +163,16 @@ get-or-create on `Customer` by email (per `docs/DECISIONS.md`, email is unique p
 salon, so a returning guest updates their existing row). The confirmation email links
 to a frontend route with a signed token (Django's `core.signing`, keyed off
 `SECRET_KEY`, encoding the `Customer`/`Appointment` id) in the URL **path**
-(`{FRONTEND_URL}/salons/<slug>/appointments/<id>/manage/<token>/`), never a query
-string or fragment — this is a persistent, long-lived resource link, not a
-one-time credential (`docs/DECISIONS.md` § Step (d) decisions). How the frontend
-reads the token out of that route and presents it to the API is a Stage 18-21
-frontend detail, not yet specified. A `GuestAccessToken` row stores the SHA-256
+(currently `{FRONTEND_URL}/salons/<slug>/appointments/<id>/manage/<token>/`),
+never a query string or fragment — this is a persistent, long-lived resource
+link, not a one-time credential (`docs/DECISIONS.md` § Step (d) decisions). The
+`/salons/<slug>/` path segment is scheduled to change to a subdomain form
+(`https://<slug>.salonhub.com/appointments/<id>/manage/<token>/`) once the
+tracked follow-up in `docs/DECISIONS.md` § Stage 12 ("Frontend routing:
+subdomain-based") is implemented; the signed-token-in-the-path design is
+unaffected. How the frontend reads the token out of that route and presents it
+to the API is a Stage 18-21 frontend detail, not yet specified. A
+`GuestAccessToken` row stores the SHA-256
 hash of the signed token (`token_hash`), an `expires_at` (30 days after
 `Appointment.end_datetime`), and a nullable `cancelled_via_token_at`. The API
 re-hashes the presented token, looks it up by `token_hash`, and checks

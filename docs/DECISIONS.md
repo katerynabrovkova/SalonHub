@@ -648,6 +648,14 @@ load-bearing shape.
   string is still ruled out (lands in access logs); fragment needs a
   client-landing page that doesn't exist yet. Accepted conscious risk:
   blast radius is a single booking, no account, no funds.
+
+  **Partially superseded 2026-09-10 by § Stage 12 "Frontend routing:
+  subdomain-based".** The `/salons/<slug>/` path segment shown here is
+  scheduled to change to a subdomain form
+  (`https://<slug>.salonhub.com/appointments/<id>/manage/<token>/`) once that
+  follow-up is implemented — tracked there, not done yet. Everything else in
+  this bullet stands: token in the path (not query/fragment), persistent
+  resource link, the accepted-risk rationale.
 - **`BOOKING_CONFIRMED` fires from exactly one production call site** —
   `payments/views.py` `PaymentWebhookView.post`, on the succeeded →
   `PENDING → CONFIRMED` branch, inside the `select_for_update` lock. So
@@ -1514,6 +1522,17 @@ value" open questions below; the CORS allowed-origins list stays open.
   session cookie in the same browser. This is accepted as intentional — a user
   is expected to be logged into one salon at a time. Do not treat this as a bug
   to fix later.
+
+  **Superseded 2026-09-10 by "Frontend routing: subdomain-based" below.** That
+  note was written when the frontend routing strategy was still undecided and
+  path-based (`salonhub.com/<slug>`) was the working assumption — one domain,
+  so one shared cookie name, so one session at a time. With subdomain routing
+  (`<slug>.salonhub.com`) each salon is its own origin and the auth cookies are
+  host-only (no `Domain=` attribute — see below), so salon A's and salon B's
+  session cookies no longer collide: a user *can* hold independent, simultaneous
+  sessions in different salons in the same browser, and that is now the intended
+  behaviour, consistent with `Account` email uniqueness being per-salon rather
+  than global.
 - **`SameSite=Lax`** on both. `Strict` was rejected because it drops the cookie
   on top-level cross-site navigation into an authenticated view (e.g. following
   a link from an email into a booking-management page), which is a flow this
@@ -1644,8 +1663,10 @@ Decided and implemented 2026-09-10.
 
 - `apiRequest<T>(slug, path, options)` — explicit salon slug parameter, no
   global/module-level state. How the frontend determines the active slug per
-  page (subdomain vs path routing) is a separate, unresolved decision; keeping
-  the client agnostic to it avoids coupling now and rework later.
+  page was left open here and is now resolved as subdomain-based routing — see
+  "Frontend routing: subdomain-based" below. The client stays agnostic to it
+  regardless (it takes `slug` as an argument), so the resolution does not
+  change `client.ts`.
 - Browser-only: reads the CSRF token from `document.cookie`, so this client
   cannot run in Server Components — only Client Components / event handlers.
   Server-side data fetching is a separate future decision if a use case
@@ -1663,3 +1684,76 @@ Decided and implemented 2026-09-10.
 - No automated tests added in this step — frontend has no test runner yet.
   Verified manually via curl/browser. Adding a frontend test framework is a
   separate near-term decision.
+
+### Frontend routing: subdomain-based
+
+Decided 2026-09-10. Supersedes the "separate, unresolved decision" note in
+"Stage 12: API client wrapper" above and the "one salon at a time" note in
+"Cookie mechanism resolved".
+
+- **Each tenant is served from its own subdomain: `<slug>.salonhub.com` in
+  production, `<slug>.localhost:3000` in development.** Browsers resolve any
+  `*.localhost` name to `127.0.0.1` automatically, so dev needs no hosts-file
+  edit and no local DNS. Path-based routing (`salonhub.com/<slug>/...`) was the
+  earlier working assumption and is rejected: distinct origins per tenant give
+  cleaner cookie/storage isolation and match how the session cookies already
+  behave.
+- **The backend tenant-resolution path prefix (`/api/v1/salons/<slug>/...`) is
+  UNCHANGED.** This decision is about frontend *page* routing only. The API
+  keeps its path-prefix tenant resolution (§ Stage 1); the Next.js app reads
+  the active slug from `window.location.hostname` and passes it to
+  `apiRequest(slug, ...)`, which still builds `/api/v1/salons/<slug>/...` URLs.
+- **Cookie scoping: no `Domain=` attribute is set on the auth cookies**
+  (`accounts/cookies.py` — confirmed still true as of this recon; also true for
+  the `csrftoken` cookie, which Django sets with no domain). This is now a
+  deliberate choice, not an incidental fact. A cookie with no `Domain=` is
+  host-only: it is sent back only to the exact host that set it. So
+  `<salon-a>.salonhub.com` and `<salon-b>.salonhub.com` each get their own
+  isolated `access_token` / `refresh_token` / `csrftoken` cookies, and a user
+  can be logged into several salons at once in one browser with no cookie
+  collision. This is consistent with `Account` having per-salon (not global)
+  email uniqueness — the same person at two salons is two independent
+  `Account`s and now genuinely two independent browser sessions.
+- **CORS: `CORS_ALLOWED_ORIGIN_REGEXES`, not a hardcoded origin list.** The
+  single `CORS_ALLOWED_ORIGINS = ["http://localhost:3000"]` planned in "Stage
+  12: API client wrapper" cannot express "any salon subdomain". Two regex
+  patterns are needed:
+  - prod: `^https://[\w-]+\.salonhub\.com$`
+  - dev: `^http://[\w-]+\.localhost:3000$`
+
+  `CORS_ALLOW_CREDENTIALS = True` is unchanged. **Not yet implemented in
+  settings** — `config/settings/base.py` still has the hardcoded
+  `CORS_ALLOWED_ORIGINS`. This entry is the decision record; the settings
+  change is a separate implementation step.
+- **CSRF: `CSRF_TRUSTED_ORIGINS` will need wildcard-subdomain entries.** It is
+  currently unset anywhere in the settings modules. Once subdomain routing
+  lands it must include `https://*.salonhub.com` (and the dev equivalent) so
+  Django's CSRF origin check accepts unsafe requests coming from a salon
+  subdomain. **Not yet implemented.**
+- **Apex domain (`salonhub.com`, or `localhost:3000` with no subdomain) serves
+  a minimal placeholder for now**, not a full marketing landing page. The full
+  landing-page design is deferred to the frontend polish stages (18–21).
+
+**Tracked open follow-up (NOT part of this docs change — do not implement
+here):** the emailed links still use the path-based frontend shape and must be
+migrated to the subdomain shape when this lands:
+
+- `notifications/services.py` — the guest manage-appointment link, built in
+  both the `APPOINTMENT_REMINDER` and `BOOKING_CONFIRMED` branches of
+  `_build_message`, currently
+  `{FRONTEND_URL}/salons/<slug>/appointments/<id>/manage/<token>/`.
+- `accounts/tasks.py` — `send_verification_email` and
+  `send_password_reset_email`, currently
+  `{FRONTEND_URL}/salons/<slug>/verify-email#token=...` and
+  `.../reset-password#uid=...&token=...`.
+
+The target shape is subdomain-based (e.g.
+`https://<slug>.salonhub.com/appointments/<id>/manage/<token>/`), which also
+implies `FRONTEND_URL` can no longer be a single fixed base URL — it needs a
+per-salon host. Four tests in `backend/tests/test_notifications_send_service.py`
+hard-assert the current path shape and will need updating:
+`test_build_message_for_booking_confirmed_builds_subject_body_and_link`,
+`test_build_message_for_booking_confirmed_link_carries_the_re_derived_token`,
+`test_build_message_for_appointment_reminder_builds_subject_body_and_link`
+(which asserts the whole email body verbatim), and
+`test_build_message_for_appointment_reminder_link_carries_the_re_derived_token`.
