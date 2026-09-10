@@ -1421,3 +1421,51 @@ to be resolved when Stage 12/13 scope is written). Stage 11.5 was the
 data-layer only, not an endpoint surface. Final gate clean: full suite
 620/620, `ruff check`, `ruff format --check`, `mypy`, and
 `makemigrations --check` all pass (2026-09-10).
+
+## Stage 12 (Frontend skeleton — design system, API client, auth)
+
+Decided 10.09.2026 — contract agreed before any code, per the stage-by-stage
+workflow. This section is the spec the implementation sub-steps build to.
+
+### Authenticated session transport: httpOnly cookie, not localStorage
+
+- **The authenticated `Account` JWT session is held client-side in an httpOnly
+  cookie set by the backend, never in `localStorage` or `sessionStorage` and
+  never in JS-readable state.** An httpOnly cookie is unreadable from page
+  JavaScript, so an XSS foothold in the Next.js app cannot exfiltrate the
+  access or refresh token. `localStorage` tokens are the standard XSS
+  token-theft target and are rejected for that reason.
+- This diverges from the one-time credential tokens (email verification,
+  password reset) and the guest access token, whose transports were fixed in
+  Stage 3 / Stage 9 § Step (d) (URL fragment and URL path respectively). Those
+  are single-purpose links handled by page JS on arrival; the authenticated
+  session is a long-lived ambient credential and takes the cookie path
+  instead. The guest-token `X-Guest-Token` header mechanism is unchanged.
+
+### Consequences (agreed in principle, parameters deferred below)
+
+- **CORS must be configured on the backend.** The Next.js origin differs from
+  the API origin in every environment (`localhost:3000` vs the backend host in
+  dev; separate hosts in prod), so `django-cors-headers` (or equivalent) is
+  added, with credentialed requests enabled
+  (`CORS_ALLOW_CREDENTIALS = True`) so the browser sends the session cookie on
+  XHR/fetch to the API. `django-cors-headers` is not currently a dependency
+  (confirmed 2026-09-10) — it lands in this stage.
+- **Cookie attributes carry the CSRF mitigation.** Because the session now
+  rides a cookie, the backend sets `SameSite` on it (value chosen in the open
+  questions below) and `Secure` in production only — `production.py` already
+  sets `SESSION_COOKIE_SECURE = True` / `CSRF_COOKIE_SECURE = True`; dev over
+  plain HTTP keeps `Secure` off so the cookie works on `localhost`.
+  `base.py` currently sets no cookie attributes at all.
+
+### Open questions — resolve in the next sub-step, not decided here
+
+- **Exact cookie name(s)** — and whether access and refresh tokens share one
+  cookie or use two with different paths/lifetimes.
+- **Exact `SameSite` value** — `Lax` vs `Strict`. `Strict` is stronger against
+  CSRF but breaks top-level cross-site navigation into an authenticated view;
+  `Lax` is the usual compromise. Depends on whether any authenticated deep
+  link is reached by cross-site navigation.
+- **CORS allowed-origins list, dev vs prod** — the concrete origin values,
+  whether they come from an env var, and how many prod origins (apex +
+  per-salon subdomains?) must be allowed.
