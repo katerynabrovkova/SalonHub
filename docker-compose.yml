@@ -62,5 +62,23 @@ services:
       redis:
         condition: service_healthy
 
+  frontend:
+    build: ./frontend
+    volumes:
+      - ./frontend:/app
+      # Shadow the bind mount so the container's own Linux-built node_modules
+      # is always used, never whatever is (or isn't) on the Windows host.
+      - frontend_node_modules:/app/node_modules
+      # Same reason as node_modules: keep the build output container-side so
+      # the "node" user can write it (the host .next is owned by another uid).
+      - frontend_next_cache:/app/.next
+    ports:
+      - "${HOST_FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
 volumes:
   postgres_data:
+  frontend_node_modules:
+  frontend_next_cache:

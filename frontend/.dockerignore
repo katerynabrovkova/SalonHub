@@ -1,0 +1,6 @@
+# The container builds its own node_modules via `npm ci`; the host copy is
+# Windows-built (and may contain broken symlinks that fail the build context).
+node_modules
+.next
+.git
+npm-debug.log*
