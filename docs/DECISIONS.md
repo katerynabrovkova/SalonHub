@@ -1458,6 +1458,36 @@ workflow. This section is the spec the implementation sub-steps build to.
   plain HTTP keeps `Secure` off so the cookie works on `localhost`.
   `base.py` currently sets no cookie attributes at all.
 
+### Frontend stack and tooling
+
+Decided 10.09.2026.
+
+- **Framework: Next.js 16.3.4, App Router.** React 19.3.0, React DOM 19.3.0.
+- **TypeScript: pinned to 6.0.3 — not the unpinned `latest` tag.** As of
+  this date `latest` resolves to TypeScript 7.0.2, and Next.js 16.3 rejects
+  TypeScript `>=7.0` with a hard build error: TS7's native (Go) compiler does
+  not yet expose the programmatic compiler API that Next.js — and the
+  `typescript-eslint` dependency inside `eslint-config-next` — require. That
+  API is expected in TypeScript 7.1, which is not yet released. `package.json`
+  must pin an exact `6.0.3` (a caret range would drift into 7.x); `6.0.3` is
+  the newest stable release in the 6.x line.
+- **Styling: Tailwind CSS 4.3.3.** v4's CSS-first setup: configuration lives
+  in the stylesheet via `@theme`, with no `tailwind.config.js` generated or
+  required by default (a JS config is opt-in via `@config`). The PostCSS
+  integration is the separate `@tailwindcss/postcss` package — the old
+  in-`tailwindcss` PostCSS plugin and `autoprefixer`/`postcss-import`
+  companions are not used.
+- **Linting: `eslint-config-next` 16.3.4, flat config only** (`eslint.config.mjs`).
+  The legacy `.eslintrc.*` format is not used.
+- **API client: none yet — no Axios, no tRPC, no OpenAPI codegen.** A small
+  hand-written typed wrapper over `fetch` covers this stage. There is no
+  generated client from the DRF OpenAPI schema because that schema surface
+  does not exist yet (OpenAPI/Swagger is still unlanded on the backend per the
+  stage order). Revisit if and when a generated client earns its weight.
+- **This is an initial pin set, not a long-term lock.** These versions will be
+  revisited when TypeScript 7.1 stabilizes the toolchain, or if project
+  requirements change before then.
+
 ### Open questions — resolve in the next sub-step, not decided here
 
 - **Exact cookie name(s)** — and whether access and refresh tokens share one
