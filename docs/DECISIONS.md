@@ -34,7 +34,7 @@ current stage. `Stage N` references elsewhere point at this list.
 11. Reviews — read + submission (completed-appointment gating) ✓
 11.5. Content localization — per-salon language, translatable catalog /
     salon profile / notification templates. Numbered 11.5 so it doesn't
-    renumber every existing `Stage N` reference.
+    renumber every existing `Stage N` reference. ✓
 12. Frontend skeleton — design system, API client, auth
 13. Frontend catalog / service / specialists / reviews
 14. Frontend booking flow + payment + confirmation
@@ -1404,3 +1404,20 @@ resolve_display_name's fail-loud design to catch it later.
 Stage 11.5 is strictly the backend content-data layer: which salon-authored
 text is translatable, how it is stored and queried, and which language an
 email goes out in.
+
+### Stage 11.5 status: closed
+
+The backend content-data layer for translatable salon-authored text is
+complete: `JSONField` storage for `Service` / `ServiceCategory` /
+`Specialist` / `Salon.name` plus the new `Salon.about`;
+`resolve_translation()` / `resolve_display_name()` / `resolve_language_code()`
+in `core/i18n.py`; `?lang=` read resolution wired into the catalog,
+specialists, and reviews endpoints; dict-aware `validate_<field>` checks with
+per-language uniqueness; admin `list_display` via `resolve_display_name()`;
+and per-language notification templates (Ukrainian genitive date forms
+included). No Salon profile read/write API endpoint was built — that is out
+of scope here (see the § Open questions bullet "Salon profile API": deferred,
+to be resolved when Stage 12/13 scope is written). Stage 11.5 was the
+data-layer only, not an endpoint surface. Final gate clean: full suite
+620/620, `ruff check`, `ruff format --check`, `mypy`, and
+`makemigrations --check` all pass (2026-09-10).
