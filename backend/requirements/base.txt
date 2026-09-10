@@ -10,3 +10,7 @@ celery[redis]==5.6.3
 # as of celery 5.6.3. redis-py 7.x/8.x are NOT yet supported by kombu.
 redis==6.4.0
 django-environ==0.14.0
+# CORS headers for the browser frontend calling the API cross-origin with
+# credentials (httpOnly session cookie) — see docs/DECISIONS.md § Stage 12.
+# 4.9.0 requires django>=4.2, asgiref>=3.6 — both satisfied.
+django-cors-headers==4.9.0

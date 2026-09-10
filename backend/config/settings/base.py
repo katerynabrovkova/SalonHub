@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
+    "corsheaders",
     "core",
     "tenants",
     "accounts",
@@ -51,6 +52,12 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = "accounts.User"
 
 MIDDLEWARE = [
+    # As high as possible, and before CommonMiddleware in particular, per
+    # django-cors-headers' own docs: it must see the request before any
+    # middleware that can short-circuit with a response (CommonMiddleware's
+    # APPEND_SLASH / redirect handling), so the CORS headers are attached to
+    # those responses too.
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -206,3 +213,16 @@ FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 # and is normally acted on within minutes of being requested
 # (docs/DECISIONS.md § Stage 3 decisions).
 PASSWORD_RESET_TIMEOUT = 60 * 60  # 1 hour
+
+# --- CORS ------------------------------------------------------------------
+#
+# The browser frontend calls this API from a different origin and must send
+# the httpOnly session cookie, so credentialed cross-origin requests are
+# allowed — see docs/DECISIONS.md § Stage 12.
+CORS_ALLOW_CREDENTIALS = True
+# TODO(Stage 12): set CORS_ALLOWED_ORIGINS (per-environment: dev localhost:3000
+# vs the prod origin list — apex + per-salon subdomains?). This is an open
+# question in docs/DECISIONS.md § Stage 12 ("CORS allowed-origins list, dev vs
+# prod") and is deliberately left unset until resolved: with no allowlist
+# django-cors-headers fails safe and blocks every cross-origin request. Do NOT
+# substitute CORS_ALLOW_ALL_ORIGINS here.
