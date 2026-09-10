@@ -7,6 +7,7 @@ docs/DECISIONS.md before changing anything here.
 """
 
 import datetime as dt
+import re
 from pathlib import Path
 
 import environ
@@ -212,6 +213,13 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@bella-beauty-sa
 # docs/DECISIONS.md § Step (d) decisions (guest-token delivery).
 FRONTEND_URL = env("FRONTEND_URL", default="http://{slug}.localhost:3000")
 
+# The platform's registered domain. Each tenant is served from its own
+# subdomain (`<slug>.salonhub.com` in prod, `<slug>.localhost:3000` in dev) —
+# docs/DECISIONS.md § "Frontend routing: subdomain-based". "salonhub.com" is a
+# placeholder, NOT a confirmed purchased domain — same caveat as FRONTEND_URL;
+# update it (here and in .env / .env.example) when the real one is decided.
+PLATFORM_DOMAIN = env("PLATFORM_DOMAIN", default="salonhub.com")
+
 # Django's own token generator (used for password reset) reads this directly.
 # Short: a live reset token is the highest-value credential in this scheme
 # and is normally acted on within minutes of being requested
@@ -224,12 +232,18 @@ PASSWORD_RESET_TIMEOUT = 60 * 60  # 1 hour
 # the httpOnly session cookie, so credentialed cross-origin requests are
 # allowed — see docs/DECISIONS.md § Stage 12.
 CORS_ALLOW_CREDENTIALS = True
-# The dev frontend origin. The prod origin list (apex + per-salon subdomains?)
-# and whether it comes from an env var is still an open question in
-# docs/DECISIONS.md § Stage 12. With no allowlist django-cors-headers fails
+# Each tenant is a distinct origin (`<slug>.salonhub.com` /
+# `<slug>.localhost:3000`), so a fixed CORS_ALLOWED_ORIGINS list cannot express
+# "any salon subdomain" — docs/DECISIONS.md § "Frontend routing:
+# subdomain-based". Both patterns are fully anchored (^...$): an unanchored
+# pattern would accept a suffix-spoofed host like
+# `bella.localhost:3000.evil.com`. With no allowlist django-cors-headers fails
 # safe and blocks every cross-origin request; do NOT substitute
 # CORS_ALLOW_ALL_ORIGINS here.
-CORS_ALLOWED_ORIGINS = ["http://localhost:3000"]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://[\w-]+\.localhost:3000$",
+    rf"^https://[\w-]+\.{re.escape(PLATFORM_DOMAIN)}$",
+]
 
 # --- CSRF ------------------------------------------------------------------
 #
@@ -244,3 +258,7 @@ CORS_ALLOWED_ORIGINS = ["http://localhost:3000"]
 # (csrftoken / X-CSRFToken).
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
+# Django's CSRF origin check must accept unsafe requests coming from any salon
+# subdomain — docs/DECISIONS.md § "Frontend routing: subdomain-based". Django
+# supports a leading-wildcard host here.
+CSRF_TRUSTED_ORIGINS = [f"https://*.{PLATFORM_DOMAIN}"]
