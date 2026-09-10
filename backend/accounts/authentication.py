@@ -18,11 +18,13 @@ authentication layer itself, so no unrelated authenticated principal
 existed) ever reaches a permission check in the first place.
 """
 
+from rest_framework.request import Request
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import AuthenticationFailed, InvalidToken
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import Token
 
+from accounts.cookies import ACCESS_COOKIE
 from accounts.models import Account
 from core.tenancy import get_current_salon_id
 
@@ -64,3 +66,29 @@ class AccountJWTAuthentication(JWTAuthentication):
             raise AuthenticationFailed("Account is inactive.", code="user_inactive")
 
         return account
+
+
+class AccountJWTCookieAuthentication(AccountJWTAuthentication):
+    """
+    Reads the access JWT from the ``access_token`` cookie instead of the
+    ``Authorization: Bearer`` header (docs/DECISIONS.md § Stage 12). The token
+    is then validated and resolved exactly as the header pipeline does — same
+    ``get_validated_token()`` (signature/expiry/blacklist) and the same
+    inherited ``get_user()`` (``identity_model`` claim guard, tenant-scoped
+    ``Account`` lookup).
+
+    Returns ``None`` when the cookie is absent so DRF falls through to the
+    next authenticator: ``AccountJWTAuthentication`` (header) is kept in
+    ``DEFAULT_AUTHENTICATION_CLASSES`` after this one, since non-browser
+    clients still authenticate with a Bearer header and
+    tests/test_auth_identity_model_claim.py exercises that path directly.
+    """
+
+    # Same intended Account narrowing / stub friction as get_user() above.
+    def authenticate(self, request: Request) -> tuple[Account, Token] | None:  # type: ignore[override]
+        raw_token = request.COOKIES.get(ACCESS_COOKIE)
+        if not raw_token:
+            return None
+
+        validated_token = self.get_validated_token(raw_token.encode())
+        return self.get_user(validated_token), validated_token

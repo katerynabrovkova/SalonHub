@@ -23,6 +23,15 @@ Login and refresh opt out of the project-wide IsAuthenticated default with
 AllowAny; logout relies on that default deliberately — it needs a valid
 access token to blacklist a refresh token (docs/DECISIONS.md § Stage 3
 decisions).
+
+Stage 12 (docs/DECISIONS.md § Stage 12) moved the session onto two httpOnly
+cookies set by these views: `LoginView`/`RefreshView` write an `access_token`
+cookie (`Path=/`) and a `refresh_token` cookie (scoped to this salon's
+`auth/refresh/` path) and return an empty JSON body; `RefreshView` and
+`LogoutView` read the refresh token from its cookie, not the request body;
+`LogoutView` also clears both cookies. Cookie mechanics live in
+`accounts/cookies.py`. CSRF protection for unsafe methods is deliberately not
+implemented yet (separate deferred sub-step).
 """
 
 import datetime as dt
@@ -35,20 +44,21 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import status
+from rest_framework.exceptions import NotAuthenticated
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
-from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from accounts.cookies import REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
 from accounts.models import Account, Customer
 from accounts.serializers import (
     AccountTokenObtainPairSerializer,
     AccountTokenRefreshSerializer,
-    LogoutSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     RegisterSerializer,
@@ -267,18 +277,64 @@ class LoginView(TokenObtainPairView):
     throttle_scope = "login"
     serializer_class = AccountTokenObtainPairSerializer
 
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        # The session rides two httpOnly cookies, not the JSON body
+        # (docs/DECISIONS.md § Stage 12). super().post() raises on bad
+        # credentials before returning, so no cookie is ever set on a failure.
+        response = super().post(request, *args, **kwargs)
+        tokens = response.data
+        set_auth_cookies(
+            response,
+            access=tokens["access"],
+            refresh=tokens["refresh"],
+            salon_slug=str(kwargs["slug"]),
+        )
+        response.data = {}
+        return response
+
 
 class RefreshView(TokenRefreshView):
     permission_classes = (AllowAny,)  # type: ignore[assignment]
     serializer_class = AccountTokenRefreshSerializer
 
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        # Refresh token comes from its own cookie, never the request body
+        # (docs/DECISIONS.md § Stage 12).
+        raw_refresh = request.COOKIES.get(REFRESH_COOKIE)
+        if not raw_refresh:
+            # Missing credential, not a malformed request — 401, consistent
+            # with every other auth failure.
+            raise NotAuthenticated("No refresh token cookie.")
+
+        serializer = self.get_serializer(data={"refresh": raw_refresh})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as exc:
+            raise InvalidToken(exc.args[0]) from exc
+
+        data = serializer.validated_data
+        response = Response(status=status.HTTP_200_OK)
+        set_auth_cookies(
+            response,
+            access=data["access"],
+            # ROTATE_REFRESH_TOKENS is on, so `data` always carries a fresh
+            # refresh token; fall back to the presented one defensively.
+            refresh=data.get("refresh", raw_refresh),
+            salon_slug=str(kwargs["slug"]),
+        )
+        response.data = {}
+        return response
+
 
 class LogoutView(APIView):
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
-        serializer = LogoutSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        response = Response(status=status.HTTP_205_RESET_CONTENT)
+        raw_refresh = request.COOKIES.get(REFRESH_COOKIE)
         try:
-            RefreshToken(serializer.validated_data["refresh"]).blacklist()
+            if raw_refresh:
+                RefreshToken(raw_refresh).blacklist()
         except TokenError as exc:
+            clear_auth_cookies(response, salon_slug=str(kwargs["slug"]))
             raise InvalidOrExpiredTokenError("Invalid or already-used refresh token.") from exc
-        return Response(status=status.HTTP_205_RESET_CONTENT)
+        clear_auth_cookies(response, salon_slug=str(kwargs["slug"]))
+        return response

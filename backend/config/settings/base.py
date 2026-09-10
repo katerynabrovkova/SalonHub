@@ -152,7 +152,11 @@ REST_FRAMEWORK = {
     # Retargeted onto Account in Stage 3-R.E (docs/DECISIONS.md) — see
     # accounts.authentication.AccountJWTAuthentication for the
     # identity_model claim guard this depends on.
+    # Cookie transport first (browser clients, docs/DECISIONS.md § Stage 12),
+    # header-based Bearer kept as a fallback for non-browser clients — the
+    # cookie class returns None when its cookie is absent so DRF falls through.
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "accounts.authentication.AccountJWTCookieAuthentication",
         "accounts.authentication.AccountJWTAuthentication",
     ],
     # Fixed default page size, overridable up to a capped maximum
