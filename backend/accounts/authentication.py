@@ -25,6 +25,7 @@ from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import Token
 
 from accounts.cookies import ACCESS_COOKIE
+from accounts.csrf import enforce_csrf_on_unsafe
 from accounts.models import Account
 from core.tenancy import get_current_salon_id
 
@@ -91,4 +92,12 @@ class AccountJWTCookieAuthentication(AccountJWTAuthentication):
             return None
 
         validated_token = self.get_validated_token(raw_token.encode())
-        return self.get_user(validated_token), validated_token
+        user = self.get_user(validated_token)
+
+        # The token came from the cookie (an ambient credential), so an unsafe
+        # request needs the same CSRF guard a session cookie would get
+        # (docs/DECISIONS.md § Stage 12). Bearer-header clients go through
+        # AccountJWTAuthentication instead and are never checked.
+        enforce_csrf_on_unsafe(request)
+
+        return user, validated_token

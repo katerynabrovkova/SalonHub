@@ -16,9 +16,9 @@ settings-module split via ``SESSION_COOKIE_SECURE`` (unset -> ``False`` in
 ``config.settings.development``; ``True`` in ``config.settings.production``),
 so the cookies work over plain HTTP on ``localhost`` and are TLS-only in prod.
 
-CSRF protection for unsafe methods is deliberately NOT implemented here — it
-rides a separate non-httpOnly cookie + header check, deferred to its own
-sub-step (docs/DECISIONS.md § Stage 12).
+CSRF protection for unsafe cookie-authenticated requests rides a separate
+non-httpOnly `csrftoken` cookie + `X-CSRFToken` header check — see
+`accounts/csrf.py` (docs/DECISIONS.md § Stage 12).
 """
 
 from django.conf import settings

@@ -33,6 +33,7 @@ urlpatterns = [
         views.ResendVerificationView.as_view(),
         name="resend-verification",
     ),
+    path("auth/csrf/", views.AuthCsrfView.as_view(), name="csrf"),
     path("auth/login/", views.LoginView.as_view(), name="login"),
     path("auth/refresh/", views.RefreshView.as_view(), name="refresh"),
     path("auth/logout/", views.LogoutView.as_view(), name="logout"),

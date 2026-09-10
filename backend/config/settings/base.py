@@ -230,3 +230,17 @@ CORS_ALLOW_CREDENTIALS = True
 # prod") and is deliberately left unset until resolved: with no allowlist
 # django-cors-headers fails safe and blocks every cross-origin request. Do NOT
 # substitute CORS_ALLOW_ALL_ORIGINS here.
+
+# --- CSRF ------------------------------------------------------------------
+#
+# The Account session rides an httpOnly cookie, so unsafe cookie-authenticated
+# requests are CSRF-checked manually via Django's engine (accounts/csrf.py,
+# docs/DECISIONS.md § Stage 12). The csrftoken cookie must be JS-readable —
+# the frontend echoes its value in the X-CSRFToken header — so HTTPONLY is
+# explicitly False (also the Django default; stated here to make the intent
+# visible against the httpOnly session cookies). SameSite matches the auth
+# cookies. CSRF_COOKIE_SECURE is set in production.py alongside the other
+# _SECURE flags. Cookie/header names stay at their Django defaults
+# (csrftoken / X-CSRFToken).
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_HTTPONLY = False

@@ -30,8 +30,11 @@ cookie (`Path=/`) and a `refresh_token` cookie (scoped to this salon's
 `auth/refresh/` path) and return an empty JSON body; `RefreshView` and
 `LogoutView` read the refresh token from its cookie, not the request body;
 `LogoutView` also clears both cookies. Cookie mechanics live in
-`accounts/cookies.py`. CSRF protection for unsafe methods is deliberately not
-implemented yet (separate deferred sub-step).
+`accounts/cookies.py`. Unsafe cookie-authenticated requests are CSRF-checked
+via Django's engine — `AccountJWTCookieAuthentication` does this for
+Account-authenticated writes; the three AllowAny cookie-driven views here call
+`accounts.csrf.enforce_csrf_on_unsafe` themselves (the auth class never runs
+for them). `AuthCsrfView` (`GET auth/csrf/`) primes the `csrftoken` cookie.
 """
 
 import datetime as dt
@@ -39,6 +42,7 @@ import datetime as dt
 from django.contrib.auth.tokens import default_token_generator
 from django.core import signing
 from django.db import transaction
+from django.middleware.csrf import get_token as get_csrf_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
@@ -55,6 +59,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from accounts.cookies import REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
+from accounts.csrf import enforce_csrf_on_unsafe
 from accounts.models import Account, Customer
 from accounts.serializers import (
     AccountTokenObtainPairSerializer,
@@ -266,6 +271,21 @@ class ResendVerificationView(APIView):
         return Response(status=status.HTTP_202_ACCEPTED)
 
 
+class AuthCsrfView(APIView):
+    """
+    ``GET /api/v1/salons/<slug>/auth/csrf/`` — primes the ``csrftoken`` cookie
+    (docs/DECISIONS.md § Stage 12). ``get_csrf_token(request)`` forces
+    ``CsrfViewMiddleware`` to write the cookie onto the response. Public
+    (AllowAny); the frontend calls this once before rendering the login form.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request, *args: object, **kwargs: object) -> Response:
+        get_csrf_token(request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class LoginView(TokenObtainPairView):
     # TokenViewBase (simplejwt) has no explicit annotation on
     # permission_classes, so django-stubs infers its type from `()` — the
@@ -278,6 +298,10 @@ class LoginView(TokenObtainPairView):
     serializer_class = AccountTokenObtainPairSerializer
 
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        # AllowAny + cookie-driven, so AccountJWTCookieAuthentication never runs
+        # its CSRF guard for this view — enforce it here. login-CSRF is in
+        # scope (docs/DECISIONS.md § Stage 12).
+        enforce_csrf_on_unsafe(request)
         # The session rides two httpOnly cookies, not the JSON body
         # (docs/DECISIONS.md § Stage 12). super().post() raises on bad
         # credentials before returning, so no cookie is ever set on a failure.
@@ -298,6 +322,8 @@ class RefreshView(TokenRefreshView):
     serializer_class = AccountTokenRefreshSerializer
 
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        # See LoginView.post: AllowAny + cookie-driven, CSRF enforced here.
+        enforce_csrf_on_unsafe(request)
         # Refresh token comes from its own cookie, never the request body
         # (docs/DECISIONS.md § Stage 12).
         raw_refresh = request.COOKIES.get(REFRESH_COOKIE)
@@ -328,6 +354,9 @@ class RefreshView(TokenRefreshView):
 
 class LogoutView(APIView):
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        # See LoginView.post: AllowAny/global-default + cookie-driven, CSRF
+        # enforced here rather than by the authentication class.
+        enforce_csrf_on_unsafe(request)
         response = Response(status=status.HTTP_205_RESET_CONTENT)
         raw_refresh = request.COOKIES.get(REFRESH_COOKIE)
         try:
