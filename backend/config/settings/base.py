@@ -224,12 +224,12 @@ PASSWORD_RESET_TIMEOUT = 60 * 60  # 1 hour
 # the httpOnly session cookie, so credentialed cross-origin requests are
 # allowed — see docs/DECISIONS.md § Stage 12.
 CORS_ALLOW_CREDENTIALS = True
-# TODO(Stage 12): set CORS_ALLOWED_ORIGINS (per-environment: dev localhost:3000
-# vs the prod origin list — apex + per-salon subdomains?). This is an open
-# question in docs/DECISIONS.md § Stage 12 ("CORS allowed-origins list, dev vs
-# prod") and is deliberately left unset until resolved: with no allowlist
-# django-cors-headers fails safe and blocks every cross-origin request. Do NOT
-# substitute CORS_ALLOW_ALL_ORIGINS here.
+# The dev frontend origin. The prod origin list (apex + per-salon subdomains?)
+# and whether it comes from an env var is still an open question in
+# docs/DECISIONS.md § Stage 12. With no allowlist django-cors-headers fails
+# safe and blocks every cross-origin request; do NOT substitute
+# CORS_ALLOW_ALL_ORIGINS here.
+CORS_ALLOWED_ORIGINS = ["http://localhost:3000"]
 
 # --- CSRF ------------------------------------------------------------------
 #
