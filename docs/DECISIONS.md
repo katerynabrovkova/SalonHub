@@ -82,6 +82,14 @@ on them.
   validator). `scheduling._step_windows` guards `<= 0` at read time
   precisely because the write side doesn't. Real fix: close it at the
   source. Needed by Stage 19/20.
+- **Salon profile API.** No endpoint currently exposes `Salon.name` /
+  `Salon.about` / other salon-identity fields over HTTP (the `tenants/` app
+  has no `serializers.py`, `views.py`, or `urls.py` — see Stage 11.5 closure
+  recon, 2026-09-10). Stage 11.5 made these fields translatable at the data
+  layer only; no stage in the roadmap explicitly commits to building a read
+  endpoint for them. Must be resolved when Stage 12/13 scope is written: does
+  the frontend catalog/landing page need to render salon name/about, and if
+  so, in which stage does the endpoint get built.
 - **`compute_candidate_start_times`'s `salon` arg is not checked against
   `specialist.salon`.** A mismatched `salon` silently resolves granularity
   / lead time / max-advance / timezone from the wrong tenant — wrong
