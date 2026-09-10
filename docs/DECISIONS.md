@@ -1637,3 +1637,29 @@ workflow.
 - **CORS allowed-origins list, dev vs prod** — the concrete origin values,
   whether they come from an env var, and how many prod origins (apex +
   per-salon subdomains?) must be allowed.
+
+## Stage 12: API client wrapper
+
+Decided and implemented 2026-09-10.
+
+- `apiRequest<T>(slug, path, options)` — explicit salon slug parameter, no
+  global/module-level state. How the frontend determines the active slug per
+  page (subdomain vs path routing) is a separate, unresolved decision; keeping
+  the client agnostic to it avoids coupling now and rework later.
+- Browser-only: reads the CSRF token from `document.cookie`, so this client
+  cannot run in Server Components — only Client Components / event handlers.
+  Server-side data fetching is a separate future decision if a use case
+  appears.
+- Every request sent with `credentials: 'include'`. Non-safe methods
+  (POST/PATCH/PUT/DELETE) attach `X-CSRFToken` read from the `csrftoken`
+  cookie.
+- Errors surfaced as one `ApiError` class (`status`, `code`, `message`,
+  `details`), mirroring the backend's single `{error:{code,message,details}}`
+  envelope (confirmed by recon in `core/exceptions.py`). Network failures
+  (fetch throwing before a response) are not wrapped — propagate as-is.
+- `NEXT_PUBLIC_API_URL=http://localhost:8000` (frontend, dev default) and
+  `CORS_ALLOWED_ORIGINS=["http://localhost:3000"]` (backend, closing the
+  Stage 12 TODO) added — required for any browser fetch to pass CORS at all.
+- No automated tests added in this step — frontend has no test runner yet.
+  Verified manually via curl/browser. Adding a frontend test framework is a
+  separate near-term decision.
