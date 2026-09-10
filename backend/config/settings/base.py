@@ -210,7 +210,7 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@bella-beauty-sa
 # exception: it travels in the URL path instead, being a persistent,
 # long-lived resource link rather than a one-time credential — see
 # docs/DECISIONS.md § Step (d) decisions (guest-token delivery).
-FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
+FRONTEND_URL = env("FRONTEND_URL", default="http://{slug}.localhost:3000")
 
 # Django's own token generator (used for password reset) reads this directly.
 # Short: a live reset token is the highest-value credential in this scheme
