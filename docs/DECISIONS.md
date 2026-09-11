@@ -1799,3 +1799,27 @@ functional but not stylistically final. Stage 12 is considered closed
 on this basis: the auth and API-client scope is complete; the
 design-system third of the title is a known, named, deferred item —
 not an oversight.
+
+## Stage 13 (Frontend catalog / service / specialists / reviews)
+
+Decided 11.09.2026 — contract agreed before any code, per the
+stage-by-stage workflow.
+
+Scope: browsing/display only — no booking flow, no appointment state.
+Selecting a specialist or service here does not carry any state into
+a booking process; that begins at Stage 14 (a separate, distinct
+stage: "Frontend booking flow + payment + confirmation").
+
+Routing: three separate pages, not one combined page and not a
+services+specialists merge —
+  - /services — service list
+  - /specialists — specialist list, each showing their assigned
+    services (already modeled via Specialist.services M2M)
+  - /reviews — review list
+
+Rationale: clients approach a salon two ways — "which specialist do I
+want" or "which service do I want" — and each needs a different card
+layout (specialist: photo/bio-first; service: price/duration-first).
+Merging them into one page or one route forces a layout compromise
+that serves neither entry path well. All three endpoints are already
+AllowAny on GET — public browsing, no login required.
