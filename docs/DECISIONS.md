@@ -1880,6 +1880,38 @@ Decided 11.09.2026.
    Stage 13 note above on distinct card layouts per client entry path)
    are known.
 
+### Stage 13 amendment — /specialists page: serializer and card scope
+
+Decided 11.09.2026.
+
+1. `SpecialistReadSerializer` gains three additions:
+   - `photo` (existing model field, was not exposed until now)
+   - `services` changes from a bare list of ids to nested `{id, name}`
+     objects (`name` resolved via `?lang=`, matching
+     `ServiceCategoryMiniSerializer`'s pattern), to show service names
+     on the card without a second fetch per specialist
+   - `average_rating` and `review_count`, computed via queryset-level
+     `annotate()` (`Avg`/`Count` over the reverse `reviews` relation)
+     — never via a per-object `SerializerMethodField`, to avoid N+1
+     across a paginated list of specialists
+
+2. `services` must be loaded via `prefetch_related`, kept separate from
+   the `annotate()` on `reviews` — combining an annotate and a
+   select_related/join on two different reverse relations in one
+   queryset risks row multiplication before aggregation, silently
+   inflating `average_rating`/`review_count`.
+
+3. A specialist with zero reviews: `average_rating` is null (not 0) at
+   the API level; the frontend renders this as 0 stars plus a "Немає
+   відгуків" label, never hidden from the list (unlike the `/reviews`
+   endpoint, which omits zero-review specialists from its grouping —
+   that's a different, deliberate behavior for a different page).
+
+4. Specialist detail page (`/specialists/[id]`) with full review list
+   and a "choose this specialist" CTA remains deferred to a later
+   stage — out of scope here, this amendment only covers the
+   `/specialists` list card.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
