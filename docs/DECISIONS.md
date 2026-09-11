@@ -1925,6 +1925,55 @@ Not yet implemented — this entry records the agreed shape only; no
 `docker-compose.yml`, `.env`/`.env.example`, or `getServicesPage.ts`
 change has been made yet.
 
+### Fix: INTERNAL_API_URL implemented
+
+Decided and implemented 11.09.2026.
+
+The above agreed shape is now in place: `INTERNAL_API_URL=http://backend:8000`
+added to `frontend/.env` (documented in `frontend/.env.example` alongside
+`NEXT_PUBLIC_API_URL`, with a comment on the browser/server/Docker-network
+distinction — no `docker-compose.yml` change, since the `frontend` service
+has no Compose-level `environment:`/`env_file:` block and already relies on
+Next.js loading `frontend/.env` from the bind-mounted volume).
+`getServicesPage.ts` now reads `process.env.INTERNAL_API_URL` instead of
+`NEXT_PUBLIC_API_URL`. `getServicesPage.test.ts` updated to stub
+`INTERNAL_API_URL`, value changed to `http://backend:8000` — no assertion
+behavior changed, only the env var name/value being stubbed.
+`api/client.ts` untouched (still browser-only, still `NEXT_PUBLIC_API_URL`).
+
+Frontend test suite: 21/21 passing (3 files) after the change.
+
+This surfaced a second, pre-existing gap: the container-to-container
+request reaches Django but is rejected with `DisallowedHost` — see next
+entry.
+
+### Fix: add `backend` to DJANGO_ALLOWED_HOSTS
+
+Decided and implemented 11.09.2026.
+
+Server-side Next.js code (`getServicesPage.ts`) now reaches Django over
+the Docker network as `http://backend:8000` (`INTERNAL_API_URL`), sending
+`Host: backend:8000`. Django's `CommonMiddleware` rejected this with
+`DisallowedHost` (400) because `ALLOWED_HOSTS` only listed
+`localhost,127.0.0.1` — correct for browser-origin requests, but this is
+the first container-to-container request the project has made. Added
+`backend` to `DJANGO_ALLOWED_HOSTS` in both the dev `.env` and
+`.env.example` (`localhost,127.0.0.1,backend`) to allow it.
+
+Verified end-to-end after recreating the `backend` container (a plain
+`docker compose restart` does not pick up an `env_file` change — the
+container keeps the env it was created with; `docker compose up -d
+backend` was needed to recreate it): a direct request to
+`http://backend:8000/api/v1/salons/bella-demo/services/` with
+`Host: backend:8000` now returns `200` with real catalog data, and the
+backend access log shows a matching `200` for the request the `/services`
+page itself made (`GET /api/v1/salons/bella-demo/services/ HTTP/1.1" 200
+837` at 10:01:05, correlated against the frontend's own `GET /services
+200` log line for the same request) — confirmed as a live round trip, not
+a cached render (an earlier `/services 200` had no corresponding backend
+log entry and was discarded as a stale Next.js dev-cache hit before
+concluding the fix worked).
+
 ### Fix: NullIf output_field on ServiceCategory/Service unique constraints
 
 Decided and implemented 11.09.2026.
