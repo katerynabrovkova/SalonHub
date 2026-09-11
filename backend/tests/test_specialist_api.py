@@ -5,12 +5,16 @@ Specialist API tests (docs/ARCHITECTURE.md § 4, § 13; Stage 5 sub-step 5).
 import datetime as dt
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import Account, AccountRole, Customer
 from booking.models import AppointmentStatus
+from catalog.models import Service
 from core.tenancy import tenant_context
+from reviews.models import Review
 from specialists.models import Specialist
 from tests.conftest import make_appointment
 
@@ -415,3 +419,161 @@ def test_posting_a_service_from_another_salon_returns_400(
 
     assert response.status_code == 400
     assert "services" in response.data["error"]["details"]
+
+
+# --- Stage 13 /specialists amendment: photo, nested services, ratings ------
+#
+# RED phase (docs/DECISIONS.md § Stage 13 amendment "/specialists page:
+# serializer and card scope") — SpecialistReadSerializer/SpecialistListCreateView
+# do not yet expose `photo`, nested `services`, `average_rating`, or
+# `review_count`. These tests are written against the *decided* contract and
+# are expected to fail against the current, unmodified serializer/view —
+# either with a KeyError on a field that doesn't exist yet, a bare-id vs.
+# nested-object mismatch, or (test 6) a query count that scales with the
+# number of specialists because nothing is prefetched/annotated yet.
+
+_review_slot_counter = 0
+
+
+def _make_review(
+    *, salon, specialist, customer, service, rating: int = 5, text: str = ""
+) -> Review:
+    """Create one COMPLETED appointment + its Review. Each call uses a fresh
+    day-spaced slot so the Appointment exclusion constraint never trips
+    (same pattern as test_review_list_endpoint.py's _make_review)."""
+    global _review_slot_counter
+    _review_slot_counter += 1
+    start = timezone.now() + dt.timedelta(days=100 + _review_slot_counter)
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=start,
+        status=AppointmentStatus.COMPLETED,
+    )
+    with tenant_context(salon.id):
+        return Review.objects.create(
+            salon=salon,
+            appointment=appointment,
+            customer=customer,
+            specialist=specialist,
+            rating=rating,
+            text=text,
+        )
+
+
+@pytest.fixture(autouse=True)
+def _reset_review_slot_counter():
+    global _review_slot_counter
+    _review_slot_counter = 0
+    yield
+
+
+def _make_service(salon, service_category, *, name: str) -> Service:
+    with tenant_context(salon.id):
+        return Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": name},
+            duration_minutes=30,
+            price="300.00",
+        )
+
+
+def test_photo_field_exposed(client, salon, specialist):
+    with tenant_context(salon.id):
+        specialist.photo = "https://example.com/photos/jane.jpg"
+        specialist.save(update_fields=["photo"])
+
+    response = client.get(_specialist_detail_url(salon, specialist))
+
+    assert response.status_code == 200
+    assert response.data["photo"] == "https://example.com/photos/jane.jpg"
+
+
+def test_services_nested_not_bare_ids(client, salon, service_category, specialist):
+    service_a = _make_service(salon, service_category, name="Manicure")
+    service_b = _make_service(salon, service_category, name="Pedicure")
+    with tenant_context(salon.id):
+        specialist.services.set([service_a, service_b], through_defaults={"salon_id": salon.id})
+
+    response = client.get(_specialist_detail_url(salon, specialist))
+
+    assert response.status_code == 200
+    returned = {row["id"]: row["name"] for row in response.data["services"]}
+    assert returned == {service_a.id: "Manicure", service_b.id: "Pedicure"}
+
+
+def test_average_rating_and_review_count_correct(client, salon, specialist, customer, service):
+    _make_review(salon=salon, specialist=specialist, customer=customer, service=service, rating=5)
+    _make_review(salon=salon, specialist=specialist, customer=customer, service=service, rating=4)
+    _make_review(salon=salon, specialist=specialist, customer=customer, service=service, rating=3)
+
+    response = client.get(_specialist_detail_url(salon, specialist))
+
+    assert response.status_code == 200
+    assert response.data["average_rating"] == 4.0
+    assert response.data["review_count"] == 3
+
+
+def test_zero_reviews_specialist_shows_null_rating_and_appears_in_list(client, salon, specialist):
+    response = client.get(_specialist_list_url(salon))
+
+    assert response.status_code == 200
+    returned_ids = [row["id"] for row in response.data["results"]]
+    assert specialist.id in returned_ids
+    row = next(row for row in response.data["results"] if row["id"] == specialist.id)
+    assert row["average_rating"] is None
+    assert row["review_count"] == 0
+
+
+def test_no_row_multiplication_with_multiple_services_and_reviews(
+    client, salon, service_category, specialist, customer, service
+):
+    service_a = _make_service(salon, service_category, name="Gel Polish")
+    service_b = _make_service(salon, service_category, name="Pedicure")
+    service_c = _make_service(salon, service_category, name="Brows")
+    with tenant_context(salon.id):
+        specialist.services.set(
+            [service_a, service_b, service_c], through_defaults={"salon_id": salon.id}
+        )
+
+    _make_review(salon=salon, specialist=specialist, customer=customer, service=service, rating=5)
+    _make_review(salon=salon, specialist=specialist, customer=customer, service=service, rating=4)
+    _make_review(salon=salon, specialist=specialist, customer=customer, service=service, rating=3)
+
+    response = client.get(_specialist_detail_url(salon, specialist))
+
+    assert response.status_code == 200
+    assert response.data["review_count"] == 3
+
+
+def test_no_n_plus_one_queries(client, salon, service_category, customer, service):
+    service_a = _make_service(salon, service_category, name="Gel Polish")
+    service_b = _make_service(salon, service_category, name="Pedicure")
+
+    with tenant_context(salon.id):
+        specialists = [
+            Specialist.objects.create(salon=salon, name={"en": f"Specialist {i}"})
+            for i in range(20)
+        ]
+        for sp in specialists:
+            sp.services.set([service_a, service_b], through_defaults={"salon_id": salon.id})
+
+    for sp in specialists:
+        _make_review(salon=salon, specialist=sp, customer=customer, service=service, rating=5)
+        _make_review(salon=salon, specialist=sp, customer=customer, service=service, rating=3)
+
+    with CaptureQueriesContext(connection) as ctx:
+        response = client.get(_specialist_list_url(salon))
+
+    assert response.status_code == 200
+    assert len(response.data["results"]) == 20
+    # A fixed, small number of queries regardless of how many specialists are
+    # on the page (count + list + prefetch(services) + prefetch(reviews), not
+    # N queries for N specialists' services/reviews).
+    assert len(ctx.captured_queries) <= 10, (
+        f"expected a fixed small query count, got {len(ctx.captured_queries)}: "
+        + "\n".join(q["sql"] for q in ctx.captured_queries)
+    )

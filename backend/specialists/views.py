@@ -8,7 +8,7 @@ the URL's bound tenant context — never from client input (both serializers
 keep it read-only, see specialists/serializers.py).
 """
 
-from django.db.models import QuerySet
+from django.db.models import Avg, Count, QuerySet
 from rest_framework import generics
 from rest_framework.permissions import SAFE_METHODS, AllowAny, BasePermission
 from rest_framework.request import Request
@@ -71,6 +71,31 @@ class _SpecialistViewMixin:
             queryset = queryset.filter(is_active=True)
         return queryset
 
+    def _with_card_annotations(self, queryset: QuerySet) -> QuerySet:
+        """
+        `services` is prefetched separately from the `reviews` annotate()
+        (docs/DECISIONS.md § Stage 13 amendment "/specialists page:
+        serializer and card scope") — combining a join on `services` with an
+        aggregate over `reviews` in one queryset would multiply rows before
+        aggregation and silently inflate average_rating/review_count.
+        SpecialistReadSerializer requires both annotations to be present
+        (average_rating/review_count are plain fields, not
+        SerializerMethodFields), so every view that can serve
+        SpecialistReadSerializer needs this, not just the list view.
+
+        `annotate()` with an aggregate makes Django's `QuerySet.ordered`
+        stop crediting the model's default `Meta.ordering` (it can no
+        longer tell whether GROUP BY reshuffled rows), which trips
+        DRF pagination's `UnorderedObjectListWarning` and risks
+        inconsistent results across pages. The explicit `order_by` below
+        restores the same order as `Specialist.Meta.ordering`.
+        """
+        return (
+            queryset.prefetch_related("services")
+            .annotate(average_rating=Avg("reviews__rating"), review_count=Count("reviews"))
+            .order_by("created_at", "id")
+        )
+
 
 class SpecialistListCreateView(
     _SpecialistSerializerMixin, _SpecialistViewMixin, generics.ListCreateAPIView
@@ -80,7 +105,7 @@ class SpecialistListCreateView(
         service_id = self.request.query_params.get("service")
         if service_id and service_id.isdigit():
             queryset = queryset.filter(services__id=service_id)
-        return queryset
+        return self._with_card_annotations(queryset)
 
     def perform_create(self, serializer: BaseSerializer) -> None:
         serializer.save(salon_id=get_current_salon_id())
@@ -90,7 +115,7 @@ class SpecialistDetailView(
     _SpecialistSerializerMixin, _SpecialistViewMixin, generics.RetrieveUpdateDestroyAPIView
 ):
     def get_queryset(self) -> QuerySet[Specialist]:
-        return self._apply_visibility(Specialist.objects.all())
+        return self._with_card_annotations(self._apply_visibility(Specialist.objects.all()))
 
     def perform_destroy(self, instance: Specialist) -> None:
         soft_delete_specialist(instance)

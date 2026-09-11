@@ -117,20 +117,67 @@ class SpecialistWriteSerializer(serializers.ModelSerializer):
         return instance
 
 
+class ServiceMiniSerializer(serializers.ModelSerializer):
+    """
+    Nested read-only summary of a Service on a Specialist's `services` list
+    (docs/DECISIONS.md § Stage 13 amendment "/specialists page: serializer
+    and card scope"). `name` resolves per the request's ``?lang=`` the same
+    way SpecialistReadSerializer._resolved / catalog's
+    ServiceCategoryMiniSerializer do — a nested serializer inherits
+    `self.context` from its parent when instantiated the normal declarative
+    way, so the request reaches this `get_name` too.
+    """
+
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Service
+        fields = ["id", "name"]
+        read_only_fields = fields
+
+    def get_name(self, obj: Service) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
+
+
 class SpecialistReadSerializer(serializers.ModelSerializer):
     """
     Read representation: `name`/`bio` resolved to a plain string for the
     request's ``?lang=`` (docs/DECISIONS.md § Stage 11.5), never the raw dict.
-    `services` stays a read-only list of ids.
+    `services` is a nested, read-only list of {id, name} (docs/DECISIONS.md
+    § Stage 13 amendment "/specialists page: serializer and card scope").
+
+    `average_rating` / `review_count` are plain read-only fields, not
+    SerializerMethodFields — they are sourced from the view's queryset-level
+    `annotate()` (SpecialistListCreateView.get_queryset), never computed here,
+    to avoid N+1 across a paginated list of specialists. A specialist with no
+    reviews reads as `average_rating=None`, `review_count=0` (Avg over zero
+    rows is NULL; Count over zero rows is 0) — deliberately not omitted from
+    the list, unlike the /reviews endpoint's grouping.
     """
 
     name = serializers.SerializerMethodField()
     bio = serializers.SerializerMethodField()
-    services = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    services = ServiceMiniSerializer(many=True, read_only=True)
+    average_rating = serializers.FloatField(read_only=True)
+    review_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Specialist
-        fields = ["id", "salon", "name", "bio", "is_active", "services", "created_at", "updated_at"]
+        fields = [
+            "id",
+            "salon",
+            "name",
+            "bio",
+            "photo",
+            "is_active",
+            "services",
+            "average_rating",
+            "review_count",
+            "created_at",
+            "updated_at",
+        ]
         read_only_fields = fields
 
     def _resolved(self, value: dict[str, str]) -> str:
