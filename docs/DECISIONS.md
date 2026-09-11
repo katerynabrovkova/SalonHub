@@ -1968,6 +1968,33 @@ Explicit deferrals coming out of this stage:
   only, revealing more of the already-fetched array. Revisit if a
   salon's review volume grows enough to make one full fetch costly.
 
+## Stage 14 (frontend booking flow + payment + confirmation) — scope
+
+Decided 11.09.2026 — contract agreed before any code, per the
+stage-by-stage workflow.
+
+- **Stage 14 is scoped guest-only.** It builds on the existing
+  guest-token-based backend endpoints as-is: `bookings/`,
+  `guest/appointments/<id>/pay/`, `guest/appointments/<id>/cancel/`
+  (`backend/booking/urls.py`, `backend/payments/urls.py`). No new
+  backend auth path is added for this stage.
+- **Logged-in Account booking is explicitly deferred to Stage 15**
+  ("Frontend customer account + guest token management") — an
+  Account-aware booking path, frontend auth context, and "my bookings"
+  in a client dashboard all land there. Stage 15 already owns the
+  client dashboard per the existing stage list (`/client/page.tsx` is
+  currently only a Stage 12 placeholder proving the post-login
+  redirect).
+- **Rationale:** no stage-scoping decision existed prior to this entry.
+  The backend's guest/Account-agnostic booking path (`Appointment`
+  always references `Customer`, never `Account` — see § "Identity:
+  Customer vs. Account") is an implementation detail of the service
+  layer, not a frontend scope decision — it does not by itself commit
+  the Stage 14 frontend to building an Account-aware flow. Splitting
+  here avoids duplicating booking-flow logic between Stage 14 and
+  Stage 15: Stage 14 ships the guest flow once; Stage 15 adds the
+  Account-aware path on top once auth context exists on the frontend.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
