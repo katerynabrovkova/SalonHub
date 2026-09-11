@@ -1942,6 +1942,32 @@ Decided 11.09.2026.
    remains deferred to a later stage per the existing Stage 13
    amendment.
 
+### Stage 13 status: closed
+
+Decided 11.09.2026.
+
+All three catalog pages shipped: `/services` list + `/services/[id]`
+detail, `/specialists` list, and `/reviews` flat feed. Each follows the
+same thin Server Component + tested pure fetch-helper pattern
+(`getServicesPage`/`getServiceDetailPage`/`getSpecialistsPage`/
+`getReviews`). Scope held throughout: browsing/display only, no
+booking-state carryover — consistent with how Stage 13 was scoped at
+the start.
+
+Explicit deferrals coming out of this stage:
+
+- `/services/[id]` has no description field — the `Service` model has
+  none; adding one is deferred until a concrete need arises.
+- `/specialists` cards are inline JSX, not a reusable `SpecialistCard`
+  component — extraction deferred until a second caller with known
+  requirements exists.
+- `/specialists/[id]` (full review list, "choose this specialist" CTA)
+  remains deferred — it bridges into booking, out of scope for a
+  browsing-only stage.
+- `/reviews` has no server-side pagination — client-side "показати ще"
+  only, revealing more of the already-fetched array. Revisit if a
+  salon's review volume grows enough to make one full fetch costly.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
