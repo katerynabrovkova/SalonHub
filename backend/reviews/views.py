@@ -82,16 +82,19 @@ class ReviewListView(APIView):
     with at least one review, ordered by review count descending (tie:
     lower specialist id first). Reviews within a group are newest-first.
 
-    One query: every tenant review with its specialist joined; grouping and
-    ordering happen in Python (per-salon review volume is assumed modest —
-    the same premise that made pagination unnecessary). Tenant scoping is
-    the ambient TenantResolutionMiddleware context, like every view here.
+    One query: every tenant review with its specialist and (via
+    appointment__service) service joined; grouping and ordering happen in
+    Python (per-salon review volume is assumed modest — the same premise
+    that made pagination unnecessary). Tenant scoping is the ambient
+    TenantResolutionMiddleware context, like every view here.
     """
 
     permission_classes = [AllowAny]
 
     def get(self, request: Request, *args: object, **kwargs: object) -> Response:
-        reviews = Review.objects.select_related("specialist").order_by("-created_at", "-id")
+        reviews = Review.objects.select_related("specialist", "appointment__service").order_by(
+            "-created_at", "-id"
+        )
 
         grouped: dict[int, list[Review]] = {}
         specialists: dict[int, Specialist] = {}
@@ -106,7 +109,9 @@ class ReviewListView(APIView):
                 "specialist": ReviewSpecialistSerializer(
                     specialists[specialist_id], context={"request": request}
                 ).data,
-                "reviews": ReviewPublicSerializer(rows, many=True).data,
+                "reviews": ReviewPublicSerializer(
+                    rows, many=True, context={"request": request}
+                ).data,
             }
             for specialist_id, rows in ordered
         ]

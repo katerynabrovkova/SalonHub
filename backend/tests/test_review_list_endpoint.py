@@ -31,6 +31,8 @@ lower specialist ``id`` sorts first (deterministic, not incidental DB order).
 import datetime as dt
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from accounts.models import Customer
@@ -327,3 +329,75 @@ def test_specialist_name_falls_back_to_english_when_lang_absent_or_unsupported(
     assert bad_lang.status_code == 200
     assert no_lang.data[0]["specialist"]["name"] == "Jane"
     assert bad_lang.data[0]["specialist"]["name"] == "Jane"
+
+
+# --- 10. service field (docs/DECISIONS.md § Stage 13 amendment "/reviews
+# page: flat feed, not grouped-by-specialist") -----------------------
+#
+# RED phase: ReviewPublicSerializer does not yet expose `service`. These
+# tests assert on response.data[...]["reviews"][0]["service"], which does
+# not exist until the GREEN phase adds the field to the serializer and
+# `select_related("specialist", "appointment__service")` to the view.
+
+
+def _bilingual_service(salon, service_category):
+    with tenant_context(salon.id):
+        return Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure", "uk": "Манікюр"},
+            duration_minutes=60,
+            price="500.00",
+            buffer_minutes=15,
+        )
+
+
+def test_review_includes_service_field(client, salon, specialist, customer, service):
+    review = _make_review(salon=salon, specialist=specialist, customer=customer, service=service)
+
+    response = client.get(_reviews_url(salon))
+
+    assert response.status_code == 200
+    review_data = response.data[0]["reviews"][0]
+    assert review_data["id"] == review.id
+    assert review_data["service"] == {"id": service.id, "name": "Manicure"}
+
+
+def test_service_name_respects_lang_param(client, salon, specialist, customer, service_category):
+    svc = _bilingual_service(salon, service_category)
+    _make_review(salon=salon, specialist=specialist, customer=customer, service=svc)
+
+    uk = client.get(_reviews_url(salon) + "?lang=uk")
+    en = client.get(_reviews_url(salon) + "?lang=en")
+
+    assert uk.status_code == 200
+    assert en.status_code == 200
+    assert uk.data[0]["reviews"][0]["service"]["name"] == "Манікюр"
+    assert en.data[0]["reviews"][0]["service"]["name"] == "Manicure"
+
+
+def test_no_n_plus_one_from_service_field(client, salon, customer, service_category):
+    service_a = _bilingual_service(salon, service_category)
+
+    with tenant_context(salon.id):
+        specialists = [
+            Specialist.objects.create(salon=salon, name={"en": f"Specialist {i}"})
+            for i in range(20)
+        ]
+
+    for sp in specialists:
+        _make_review(salon=salon, specialist=sp, customer=customer, service=service_a, rating=5)
+        _make_review(salon=salon, specialist=sp, customer=customer, service=service_a, rating=3)
+
+    with CaptureQueriesContext(connection) as ctx:
+        response = client.get(_reviews_url(salon))
+
+    assert response.status_code == 200
+    assert len(response.data) == 20
+    # One query for the review rows (joined to specialist + appointment +
+    # service via select_related), not one additional query per review for
+    # its service — a fixed, small count regardless of review volume.
+    assert len(ctx.captured_queries) <= 5, (
+        f"expected a fixed small query count, got {len(ctx.captured_queries)}: "
+        + "\n".join(q["sql"] for q in ctx.captured_queries)
+    )

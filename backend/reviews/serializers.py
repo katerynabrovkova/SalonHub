@@ -13,10 +13,32 @@ from typing import Any
 from rest_framework import serializers
 
 from booking.models import AppointmentStatus
+from catalog.models import Service
 from core.exceptions import DuplicateReviewError, ReviewRequiresCompletedAppointmentError
 from core.i18n import resolve_translation
 from reviews.models import REVIEW_TEXT_MAX_LENGTH, Review
 from specialists.models import Specialist
+
+
+class ReviewServiceSerializer(serializers.ModelSerializer):
+    """
+    The `service` block of each review in the public list response
+    (docs/DECISIONS.md § Stage 13 amendment "/reviews page: flat feed, not
+    grouped-by-specialist"). `name` resolved for the request's ``?lang=``,
+    mirroring ReviewSpecialistSerializer.
+    """
+
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Service
+        fields = ["id", "name"]
+        read_only_fields = fields
+
+    def get_name(self, obj: Service) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
 
 
 class ReviewPublicSerializer(serializers.ModelSerializer):
@@ -26,11 +48,18 @@ class ReviewPublicSerializer(serializers.ModelSerializer):
     (and every other identifying field) — the list endpoint is
     unauthenticated. Separate from ReviewCreateSerializer, which is
     write-oriented and exposes `customer` / `salon` / `appointment`.
+
+    `service` is sourced from `review.appointment.service` (docs/DECISIONS.md
+    § Stage 13 amendment "/reviews page: flat feed, not
+    grouped-by-specialist") — a plain FK chain, relies on the view's
+    `select_related("appointment__service")` to stay a single query.
     """
+
+    service = ReviewServiceSerializer(source="appointment.service")
 
     class Meta:
         model = Review
-        fields = ["id", "rating", "text", "created_at"]
+        fields = ["id", "rating", "text", "created_at", "service"]
         read_only_fields = fields
 
 
