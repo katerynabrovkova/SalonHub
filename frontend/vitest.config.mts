@@ -2,10 +2,10 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
-// Kept deliberately minimal: this project currently only needs to unit-test
-// plain TypeScript logic (e.g. subdomain/slug parsing). React component tests
-// would additionally need `@vitejs/plugin-react` and the `jsdom` environment —
-// add those when the first component test lands, not before.
+// The global environment stays "node" for the existing plain-TypeScript logic
+// tests (e.g. subdomain/slug parsing). Component tests opt into "jsdom"
+// per-file via a `// @vitest-environment jsdom` pragma comment at the top of
+// the test file instead of switching this globally.
 export default defineConfig({
   resolve: {
     alias: {
@@ -16,5 +16,6 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    setupFiles: ["./vitest.setup.ts"],
   },
 });
