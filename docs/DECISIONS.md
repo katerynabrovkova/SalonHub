@@ -1863,6 +1863,23 @@ to only the request that actually needs it.
 `test_no_filter_returns_all` (`backend/tests/test_specialist_api.py`)
 pass.
 
+### Stage 13 amendment — service detail page scope narrowing
+
+Decided 11.09.2026.
+
+1. `/services/<id>` will not display a description field for now. The
+   `Service` model (`backend/catalog/models.py`) has no description
+   column; adding one is deferred until a concrete need arises, not
+   part of Stage 13 scope.
+
+2. The specialist list ("who offers this service") on `/services/<id>`
+   is implemented as inline JSX within the page component, not as a
+   separate reusable `SpecialistCard` component. Extraction into a
+   shared component is deferred until `/specialists` is built and its
+   actual card requirements (likely a different layout — per the
+   Stage 13 note above on distinct card layouts per client entry path)
+   are known.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
