@@ -63,6 +63,56 @@ def test_guest_cannot_create_a_specialist(client, salon):
     assert response.status_code == 401
 
 
+def test_filter_by_service_returns_only_matching_specialists(client, salon, service_category):
+    from catalog.models import Service
+
+    with tenant_context(salon.id):
+        service_a = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure"},
+            duration_minutes=60,
+            price="500.00",
+        )
+        service_b = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Pedicure"},
+            duration_minutes=60,
+            price="500.00",
+        )
+        specialist_1 = Specialist.objects.create(salon=salon, name={"en": "Jane"})
+        specialist_2 = Specialist.objects.create(salon=salon, name={"en": "Ann"})
+        specialist_3 = Specialist.objects.create(salon=salon, name={"en": "Mia"})
+        specialist_1.services.set([service_a], through_defaults={"salon_id": salon.id})
+        specialist_2.services.set([service_a], through_defaults={"salon_id": salon.id})
+        specialist_3.services.set([service_b], through_defaults={"salon_id": salon.id})
+
+    response = client.get(_specialist_list_url(salon) + f"?service={service_a.id}")
+
+    assert response.status_code == 200
+    returned_ids = {row["id"] for row in response.data["results"]}
+    assert returned_ids == {specialist_1.id, specialist_2.id}
+
+
+def test_filter_by_nonexistent_service_returns_empty(client, salon, specialist):
+    response = client.get(_specialist_list_url(salon) + "?service=999999")
+
+    assert response.status_code == 200
+    assert response.data["results"] == []
+
+
+def test_no_filter_returns_all(client, salon, specialist):
+    with tenant_context(salon.id):
+        other = Specialist.objects.create(salon=salon, name={"en": "Ann"})
+
+    response = client.get(_specialist_list_url(salon))
+
+    assert response.status_code == 200
+    returned_ids = {row["id"] for row in response.data["results"]}
+    assert returned_ids == {specialist.id, other.id}
+
+
 def test_client_supplied_salon_in_body_is_ignored(client, salon, other_salon, admin_account):
     client.force_authenticate(user=admin_account)
     response = client.post(

@@ -76,7 +76,11 @@ class SpecialistListCreateView(
     _SpecialistSerializerMixin, _SpecialistViewMixin, generics.ListCreateAPIView
 ):
     def get_queryset(self) -> QuerySet[Specialist]:
-        return self._apply_visibility(Specialist.objects.all())
+        queryset = self._apply_visibility(Specialist.objects.all())
+        service_id = self.request.query_params.get("service")
+        if service_id and service_id.isdigit():
+            queryset = queryset.filter(services__id=service_id)
+        return queryset
 
     def perform_create(self, serializer: BaseSerializer) -> None:
         serializer.save(salon_id=get_current_salon_id())
