@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getServicesPage } from "./getServicesPage";
 
-// Same env var api/client.ts reads (src/lib/api/client.ts:16) — this module
-// must not invent a second one.
-const API_BASE = "http://localhost:8000";
+// Server-only var (docs/DECISIONS.md § Fix: separate server-side API URL for
+// Server Components) — deliberately distinct from api/client.ts's
+// NEXT_PUBLIC_API_URL (src/lib/api/client.ts:16), since this module runs
+// server-side and must reach the backend via the Docker network, not the
+// host-published port.
+const API_BASE = "http://backend:8000";
 
 // Mirrors the backend's core.pagination.DefaultPagination.page_size (20,
 // backend/core/pagination.py). Not present in the DRF list envelope itself
@@ -21,7 +24,7 @@ function jsonResponse(body: unknown, ok = true) {
 }
 
 beforeEach(() => {
-  process.env.NEXT_PUBLIC_API_URL = API_BASE;
+  process.env.INTERNAL_API_URL = API_BASE;
   vi.stubGlobal("fetch", vi.fn());
 });
 

@@ -41,7 +41,7 @@ export interface ServicesPage {
 }
 
 export async function getServicesPage(slug: string, page = 1): Promise<ServicesPage> {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL;
+  const apiBase = process.env.INTERNAL_API_URL;
   const path = `/api/v1/salons/${slug}/services/`;
   const url = page === 1 ? `${apiBase}${path}` : `${apiBase}${path}?page=${page}`;
 
