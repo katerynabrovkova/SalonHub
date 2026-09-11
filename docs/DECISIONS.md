@@ -1874,3 +1874,27 @@ AccountAdmin's local copy is removed in favor of the shared one.
 Discovered while manually seeding dev data through /admin/ — a real
 gap, not present in existing tests because nothing previously
 exercised admin-side creation of these models outside Account.
+
+### Fix: shared tenant-bound admin form (promoted from Account-only)
+
+Decided and implemented 11.09.2026.
+
+_TenantBoundModelForm moved from accounts/admin.py to core/admin.py,
+wired as SalonScopedAdmin's default `form`. Every TenantScopedModel
+admin subclass now inherits the fix for free — previously only
+Account had it, leaving ServiceCategory/Service/Specialist admin-side
+creation broken (TenantContextMissingError on save, discovered
+manually while seeding dev data).
+
+Specialist admin creation is now fully fixed and tested
+(test_specialist_admin_add_post_succeeds passes).
+
+ServiceCategory and Service admin creation are still broken, but for
+an unrelated, pre-existing reason: their per-language UniqueConstraint
+uses NullIf(KeyTextTransform(...), Value("")) with no output_field,
+which Django's Python-side UniqueConstraint.validate() cannot resolve
+a type for (Postgres itself handles it fine at the DB level — this
+only affects the ORM's pre-check, reached via Model.full_clean(), a
+path nothing previously exercised for these two models). Tracked
+separately, not fixed in this change per CLAUDE.md's Meta.constraints
+decision-point rule.
