@@ -64,6 +64,7 @@ from accounts.models import Account, Customer
 from accounts.serializers import (
     AccountTokenObtainPairSerializer,
     AccountTokenRefreshSerializer,
+    MeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     RegisterSerializer,
@@ -350,6 +351,22 @@ class RefreshView(TokenRefreshView):
         )
         response.data = {}
         return response
+
+
+class MeView(APIView):
+    """
+    ``GET auth/me/`` — the current Account's `email` + `role`
+    (docs/DECISIONS.md § "`/me/` endpoint (Stage 12)"). No explicit
+    `authentication_classes`/`permission_classes` override: relies on the
+    project-wide defaults (`AccountJWTCookieAuthentication` +
+    `IsAuthenticated`), same posture as `LogoutView` — the cookie-carried
+    access token is all that's needed, and DEFAULT_PERMISSION_CLASSES
+    already rejects an unauthenticated request with 401.
+    """
+
+    def get(self, request: Request, *args: object, **kwargs: object) -> Response:
+        serializer = MeSerializer(request.user)
+        return Response(serializer.data)
 
 
 class LogoutView(APIView):

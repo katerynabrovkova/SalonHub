@@ -18,6 +18,9 @@ field-level 400, never the neutral token-failure collapse.
 the salon bound from the URL slug — see docs/DECISIONS.md § Stage 3-R.E for
 the full contract (login request shape, no-enumeration failure, the
 `identity_model` claim mitigation).
+
+`MeSerializer` (Stage 12) is the read representation for `GET auth/me/` —
+see docs/DECISIONS.md § "`/me/` endpoint (Stage 12)".
 """
 
 from typing import Any
@@ -61,6 +64,21 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 class ResendVerificationSerializer(serializers.Serializer):
     email = serializers.EmailField()
+
+
+class MeSerializer(serializers.ModelSerializer):
+    """
+    Read representation for ``GET auth/me/`` (docs/DECISIONS.md § "`/me/`
+    endpoint (Stage 12)"). Deliberately just `email` + `role` — no `salon`
+    (the frontend already has the slug from the subdomain before login
+    happens) and no `email_verified_at` (deferred until an actual
+    "verify your email" UI exists).
+    """
+
+    class Meta:
+        model = Account
+        fields = ["email", "role"]
+        read_only_fields = fields
 
     def validate_email(self, value: str) -> str:
         return value.strip().lower()
