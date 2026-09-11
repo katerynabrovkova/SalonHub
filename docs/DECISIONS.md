@@ -1899,6 +1899,32 @@ path nothing previously exercised for these two models). Tracked
 separately, not fixed in this change per CLAUDE.md's Meta.constraints
 decision-point rule.
 
+### Fix: separate server-side API URL for Server Components
+
+Decided 11.09.2026.
+
+`NEXT_PUBLIC_API_URL` is browser-scoped by design (Next.js inlines
+`NEXT_PUBLIC_*` vars into client bundles) and set to the host-published
+port (`http://localhost:8001` dev) — correct for browser code
+(`api/client.ts`) but unreachable from server-side code running inside
+the `frontend` Docker container, where "localhost" means the frontend
+container itself. Discovered as `fetch failed, ECONNREFUSED
+127.0.0.1:8001` from `getServicesPage.ts`, a Server Component data-fetch
+helper.
+
+Agreed fix: add `INTERNAL_API_URL` (no `NEXT_PUBLIC_` prefix —
+server-only, never inlined into the client bundle), set to
+`http://backend:8000` — Compose's internal service-name DNS, resolvable
+container-to-container on the shared `salonhub_default` network
+regardless of host port mappings. `getServicesPage.ts` (and any future
+server-side data-fetch helper) is to read this instead of
+`NEXT_PUBLIC_API_URL`. `api/client.ts` is unaffected — it stays on
+`NEXT_PUBLIC_API_URL`, since it only ever runs in the browser.
+
+Not yet implemented — this entry records the agreed shape only; no
+`docker-compose.yml`, `.env`/`.env.example`, or `getServicesPage.ts`
+change has been made yet.
+
 ### Fix: NullIf output_field on ServiceCategory/Service unique constraints
 
 Decided and implemented 11.09.2026.
