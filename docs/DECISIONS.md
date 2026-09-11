@@ -1841,9 +1841,7 @@ assigned services. No new backend relation needed.
 
 ### Stage 13 amendment — specialists-by-service filter
 
-Decided 11.09.2026. Not yet implemented — this entry records the
-agreed approach; `SpecialistListCreateView.get_queryset()` in
-`backend/specialists/views.py` is still unfiltered as of this writing.
+Decided and implemented 11.09.2026.
 
 Plan: add a `?service=<id>` query param to `SpecialistListCreateView`,
 mirroring the existing `?category=` filter on `ServiceListCreateView`
@@ -1860,11 +1858,16 @@ specialists app and add cost to every service *list* request, not
 just the detail page — the query-param filter keeps that cost scoped
 to only the request that actually needs it.
 
+`test_filter_by_service_returns_only_matching_specialists`,
+`test_filter_by_nonexistent_service_returns_empty`, and
+`test_no_filter_returns_all` (`backend/tests/test_specialist_api.py`)
+pass.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
-Decided 11.09.2026.
+Decided and implemented 11.09.2026.
 
-_TenantBoundModelForm (currently local to accounts/admin.py, solving
+_TenantBoundModelForm (previously local to accounts/admin.py, solving
 this exact issue for Account only) is promoted to core/admin.py and
 wired as SalonScopedAdmin's default form, so every TenantScopedModel
 admin (ServiceCategory, Service, Specialist, and any future one)
@@ -1874,17 +1877,6 @@ AccountAdmin's local copy is removed in favor of the shared one.
 Discovered while manually seeding dev data through /admin/ — a real
 gap, not present in existing tests because nothing previously
 exercised admin-side creation of these models outside Account.
-
-### Fix: shared tenant-bound admin form (promoted from Account-only)
-
-Decided and implemented 11.09.2026.
-
-_TenantBoundModelForm moved from accounts/admin.py to core/admin.py,
-wired as SalonScopedAdmin's default `form`. Every TenantScopedModel
-admin subclass now inherits the fix for free — previously only
-Account had it, leaving ServiceCategory/Service/Specialist admin-side
-creation broken (TenantContextMissingError on save, discovered
-manually while seeding dev data).
 
 Specialist admin creation is now fully fixed and tested
 (test_specialist_admin_add_post_succeeds passes).
@@ -1901,7 +1893,7 @@ decision-point rule.
 
 ### Fix: separate server-side API URL for Server Components
 
-Decided 11.09.2026.
+Decided and implemented 11.09.2026.
 
 `NEXT_PUBLIC_API_URL` is browser-scoped by design (Next.js inlines
 `NEXT_PUBLIC_*` vars into client bundles) and set to the host-published
@@ -1912,34 +1904,22 @@ container itself. Discovered as `fetch failed, ECONNREFUSED
 127.0.0.1:8001` from `getServicesPage.ts`, a Server Component data-fetch
 helper.
 
-Agreed fix: add `INTERNAL_API_URL` (no `NEXT_PUBLIC_` prefix —
-server-only, never inlined into the client bundle), set to
-`http://backend:8000` — Compose's internal service-name DNS, resolvable
-container-to-container on the shared `salonhub_default` network
-regardless of host port mappings. `getServicesPage.ts` (and any future
-server-side data-fetch helper) is to read this instead of
-`NEXT_PUBLIC_API_URL`. `api/client.ts` is unaffected — it stays on
-`NEXT_PUBLIC_API_URL`, since it only ever runs in the browser.
-
-Not yet implemented — this entry records the agreed shape only; no
-`docker-compose.yml`, `.env`/`.env.example`, or `getServicesPage.ts`
-change has been made yet.
-
-### Fix: INTERNAL_API_URL implemented
-
-Decided and implemented 11.09.2026.
-
-The above agreed shape is now in place: `INTERNAL_API_URL=http://backend:8000`
-added to `frontend/.env` (documented in `frontend/.env.example` alongside
-`NEXT_PUBLIC_API_URL`, with a comment on the browser/server/Docker-network
-distinction — no `docker-compose.yml` change, since the `frontend` service
-has no Compose-level `environment:`/`env_file:` block and already relies on
-Next.js loading `frontend/.env` from the bind-mounted volume).
-`getServicesPage.ts` now reads `process.env.INTERNAL_API_URL` instead of
-`NEXT_PUBLIC_API_URL`. `getServicesPage.test.ts` updated to stub
-`INTERNAL_API_URL`, value changed to `http://backend:8000` — no assertion
-behavior changed, only the env var name/value being stubbed.
-`api/client.ts` untouched (still browser-only, still `NEXT_PUBLIC_API_URL`).
+Fix: added `INTERNAL_API_URL` (no `NEXT_PUBLIC_` prefix — server-only,
+never inlined into the client bundle), set to `http://backend:8000` —
+Compose's internal service-name DNS, resolvable container-to-container
+on the shared `salonhub_default` network regardless of host port
+mappings — to `frontend/.env` (documented in `frontend/.env.example`
+alongside `NEXT_PUBLIC_API_URL`, with a comment on the
+browser/server/Docker-network distinction; no `docker-compose.yml`
+change, since the `frontend` service has no Compose-level
+`environment:`/`env_file:` block and already relies on Next.js loading
+`frontend/.env` from the bind-mounted volume). `getServicesPage.ts` now
+reads `process.env.INTERNAL_API_URL` instead of `NEXT_PUBLIC_API_URL`.
+`getServicesPage.test.ts` updated to stub `INTERNAL_API_URL`, value
+changed to `http://backend:8000` — no assertion behavior changed, only
+the env var name/value being stubbed. `api/client.ts` is unaffected —
+it stays on `NEXT_PUBLIC_API_URL`, since it only ever runs in the
+browser.
 
 Frontend test suite: 21/21 passing (3 files) after the change.
 
