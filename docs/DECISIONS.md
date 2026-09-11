@@ -1838,3 +1838,24 @@ Specialists-per-service is read from the existing `SpecialistService`
 M2M (`backend/specialists/models.py`) — the same relation Stage 13
 already uses in reverse for `/specialists` showing each specialist's
 assigned services. No new backend relation needed.
+
+### Stage 13 amendment — specialists-by-service filter
+
+Decided 11.09.2026. Not yet implemented — this entry records the
+agreed approach; `SpecialistListCreateView.get_queryset()` in
+`backend/specialists/views.py` is still unfiltered as of this writing.
+
+Plan: add a `?service=<id>` query param to `SpecialistListCreateView`,
+mirroring the existing `?category=` filter on `ServiceListCreateView`
+(`backend/catalog/views.py`). Needed for the `/services/<id>` detail
+page ("who offers this service") — without it, the only option is
+fetching the full specialist list (paginated, 20/page via
+`core.pagination.DefaultPagination`) and filtering client-side, which
+silently breaks past page 1 for any salon with more than 20
+specialists.
+
+Rejected alternative: nesting specialists directly into
+`ServiceReadSerializer`. That would couple catalog's serializer to the
+specialists app and add cost to every service *list* request, not
+just the detail page — the query-param filter keeps that cost scoped
+to only the request that actually needs it.
