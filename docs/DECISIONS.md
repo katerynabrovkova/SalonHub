@@ -1760,3 +1760,20 @@ hard-assert the current path shape and will need updating:
 `test_build_message_for_appointment_reminder_builds_subject_body_and_link`
 (which asserts the whole email body verbatim), and
 `test_build_message_for_appointment_reminder_link_carries_the_re_derived_token`.
+
+### `/me/` endpoint (Stage 12)
+
+Decided 2026-09-11.
+
+- New endpoint: `GET /api/v1/salons/<slug>/auth/me/`, authenticated
+  (Account, cookie-based JWT via AccountJWTCookieAuthentication).
+- Returns only `email` and `role`. No `salon` field — the frontend
+  already has the slug from the subdomain before login happens.
+- No `email_verified_at` — deferred until an actual "verify your email"
+  UI exists (YAGNI); verification does not gate login itself, only the
+  guest→account Customer merge.
+- Purpose: after login (which returns an empty body per Stage 3-R.E),
+  the frontend calls `/me/` to learn the Account's role and redirect
+  accordingly — `client` → client dashboard, `admin` → salon admin
+  panel. There is no third "specialist" role; specialists never
+  authenticate (see Stage 3-R, "No specialist logins in this build").
