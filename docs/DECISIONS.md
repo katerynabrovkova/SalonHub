@@ -1777,3 +1777,25 @@ Decided 2026-09-11.
   accordingly — `client` → client dashboard, `admin` → salon admin
   panel. There is no third "specialist" role; specialists never
   authenticate (see Stage 3-R, "No specialist logins in this build").
+
+### Design system (Stage 12) — explicitly deferred
+
+Decided 11.09.2026.
+
+Stage 12's title ("Frontend skeleton — design system, API client, auth")
+included design system as a named component, but no decision body ever
+scoped it — a gap discovered during Stage 12 closeout, not a silent
+skip. As of this entry: session transport, CORS, CSRF, the API client
+wrapper, subdomain routing, and the /me/ endpoint are decided and
+implemented; a design system (color tokens, typography scale, shared
+component library) is not.
+
+Decision: defer design-system work to Stages 18–21 (frontend polish),
+alongside the full apex marketing landing page (already deferred there
+per the Stage 12 API-client entry). Current pages (login, admin/client
+stubs) use raw HTML elements with inline Tailwind utility classes and
+the unmodified create-next-app Geist/background-foreground tokens —
+functional but not stylistically final. Stage 12 is considered closed
+on this basis: the auth and API-client scope is complete; the
+design-system third of the title is a known, named, deferred item —
+not an oversight.
