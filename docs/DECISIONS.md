@@ -1901,7 +1901,7 @@ decision-point rule.
 
 ### Fix: NullIf output_field on ServiceCategory/Service unique constraints
 
-Decided 11.09.2026.
+Decided and implemented 11.09.2026.
 
 NullIf(KeyTextTransform(lang, "name"), Value("")) in
 ServiceCategory/Service's Meta.constraints gets an explicit

@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models import Func, Value
+from django.db.models import Func, TextField, Value
 from django.db.models.fields.json import KeyTextTransform
 
 from core.i18n import resolve_display_name
@@ -40,12 +40,12 @@ class ServiceCategory(TenantScopedModel, TimeStamped):
             # new pair of these in a migration.
             models.UniqueConstraint(
                 "salon",
-                NullIf(KeyTextTransform("en", "name"), Value("")),
+                NullIf(KeyTextTransform("en", "name"), Value(""), output_field=TextField()),
                 name="servicecategory_salon_name_en_uniq",
             ),
             models.UniqueConstraint(
                 "salon",
-                NullIf(KeyTextTransform("uk", "name"), Value("")),
+                NullIf(KeyTextTransform("uk", "name"), Value(""), output_field=TextField()),
                 name="servicecategory_salon_name_uk_uniq",
             ),
         ]
@@ -78,12 +78,12 @@ class Service(TenantScopedModel, TimeStamped):
             *TenantScopedModel.Meta.constraints,
             models.UniqueConstraint(
                 "salon",
-                NullIf(KeyTextTransform("en", "name"), Value("")),
+                NullIf(KeyTextTransform("en", "name"), Value(""), output_field=TextField()),
                 name="service_salon_name_en_uniq",
             ),
             models.UniqueConstraint(
                 "salon",
-                NullIf(KeyTextTransform("uk", "name"), Value("")),
+                NullIf(KeyTextTransform("uk", "name"), Value(""), output_field=TextField()),
                 name="service_salon_name_uk_uniq",
             ),
         ]
