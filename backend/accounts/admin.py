@@ -6,8 +6,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.http import HttpRequest
 
 from accounts.models import Account, Customer, User
-from core.admin import SalonScopedAdmin
-from core.tenancy import tenant_context
+from core.admin import SalonScopedAdmin, TenantBoundModelForm
 
 
 @admin.register(User)
@@ -49,28 +48,7 @@ class CustomerAdmin(SalonScopedAdmin):
     list_display = ("salon", "name", "email", "phone")
 
 
-class _TenantBoundModelForm(forms.ModelForm):
-    """
-    Binds tenant context from the submitted (or existing) `salon` for the
-    duration of `_post_clean`, so model constraint validation — which runs
-    through the tenant-scoped `_default_manager` (e.g. Account's
-    `(salon, email)` UniqueConstraint) — does not raise
-    TenantContextMissingError inside an admin request, which never binds a
-    tenant. The DB constraint stays the real guarantee; this just lets the
-    form-level check run correctly scoped instead of blowing up.
-    """
-
-    def _post_clean(self) -> None:
-        salon = self.cleaned_data.get("salon")
-        salon_id = salon.id if salon is not None else self.instance.salon_id
-        if salon_id is not None:
-            with tenant_context(salon_id):
-                super()._post_clean()  # type: ignore[misc]  # private Django API, untyped in stubs
-        else:
-            super()._post_clean()  # type: ignore[misc]  # private Django API, untyped in stubs
-
-
-class AccountAdminAddForm(_TenantBoundModelForm):
+class AccountAdminAddForm(TenantBoundModelForm):
     """
     First-admin provisioning form (docs/DECISIONS.md § Stage 3-R.D.1).
     Mirrors django.contrib.auth.forms.UserCreationForm: `password1` /
@@ -144,7 +122,6 @@ class AccountAdmin(SalonScopedAdmin):
     """
 
     add_form = AccountAdminAddForm
-    form = _TenantBoundModelForm
 
     list_display = ("email", "salon", "role", "is_active", "email_verified_at")
     list_filter = ("salon", "role", "is_active")

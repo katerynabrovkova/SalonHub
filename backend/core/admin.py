@@ -17,6 +17,7 @@ it as the intended admin bypass.
 
 from typing import Any, ClassVar
 
+from django import forms
 from django.contrib import admin
 from django.db.models import ForeignKey
 from django.http import HttpRequest
@@ -44,6 +45,36 @@ class ReadOnlyAdminMixin:
         return False
 
 
+class TenantBoundModelForm(forms.ModelForm):
+    """
+    Binds tenant context from the submitted (or existing) `salon` field for
+    the duration of `_post_clean`, so model constraint validation — which
+    runs through the tenant-scoped `_default_manager` regardless of what
+    queryset the enclosing ModelAdmin uses for display (e.g. Account's
+    `(salon, email)` UniqueConstraint, or every TenantScopedModel's base
+    `(id, salon)` UniqueConstraint) — does not raise
+    TenantContextMissingError inside an admin request, which never binds a
+    tenant (TenantResolutionMiddleware only matches /api/v1/salons/<slug>/...
+    paths, never /admin/...). The DB constraint stays the real guarantee;
+    this just lets the form-level check run correctly scoped instead of
+    blowing up.
+
+    Shared base for every SalonScopedAdmin subclass (docs/DECISIONS.md §
+    "Fix: TenantContextMissingError on admin save for TenantScopedModel") —
+    originally local to accounts/admin.py's Account-only fix, promoted here
+    once the same bug surfaced for ServiceCategory/Service/Specialist too.
+    """
+
+    def _post_clean(self) -> None:
+        salon = self.cleaned_data.get("salon")
+        salon_id = salon.id if salon is not None else self.instance.salon_id
+        if salon_id is not None:
+            with tenant_context(salon_id):
+                super()._post_clean()  # type: ignore[misc]  # private Django API, untyped in stubs
+        else:
+            super()._post_clean()  # type: ignore[misc]  # private Django API, untyped in stubs
+
+
 class SalonScopedAdmin(admin.ModelAdmin):
     """
     Not generic over the model (unlike core.models.TenantScopedManager):
@@ -55,6 +86,7 @@ class SalonScopedAdmin(admin.ModelAdmin):
     """
 
     list_filter: ClassVar[tuple[str, ...]] = ("salon",)
+    form = TenantBoundModelForm
 
     def get_queryset(self, request: HttpRequest) -> Any:
         # unscoped_objects, not objects — see module docstring. Mirrors

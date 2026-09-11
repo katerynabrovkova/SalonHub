@@ -6,6 +6,7 @@ than just reading correctly.
 """
 
 import datetime as dt
+import json
 
 import pytest
 from django.contrib import admin
@@ -209,6 +210,70 @@ def test_guest_access_token_change_view_does_not_render_token_hash(
     assert response.status_code == 200
     assert token_row.token_hash not in response.content.decode()
     assert b"token_hash" not in response.content.lower()
+
+
+# --- admin add POST: TenantContextMissingError on validate_unique --------
+# (docs/DECISIONS.md § "Fix: TenantContextMissingError on admin save for
+# TenantScopedModel" — currently only decided, not implemented. These prove
+# the bug exists for every TenantScopedModel admin, not just Account, which
+# accounts/admin.py's _TenantBoundModelForm already happens to fix.)
+
+
+def test_service_category_admin_add_post_succeeds(client, superuser, salon):
+    client.force_login(superuser)
+
+    payload = {
+        "salon": str(salon.id),
+        "name": json.dumps({"en": "Nails"}),
+        "ordering": "0",
+        "is_active": "on",
+        "_save": "Save",
+    }
+
+    response = client.post("/admin/catalog/servicecategory/add/", payload)
+
+    assert response.status_code == 302
+    with tenant_context(salon.id):
+        assert ServiceCategory.objects.filter(name__en="Nails").exists()
+
+
+def test_service_admin_add_post_succeeds(client, superuser, salon, service_category):
+    client.force_login(superuser)
+
+    payload = {
+        "salon": str(salon.id),
+        "category": str(service_category.id),
+        "name": json.dumps({"en": "Manicure"}),
+        "duration_minutes": "60",
+        "price": "500.00",
+        "buffer_minutes": "0",
+        "ordering": "0",
+        "is_active": "on",
+        "_save": "Save",
+    }
+
+    response = client.post("/admin/catalog/service/add/", payload)
+
+    assert response.status_code == 302
+    with tenant_context(salon.id):
+        assert Service.objects.filter(name__en="Manicure").exists()
+
+
+def test_specialist_admin_add_post_succeeds(client, superuser, salon):
+    client.force_login(superuser)
+
+    payload = {
+        "salon": str(salon.id),
+        "name": json.dumps({"en": "Jane"}),
+        "is_active": "on",
+        "_save": "Save",
+    }
+
+    response = client.post("/admin/specialists/specialist/add/", payload)
+
+    assert response.status_code == 302
+    with tenant_context(salon.id):
+        assert Specialist.objects.filter(name__en="Jane").exists()
 
 
 def test_user_admin_pages_render_with_no_username_field_anywhere(client, superuser):
