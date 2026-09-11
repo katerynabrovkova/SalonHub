@@ -1912,6 +1912,36 @@ Decided 11.09.2026.
    stage — out of scope here, this amendment only covers the
    `/specialists` list card.
 
+### Stage 13 amendment — /reviews page: flat feed, not grouped-by-specialist
+
+Decided 11.09.2026.
+
+1. Unlike the existing `GET /api/v1/salons/<slug>/reviews/` endpoint
+   (which groups reviews by specialist, ordered by review count desc),
+   the `/reviews` page itself displays a flat chronological feed —
+   every review as an individual item, sorted by `created_at`
+   descending across all specialists, not grouped into per-specialist
+   sections. This is a frontend-only presentation choice; the backend
+   grouping behavior is unchanged and still used by `/specialists`'
+   rating aggregation.
+
+2. `ReviewPublicSerializer` gains a `service` field: `{id, name}`
+   (`name` resolved via `?lang=`, same pattern as
+   `ReviewSpecialistSerializer.get_name`), sourced via
+   `review.appointment.service` — a plain FK chain, added to the
+   existing `select_related("specialist")` as
+   `select_related("specialist", "appointment__service")`. No N+1
+   risk: single-valued forward relations only, one query total.
+
+3. Each review card on `/reviews` shows: rating, text, created_at,
+   specialist name, and service name — so a reader understands both
+   who performed the service and what the review is about.
+
+4. This flat-feed page is unrelated to (and does not replace) the
+   future `/specialists/[id]` detail page's own review list, which
+   remains deferred to a later stage per the existing Stage 13
+   amendment.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
