@@ -1859,3 +1859,18 @@ Rejected alternative: nesting specialists directly into
 specialists app and add cost to every service *list* request, not
 just the detail page — the query-param filter keeps that cost scoped
 to only the request that actually needs it.
+
+### Fix: TenantContextMissingError on admin save for TenantScopedModel
+
+Decided 11.09.2026.
+
+_TenantBoundModelForm (currently local to accounts/admin.py, solving
+this exact issue for Account only) is promoted to core/admin.py and
+wired as SalonScopedAdmin's default form, so every TenantScopedModel
+admin (ServiceCategory, Service, Specialist, and any future one)
+inherits the fix automatically instead of needing its own copy.
+AccountAdmin's local copy is removed in favor of the shared one.
+
+Discovered while manually seeding dev data through /admin/ — a real
+gap, not present in existing tests because nothing previously
+exercised admin-side creation of these models outside Account.
