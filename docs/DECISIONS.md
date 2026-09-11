@@ -1898,3 +1898,25 @@ only affects the ORM's pre-check, reached via Model.full_clean(), a
 path nothing previously exercised for these two models). Tracked
 separately, not fixed in this change per CLAUDE.md's Meta.constraints
 decision-point rule.
+
+### Fix: NullIf output_field on ServiceCategory/Service unique constraints
+
+Decided 11.09.2026.
+
+NullIf(KeyTextTransform(lang, "name"), Value("")) in
+ServiceCategory/Service's Meta.constraints gets an explicit
+output_field=TextField() (matching KeyTextTransform's own native
+output type). Without it, Django's Python-side
+UniqueConstraint.validate() pre-check (reached via Model.full_clean(),
+only exercised through /admin/ saves — never through the DRF
+serializer path, which does its own queryset check) raises FieldError
+on the ambiguous TextField/CharField mix between KeyTextTransform and
+an untyped Value(""). Postgres itself never hits this — it's a
+Python-side ORM resolver limitation, not a real SQL type conflict.
+
+Requires a new migration (RemoveConstraint+AddConstraint pair per
+affected constraint, 4 total across both models) — output_field
+becomes part of the expression's deconstruct() output, so migration
+state no longer matches the model without it, even though the
+generated SQL is byte-identical to the existing constraints. This
+migration is a schema no-op in Postgres.
