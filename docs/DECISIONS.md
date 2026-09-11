@@ -1823,3 +1823,18 @@ layout (specialist: photo/bio-first; service: price/duration-first).
 Merging them into one page or one route forces a layout compromise
 that serves neither entry path well. All three endpoints are already
 AllowAny on GET — public browsing, no login required.
+
+### Stage 13 amendment — service detail page
+
+Decided 11.09.2026.
+
+`/services/<id>` is in scope alongside the `/services` list: clicking
+a service card navigates to a detail page (description, price, which
+specialists offer it), not into booking — still browsing-only, still
+a Server Component (plain navigation via `next/link`, no client
+state), consistent with the rest of Stage 13's scope above.
+
+Specialists-per-service is read from the existing `SpecialistService`
+M2M (`backend/specialists/models.py`) — the same relation Stage 13
+already uses in reverse for `/specialists` showing each specialist's
+assigned services. No new backend relation needed.
