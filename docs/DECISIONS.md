@@ -2000,12 +2000,34 @@ stage-by-stage workflow.
 Decided 12.09.2026 — contract agreed before any code, per the
 stage-by-stage workflow.
 
-- **Booking-confirmation email is sent immediately** on appointment
-  creation, from `GuestBookingCreateView` — not delayed, and not
-  conditional on payment status. A customer who pays within seconds of
-  booking may therefore still receive the confirmation email after
-  paying. This is an accepted tradeoff, not a bug: keeping the send
-  unconditional avoids coupling booking creation to payment timing.
+- **Three separate notification triggers span the booking lifecycle —
+  not one trigger reused across it.** An earlier draft of this entry had
+  `BOOKING_CONFIRMED` firing immediately on appointment creation; that
+  was wrong. `BOOKING_CONFIRMED` semantically means "payment received"
+  (per the `Appointment.status` model: `CONFIRMED` only ever follows
+  payment) and stays dispatched only from `payments/views.py`
+  (`PaymentWebhookView`) on a successful payment webhook, unchanged from
+  its existing behavior.
+  - **`BOOKING_CREATED` (new)** — dispatched immediately from
+    `GuestBookingCreateView` on appointment creation, unconditional on
+    payment status. Message: booking created, pay within the hold
+    window, includes the fragment-based payment link (see the payment
+    page link bullet below).
+  - **`BOOKING_EXPIRED` (new)** — dispatched from
+    `booking.services.expire_overdue_appointments` immediately after it
+    transitions an appointment's status to `EXPIRED` (called per-salon
+    by the `expire_pending_payment_appointments` Celery sweep task, §
+    Stage 7.F). Message: the hold window passed, the booking was
+    released, invites the customer to book again.
+  - **`BOOKING_CONFIRMED` (existing, unchanged)** — dispatched from
+    `payments/views.py` on a successful payment webhook. Message:
+    payment received, appointment confirmed.
+
+  Both new triggers follow the existing generic pattern in
+  `notifications/services.py` (a `_MESSAGES` entry plus a
+  `record_and_dispatch_notification` call at the relevant call site) —
+  no new Celery task and no new send mechanism, same as every existing
+  trigger.
 - **The payment page link uses a URL fragment, not a query parameter:**
   `build_salon_frontend_url(salon_slug, "/booking/pay") +
   f"#appointment_id={id}&token={token}"`. Rationale: fragments are
@@ -2038,6 +2060,23 @@ stage-by-stage workflow.
   is preserved in local component state rather than cleared — a slot
   conflict is unrelated to the privacy rationale for keeping contact
   info out of the URL, so there is no reason to discard it.
+- **`/booking/pay` must branch on appointment status, not just
+  guest-token validity.** `HasValidGuestToken` only confirms the token
+  itself hasn't expired or been tampered with — that is orthogonal to
+  what state the appointment is actually in. The page must check
+  `Appointment.status` and render accordingly:
+  - `PENDING_PAYMENT` → render the payment form as normal.
+  - `CONFIRMED` → render an "already paid" state; do **not** render the
+    payment form (prevents double payment).
+  - `EXPIRED` or `CANCELLED` → render a "no longer available, please
+    book again" state.
+- **The guest booking creation response (`POST bookings/`) includes the
+  raw guest token in the JSON body**, in addition to the token being
+  sent via the `BOOKING_CREATED` email link. This lets the frontend
+  redirect the guest directly to `/booking/pay` right after submission,
+  without waiting on email delivery. The email-delivered link remains
+  the recovery path for a closed or lost session within the hold
+  window.
 
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
