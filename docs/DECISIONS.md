@@ -1995,6 +1995,50 @@ stage-by-stage workflow.
   Stage 15: Stage 14 ships the guest flow once; Stage 15 adds the
   Account-aware path on top once auth context exists on the frontend.
 
+### Stage 14 planning: booking flow, payment link, confirmation email
+
+Decided 12.09.2026 — contract agreed before any code, per the
+stage-by-stage workflow.
+
+- **Booking-confirmation email is sent immediately** on appointment
+  creation, from `GuestBookingCreateView` — not delayed, and not
+  conditional on payment status. A customer who pays within seconds of
+  booking may therefore still receive the confirmation email after
+  paying. This is an accepted tradeoff, not a bug: keeping the send
+  unconditional avoids coupling booking creation to payment timing.
+- **The payment page link uses a URL fragment, not a query parameter:**
+  `build_salon_frontend_url(salon_slug, "/booking/pay") +
+  f"#appointment_id={id}&token={token}"`. Rationale: fragments are
+  never sent to the server (no server logs, no Referer leakage),
+  unlike query params. This mirrors the existing password-reset and
+  email-verification link pattern in `backend/accounts/tasks.py`
+  (`#uid={uid}&token={token}` / `#token={token}`). Consequence: the
+  frontend `/booking/pay` page must be a Client Component, since the
+  fragment is only readable via `window.location.hash`, which is
+  unavailable server-side.
+- **The booking flow supports two entry points:** "service-first"
+  (choose service → choose specialist → choose date/time) and
+  "specialist-first" (choose specialist → choose service → choose
+  date/time). In both paths, date/time selection is always the third
+  step. Both paths converge on the same underlying slot-computation
+  logic, mirroring the existing dual-entry pattern for
+  `compute_candidate_start_times` from Stage 6.
+- **Client-side flow state is split by sensitivity.** Selections made
+  before contact info — service, specialist, slot, and the current
+  step number — are held in URL query params, so the flow survives a
+  page refresh and a specific step can be shared or returned to.
+  Contact info (name, phone) is held only in local component state
+  (React `useState`), never persisted to the URL, storage, or
+  elsewhere — deliberately, since it is personal data and the earlier
+  steps' choices are not.
+- **Slot conflict handling:** if the backend rejects appointment
+  creation because the exclusion constraint caught a concurrent
+  booking of the same slot, the frontend returns the user to the
+  date/time selection step. Contact info already entered (name, phone)
+  is preserved in local component state rather than cleared — a slot
+  conflict is unrelated to the privacy rationale for keeping contact
+  info out of the URL, so there is no reason to discard it.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
