@@ -39,12 +39,15 @@ NOW = dt.datetime(2026, 9, 3, 12, 0, tzinfo=dt.UTC)
 EARLIER = dt.datetime(2026, 9, 1, 8, 0, tzinfo=dt.UTC)
 APPOINTMENT_START = dt.datetime(2026, 9, 26, 11, 0, tzinfo=dt.UTC)
 
-# BOOKING_CONFIRMED and APPOINTMENT_REMINDER excluded: neither is a static
-# _MESSAGES lookup any more — each builds a subject/body from a real
-# appointment (salon name, local start time, guest manage link), so each has
-# its own dedicated tests below instead of running through this generic check.
+# BOOKING_CONFIRMED, APPOINTMENT_REMINDER, and BOOKING_CREATED are excluded:
+# none is a static _MESSAGES lookup — each builds a subject/body from a real
+# appointment (salon name, local start time, a guest link), so each has its
+# own dedicated tests below instead of running through this generic check.
+# BOOKING_EXPIRED is a static _MESSAGES entry (no per-appointment link), so
+# it is included here like BOOKING_CANCELLED.
 _IMPLEMENTED_TRIGGERS = [
     NotificationTrigger.BOOKING_CANCELLED,
+    NotificationTrigger.BOOKING_EXPIRED,
     NotificationTrigger.PAYMENT_SUCCEEDED,
     NotificationTrigger.PAYMENT_FAILED,
     NotificationTrigger.REVIEW_REQUEST,
@@ -262,6 +265,86 @@ def test_build_message_raises_for_appointment_reminder_without_an_appointment(sa
         _build_message(notification)
 
 
+# --- _build_message for BOOKING_CREATED (dynamic, mirrors BOOKING_CONFIRMED) --
+#
+# docs/DECISIONS.md § Stage 14 planning decisions: the payment link uses a
+# URL fragment, not a query parameter or a path segment —
+# build_salon_frontend_url(slug, "/booking/pay") +
+# f"#appointment_id={id}&token={token}" — unlike BOOKING_CONFIRMED/
+# APPOINTMENT_REMINDER's manage link, which is a path segment.
+
+
+def test_build_message_for_booking_created_builds_subject_body_and_payment_link(
+    salon, customer, specialist, service
+):
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(
+        salon,
+        customer=customer,
+        appointment=appointment,
+        trigger=NotificationTrigger.BOOKING_CREATED,
+    )
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Your booking is created"
+    assert "Bella Demo Salon" in body
+    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
+    payment_link = (
+        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/booking/pay"
+        f"#appointment_id={appointment.id}&token={derive_guest_token(appointment.id)}"
+    )
+    assert payment_link in body
+    assert "15 minutes" in body
+
+
+def test_build_message_for_booking_created_link_carries_the_re_derived_token(
+    salon, customer, specialist, service
+):
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(
+        salon,
+        customer=customer,
+        appointment=appointment,
+        trigger=NotificationTrigger.BOOKING_CREATED,
+    )
+
+    with tenant_context(salon.id):
+        _subject, body = _build_message(notification)
+
+    expected_token = derive_guest_token(appointment.id)
+    expected_link = (
+        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/booking/pay"
+        f"#appointment_id={appointment.id}&token={expected_token}"
+    )
+    assert expected_link in body
+
+
+def test_build_message_raises_for_booking_created_without_an_appointment(salon, customer):
+    notification = _make_notification(
+        salon,
+        customer=customer,
+        appointment=None,
+        trigger=NotificationTrigger.BOOKING_CREATED,
+    )
+
+    with tenant_context(salon.id), pytest.raises(ValueError, match="appointment"):
+        _build_message(notification)
+
+
 # --- _build_message language resolution (docs/DECISIONS.md § "Notification
 # message builder: language resolution") ------------------------------------
 
@@ -314,6 +397,62 @@ def test_build_message_dynamic_branch_renders_in_customer_preferred_language(
     assert subject == "Ваш запис підтверджено"
     assert "підтверджено" in body
     assert "Переглянути або скасувати запис:" in body
+    # The interpolated datetime is rendered with the Ukrainian tables too.
+    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang="uk") in body
+
+
+def test_build_message_for_booking_expired_renders_in_customer_preferred_language(salon):
+    customer = _uk_customer(salon)
+    notification = _make_notification(
+        salon, customer=customer, trigger=NotificationTrigger.BOOKING_EXPIRED
+    )
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Термін бронювання минув"
+    assert body == (
+        "Термін дії вашого бронювання минув, оскільки оплату не було здійснено "
+        "вчасно. Ви можете забронювати знову."
+    )
+
+
+def test_build_message_for_booking_expired_renders_in_english_by_default(salon):
+    notification = _make_notification(
+        salon, customer=None, trigger=NotificationTrigger.BOOKING_EXPIRED
+    )
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Your booking has expired"
+    assert body == "Your booking has expired because payment was not completed in time."
+
+
+def test_build_message_for_booking_created_renders_in_customer_preferred_language(
+    salon, specialist, service
+):
+    customer = _uk_customer(salon)
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    notification = _make_notification(
+        salon,
+        customer=customer,
+        appointment=appointment,
+        trigger=NotificationTrigger.BOOKING_CREATED,
+    )
+
+    with tenant_context(salon.id):
+        subject, body = _build_message(notification)
+
+    assert subject == "Ваш запис створено"
+    assert "створено" in body
+    assert "15 хвилин" in body
     # The interpolated datetime is rendered with the Ukrainian tables too.
     assert format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang="uk") in body
 

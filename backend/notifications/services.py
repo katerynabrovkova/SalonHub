@@ -21,6 +21,7 @@ import datetime as dt
 import psycopg
 from django.db import IntegrityError, transaction
 
+from booking.constants import SLOT_HOLD_DURATION
 from booking.guest_tokens import derive_guest_token
 from booking.models import Appointment, AppointmentStatus
 from core.formatting import format_datetime_for_salon
@@ -64,6 +65,17 @@ _MESSAGES: dict[str, dict[str, tuple[str, str]]] = {
     NotificationTrigger.BOOKING_CANCELLED.value: {
         "en": ("Your booking was cancelled", "Your booking has been cancelled."),
         "uk": ("Ваш запис скасовано", "Ваш запис було скасовано."),
+    },
+    NotificationTrigger.BOOKING_EXPIRED.value: {
+        "en": (
+            "Your booking has expired",
+            "Your booking has expired because payment was not completed in time.",
+        ),
+        "uk": (
+            "Термін бронювання минув",
+            "Термін дії вашого бронювання минув, оскільки оплату не було здійснено "
+            "вчасно. Ви можете забронювати знову.",
+        ),
     },
     NotificationTrigger.PAYMENT_SUCCEEDED.value: {
         "en": ("Payment received", "We have received your deposit payment."),
@@ -183,6 +195,38 @@ def _build_message(notification: Notification) -> tuple[str, str]:
         )
         body = body_template.format(
             salon=resolve_translation(salon.name, preferred), when=when, link=link
+        )
+        return subject, body
+
+    if notification.trigger_type == NotificationTrigger.BOOKING_CREATED:
+        appointment = notification.appointment
+        if appointment is None:
+            raise ValueError(
+                "BOOKING_CREATED notification "
+                f"{notification.pk!r} has no appointment to build its message from"
+            )
+        salon = appointment.salon
+        subject, body_template = {
+            "en": (
+                "Your booking is created",
+                "Your booking at {salon} on {when} is created. Pay within {minutes} "
+                "minutes to confirm it.\n\nComplete your payment: {link}",
+            ),
+            "uk": (
+                "Ваш запис створено",
+                "Ваш запис до {salon} на {when} створено. Оплатіть протягом {minutes} "
+                "хвилин, щоб підтвердити його.\n\nЗавершити оплату: {link}",
+            ),
+        }[lang_code]
+        when = format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang=lang_code)
+        token = derive_guest_token(appointment.id)
+        link = (
+            build_salon_frontend_url(salon.slug, "/booking/pay")
+            + f"#appointment_id={appointment.id}&token={token}"
+        )
+        minutes = int(SLOT_HOLD_DURATION.total_seconds() // 60)
+        body = body_template.format(
+            salon=resolve_translation(salon.name, preferred), when=when, link=link, minutes=minutes
         )
         return subject, body
 

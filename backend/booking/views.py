@@ -190,7 +190,7 @@ class GuestBookingCreateView(APIView):
         # decisions) — passed explicitly into the orchestrator, never re-read.
         now = timezone.now()
 
-        appointment, _raw_token = create_guest_appointment(
+        appointment, raw_token = create_guest_appointment(
             salon=salon,
             specialist=body.validated_data["specialist"],
             service=body.validated_data["service"],
@@ -202,6 +202,9 @@ class GuestBookingCreateView(APIView):
         )
 
         return Response(
-            {"appointment": AppointmentCreatedSerializer(appointment).data},
+            {
+                "appointment": AppointmentCreatedSerializer(appointment).data,
+                "guest_token": raw_token,
+            },
             status=status.HTTP_201_CREATED,
         )

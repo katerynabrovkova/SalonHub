@@ -113,7 +113,7 @@ def _defeat_slot_validity_check(monkeypatch, start_datetime: dt.datetime) -> Non
 # --- 1. Happy path -----------------------------------------------------------
 
 
-def test_valid_guest_booking_on_offered_slot_returns_201_without_a_token_in_the_body(
+def test_valid_guest_booking_on_offered_slot_returns_201_with_the_raw_guest_token(
     client, monkeypatch, salon, specialist, service
 ):
     _working_hours(salon, specialist)
@@ -129,18 +129,23 @@ def test_valid_guest_booking_on_offered_slot_returns_201_without_a_token_in_the_
     assert appt.service_id == service.id
     assert response.data["appointment"]["id"] == appt.id
 
-    # The raw guest token is no longer in the 201 body (docs/DECISIONS.md §
-    # Step (d) decisions) — it is delivered later, in the BOOKING_CONFIRMED
-    # email, re-derived from the appointment id rather than round-tripped
-    # through this response.
-    assert "token" not in response.data
+    # The raw guest token IS in the 201 body now (docs/DECISIONS.md § Stage 14
+    # planning decisions, reversing the earlier Step (d) decision): it lets the
+    # frontend redirect the guest straight to /booking/pay without waiting on
+    # email delivery. The email-delivered link (BOOKING_CREATED) remains the
+    # recovery path for a closed or lost session.
+    assert "guest_token" in response.data
+    with tenant_context(salon.id):
+        validated = validate_guest_token(response.data["guest_token"])
+    assert validated.appointment_id == appt.id
 
-    # A working token still exists for this appointment end-to-end — proven
-    # via the commit-A re-derivation function instead of off the response.
+    # The response token is the SAME token issue_guest_token minted for this
+    # appointment, not merely another token that happens to validate — the
+    # re-derived token (used by the BOOKING_CREATED email link) must match it
+    # exactly.
     with tenant_context(salon.id):
         derived = derive_guest_token(appt.id)
-        validated = validate_guest_token(derived)
-    assert validated.appointment_id == appt.id
+    assert response.data["guest_token"] == derived
 
 
 # --- 2. Slot not offered -----------------------------------------------------

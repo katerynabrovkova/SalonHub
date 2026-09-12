@@ -11,8 +11,10 @@ class NotificationChannel(models.TextChoices):
 
 
 class NotificationTrigger(models.TextChoices):
+    BOOKING_CREATED = "booking_created", "Booking created"
     BOOKING_CONFIRMED = "booking_confirmed", "Booking confirmed"
     BOOKING_CANCELLED = "booking_cancelled", "Booking cancelled"
+    BOOKING_EXPIRED = "booking_expired", "Booking expired"
     APPOINTMENT_REMINDER = "appointment_reminder", "Appointment reminder"
     PAYMENT_SUCCEEDED = "payment_succeeded", "Payment succeeded"
     PAYMENT_FAILED = "payment_failed", "Payment failed"

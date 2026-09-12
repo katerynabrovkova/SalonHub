@@ -153,6 +153,12 @@ def create_guest_appointment(
             now=now,
         )
         raw_token, _token_row = issue_guest_token(appointment)
+        record_and_dispatch_notification(
+            salon=salon,
+            trigger_type=NotificationTrigger.BOOKING_CREATED,
+            appointment=appointment,
+            dedup_key=f"booking_created:appointment:{appointment.pk}",
+        )
         return appointment, raw_token
 
 
@@ -216,6 +222,10 @@ def expire_overdue_appointments(*, salon: Salon, now: dt.datetime) -> int:
     unattended background cleanup with no user to hand an error to, and the
     skip is also what makes a redelivered/overlapping run idempotent (rule 4
     of the sweep-vs-webhook policy, § Stage 7 decisions).
+
+    Also dispatches a BOOKING_EXPIRED notification to the customer, right
+    after the status write to EXPIRED (docs/DECISIONS.md § Stage 14 planning
+    decisions).
     """
     candidate_ids = Appointment.objects.filter(
         salon=salon, status=AppointmentStatus.PENDING_PAYMENT, hold_expires_at__lte=now
@@ -231,6 +241,12 @@ def expire_overdue_appointments(*, salon: Salon, now: dt.datetime) -> int:
                 continue
             appointment.status = AppointmentStatus.EXPIRED
             appointment.save(update_fields=["status"])
+            record_and_dispatch_notification(
+                salon=salon,
+                trigger_type=NotificationTrigger.BOOKING_EXPIRED,
+                appointment=appointment,
+                dedup_key=f"booking_expired:appointment:{appointment.pk}",
+            )
             expired_count += 1
     return expired_count
 
