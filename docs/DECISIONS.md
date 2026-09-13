@@ -2109,6 +2109,33 @@ flow. This is recorded as reopening the closed stage, not as a new
 Stage 13 amendment appended after "status: closed," so a future reader
 isn't misled into thinking Stage 13's closure held all along.
 
+### Stage 13 reopened: implementation decisions for the popup, category fetch, and detail-page removal
+
+Decided 13.09.2026 — follow-on to the "Stage 13 reopened: category
+navigation, service popup, specialist detail page" entry above, made
+during read-only recon of the current frontend before writing any
+code. Decided only; none of this is implemented yet.
+
+- The service-info popup uses the native HTML `<dialog>` element — no
+  modal/dialog library dependency is added, since none currently
+  exists in `frontend/package.json`.
+- The popup is a separate, small Client Component (e.g.
+  `ServiceInfoPopover`), receiving service data as props. The
+  `/services` page itself remains a Server Component; `"use client"`
+  is not added to the page.
+- The `ServiceCategory` list is fetched as a single unpaginated
+  request — no `DrfPage` envelope, unlike `Service` pagination
+  (`getServicesPage.ts`'s `PAGE_SIZE`/`totalPages` handling). Category
+  counts per salon are expected to stay small enough that pagination
+  isn't warranted.
+- Removing `/services/[id]` means deleting:
+  `frontend/src/app/services/[id]/page.tsx` and its `not-found.tsx`,
+  `frontend/src/lib/catalog/getServiceDetailPage.ts` and its test
+  file, and updating the now-stale comment at
+  `frontend/src/app/booking/page.test.tsx:6`, which currently cites
+  `services/[id]/page.tsx`'s `notFound()` usage as the reason its own
+  `notFound` mock throws.
+
 ### Stage 14 scope revision: booking flow entry points and specialist assignment
 
 Decided 13.09.2026 — supersedes the entry-point assumptions in "Stage
