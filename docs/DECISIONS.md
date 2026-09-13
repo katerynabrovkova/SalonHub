@@ -1824,20 +1824,20 @@ Merging them into one page or one route forces a layout compromise
 that serves neither entry path well. All three endpoints are already
 AllowAny on GET — public browsing, no login required.
 
-### Stage 13 amendment — service detail page
+### Stage 13 amendment — service detail page (historical; removed)
 
-Decided 11.09.2026.
+Decided 11.09.2026; removed by the "Stage 13 reopened" entry below.
 
-`/services/<id>` is in scope alongside the `/services` list: clicking
-a service card navigates to a detail page (description, price, which
-specialists offer it), not into booking — still browsing-only, still
-a Server Component (plain navigation via `next/link`, no client
-state), consistent with the rest of Stage 13's scope above.
-
-Specialists-per-service is read from the existing `SpecialistService`
-M2M (`backend/specialists/models.py`) — the same relation Stage 13
-already uses in reverse for `/specialists` showing each specialist's
-assigned services. No new backend relation needed.
+`/services/[id]` existed as a Stage 13 detail page (description/price
+display, specialist list read from the existing `SpecialistService`
+M2M) from this amendment and the "service detail page scope narrowing"
+amendment that followed it, through the rest of Stage 13. It was
+removed entirely, replaced by the category-navigation + service-popup
+design, per "Stage 13 reopened: category navigation, service popup,
+specialist detail page" below. That page's implementation-level
+decisions (no description field; inline JSX specialist list rather
+than a shared component) applied to code that no longer exists and are
+not preserved here.
 
 ### Stage 13 amendment — specialists-by-service filter
 
@@ -1845,9 +1845,11 @@ Decided and implemented 11.09.2026.
 
 Plan: add a `?service=<id>` query param to `SpecialistListCreateView`,
 mirroring the existing `?category=` filter on `ServiceListCreateView`
-(`backend/catalog/views.py`). Needed for the `/services/<id>` detail
-page ("who offers this service") — without it, the only option is
-fetching the full specialist list (paginated, 20/page via
+(`backend/catalog/views.py`). Needed at the time for the (now-removed)
+`/services/<id>` detail page ("who offers this service"); the filter
+itself remains live and is reused by the Stage 14 scope revision's
+booking flow ("Step 2 for `entry=service`") — without it, the only
+option is fetching the full specialist list (paginated, 20/page via
 `core.pagination.DefaultPagination`) and filtering client-side, which
 silently breaks past page 1 for any salon with more than 20
 specialists.
@@ -1862,23 +1864,6 @@ to only the request that actually needs it.
 `test_filter_by_nonexistent_service_returns_empty`, and
 `test_no_filter_returns_all` (`backend/tests/test_specialist_api.py`)
 pass.
-
-### Stage 13 amendment — service detail page scope narrowing
-
-Decided 11.09.2026.
-
-1. `/services/<id>` will not display a description field for now. The
-   `Service` model (`backend/catalog/models.py`) has no description
-   column; adding one is deferred until a concrete need arises, not
-   part of Stage 13 scope.
-
-2. The specialist list ("who offers this service") on `/services/<id>`
-   is implemented as inline JSX within the page component, not as a
-   separate reusable `SpecialistCard` component. Extraction into a
-   shared component is deferred until `/specialists` is built and its
-   actual card requirements (likely a different layout — per the
-   Stage 13 note above on distinct card layouts per client entry path)
-   are known.
 
 ### Stage 13 amendment — /specialists page: serializer and card scope
 
@@ -1907,10 +1892,11 @@ Decided 11.09.2026.
    endpoint, which omits zero-review specialists from its grouping —
    that's a different, deliberate behavior for a different page).
 
-4. Specialist detail page (`/specialists/[id]`) with full review list
-   and a "choose this specialist" CTA remains deferred to a later
-   stage — out of scope here, this amendment only covers the
-   `/specialists` list card.
+4. Specialist detail page (`/specialists/[id]`) is out of scope for
+   this amendment — this amendment only covers the `/specialists` list
+   card. It was later built, not as a browsing-only page but as a
+   booking entry point — see "Stage 14 scope revision: booking flow
+   entry points and specialist assignment" below.
 
 ### Stage 13 amendment — /reviews page: flat feed, not grouped-by-specialist
 
@@ -1937,10 +1923,11 @@ Decided 11.09.2026.
    specialist name, and service name — so a reader understands both
    who performed the service and what the review is about.
 
-4. This flat-feed page is unrelated to (and does not replace) the
-   future `/specialists/[id]` detail page's own review list, which
-   remains deferred to a later stage per the existing Stage 13
-   amendment.
+4. This flat-feed page is unrelated to (and does not replace) any
+   review list on `/specialists/[id]` — that page was later built as a
+   booking entry point (photo, name, bio, rating, "Book" button) per
+   the Stage 14 scope revision entry, not as a browsing page with its
+   own review list.
 
 ### Stage 13 status: closed
 
@@ -1961,9 +1948,9 @@ Explicit deferrals coming out of this stage:
 - `/specialists` cards are inline JSX, not a reusable `SpecialistCard`
   component — extraction deferred until a second caller with known
   requirements exists.
-- `/specialists/[id]` (full review list, "choose this specialist" CTA)
-  remains deferred — it bridges into booking, out of scope for a
-  browsing-only stage.
+- `/specialists/[id]` was out of scope — it bridges into booking, and
+  Stage 13 was browsing-only. It was later built as a booking entry
+  point per the Stage 14 scope revision entry, not left deferred.
 - `/reviews` has no server-side pagination — client-side "показати ще"
   only, revealing more of the already-fetched array. Revisit if a
   salon's review volume grows enough to make one full fetch costly.
@@ -2038,12 +2025,13 @@ stage-by-stage workflow.
   frontend `/booking/pay` page must be a Client Component, since the
   fragment is only readable via `window.location.hash`, which is
   unavailable server-side.
-- **The booking flow supports two entry points:** "service-first"
-  (choose service → choose specialist → choose date/time) and
-  "specialist-first" (choose specialist → choose service → choose
-  date/time). In both paths, date/time selection is always the third
-  step. Both paths converge on the same underlying slot-computation
-  logic, mirroring the existing dual-entry pattern for
+- **The booking flow supports two entry orders:** "service-first" (a
+  service is already chosen before `/booking` opens; the flow then
+  proceeds to choose a specialist, then date/time) and
+  "specialist-first" (a specialist is already chosen before `/booking`
+  opens; the flow then proceeds to choose a service, then date/time).
+  Both orders converge on the same underlying slot-computation logic,
+  mirroring the existing dual-entry pattern for
   `compute_candidate_start_times` from Stage 6.
 - **Client-side flow state is split by sensitivity.** Selections made
   before contact info — service, specialist, slot, and the current
