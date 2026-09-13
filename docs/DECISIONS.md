@@ -2135,6 +2135,13 @@ code. Decided only; none of this is implemented yet.
   truncated category list — the same "raise on incomplete data, never
   silently return partial results" principle as
   `TenantScopedManager`.
+- Category selection on `/services` uses URL navigation
+  (`?category=<id>`), not client-side state — the page stays a Server
+  Component, mirroring the existing `?page=` pagination pattern
+  (`services/page.tsx`). No new client-side fetch mechanism is
+  introduced. Chosen over a client-side toggle because it requires no
+  new `"use client"` fetch infrastructure, keeps back-button behavior
+  native, and makes category links shareable/bookmarkable.
 - Removing `/services/[id]` means deleting:
   `frontend/src/app/services/[id]/page.tsx` and its `not-found.tsx`,
   `frontend/src/lib/catalog/getServiceDetailPage.ts` and its test
