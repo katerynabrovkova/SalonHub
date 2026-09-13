@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 
+import { initials } from "@/lib/format/initials";
 import { getSpecialistsPage, type Specialist } from "@/lib/specialists/getSpecialistsPage";
 import { SALON_SLUG_HEADER } from "@/middleware";
 
@@ -12,15 +13,6 @@ function parsePage(value: string | string[] | undefined): number {
   const raw = Array.isArray(value) ? value[0] : value;
   const parsed = raw === undefined ? 1 : Number.parseInt(raw, 10);
   return Number.isNaN(parsed) || parsed < 1 ? 1 : parsed;
-}
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
 }
 
 function RatingLine({ specialist }: { specialist: Specialist }) {

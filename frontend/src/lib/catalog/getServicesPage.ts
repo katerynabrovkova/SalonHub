@@ -40,10 +40,22 @@ export interface ServicesPage {
   totalPages: number;
 }
 
-export async function getServicesPage(slug: string, page = 1): Promise<ServicesPage> {
+export async function getServicesPage(
+  slug: string,
+  page = 1,
+  category?: string,
+): Promise<ServicesPage> {
   const apiBase = process.env.INTERNAL_API_URL;
   const path = `/api/v1/salons/${slug}/services/`;
-  const url = page === 1 ? `${apiBase}${path}` : `${apiBase}${path}?page=${page}`;
+  const params = new URLSearchParams();
+  if (page !== 1) {
+    params.set("page", String(page));
+  }
+  if (category !== undefined) {
+    params.set("category", category);
+  }
+  const query = params.toString();
+  const url = query ? `${apiBase}${path}?${query}` : `${apiBase}${path}`;
 
   const response = await fetch(url);
   if (!response.ok) {
