@@ -2078,6 +2078,103 @@ stage-by-stage workflow.
   the recovery path for a closed or lost session within the hold
   window.
 
+### Stage 13 reopened: category navigation, service popup, specialist detail page
+
+Decided 13.09.2026 — discovered during Stage 14 planning, not agreed in
+advance of any code. Stage 13 was previously closed (see "Stage 13
+status: closed" above) and is reopened by this entry because Stage
+14's booking-flow entry points depend on catalog changes Stage 13 did
+not anticipate.
+
+- New field `Service.description`: text, nullable/blank — optional;
+  neither existing nor new services are required to have one.
+  Supersedes the Stage 13 status entry's explicit deferral
+  ("`/services/[id]` has no description field ... deferred until a
+  concrete need arises") — a concrete need arose in Stage 14 planning:
+  the service info popup below needs it.
+- New field `ServiceCategory.photo`: mirrors `Specialist.photo`
+  (`backend/specialists/models.py`) — a URL-based field, no new
+  file-storage/upload infrastructure.
+- `/services` becomes two-level: a category list (each card showing
+  `ServiceCategory.photo`) → selecting a category shows the services
+  within it, reusing the existing `?category=` filter on
+  `GET /services/` (`backend/catalog/views.py`, from Stage 4). This
+  replaces the previous flat `/services` list.
+- Each service card in the category view has two independent controls:
+  - clicking the service itself selects it and proceeds directly into
+    the booking flow, at `/booking?entry=service&service=<id>&step=2`;
+  - a separate "i" (info) button opens a popup — a new frontend
+    component, since no modal/popup component exists anywhere in the
+    codebase yet — showing the service's name, duration, price, and
+    description. It does not show which specialists offer the
+    service; that responsibility moves to the booking flow's own step
+    2 (see the Stage 14 scope revision entry below).
+- `/services/[id]` (the Stage 13 detail page) is removed entirely.
+  Confirmed by recon before this entry: the flat `/services` list page
+  was its only inbound link anywhere in the frontend; no other page,
+  including `/specialists`, ever linked to it.
+
+Rationale: none of this was foreseeable when Stage 13 closed — the
+popup and category-navigation requirements only surfaced once Stage 14
+planning worked out how a customer actually arrives at the booking
+flow. This is recorded as reopening the closed stage, not as a new
+Stage 13 amendment appended after "status: closed," so a future reader
+isn't misled into thinking Stage 13's closure held all along.
+
+### Stage 14 scope revision: booking flow entry points and specialist assignment
+
+Decided 13.09.2026 — supersedes the entry-point assumptions in "Stage
+14 planning: booking flow, payment link, confirmation email" above.
+The core step order (service/specialist choice → date/time → contact
+info → submit) is unchanged; what changes is how the flow is entered
+and how "any specialist" is resolved.
+
+- New page `/specialists/[id]`: a specialist detail card (photo, name,
+  bio, rating) with a "Book" button leading to
+  `/booking?entry=specialist&specialist=<id>&step=2`. This did not
+  exist before — the Stage 13 amendment "/specialists page: serializer
+  and card scope" (point 4) had explicitly deferred it as "out of
+  scope ... bridges into booking"; it is now in scope because Stage 14
+  needs it as an entry point.
+- `/booking`'s "step 1" — an unqualified starting point with nothing
+  pre-selected — is removed for both entry orders described in the
+  Stage 14 planning entry above ("service-first" / "specialist-first").
+  In practice every real entry into `/booking` already carries one
+  identifying parameter from wherever the customer came from (the
+  category-navigated services catalog, or `/specialists/[id]`); there
+  is no product surface that opens `/booking` with nothing pre-chosen.
+  The flow now always starts at what the earlier entry called "step 2."
+- Step 2 for `entry=service`: shows specialists who perform the chosen
+  service, reusing the existing `?service=` filter on
+  `GET /specialists/` (`backend/specialists/views.py`, added in the
+  Stage 13 "specialists-by-service filter" amendment), plus an "any
+  specialist" option.
+- Step 2 for `entry=specialist`: shows the services offered by the
+  chosen specialist as a flat list — no category navigation, since
+  category navigation is specific to the catalog-browsing entry point
+  (Stage 13 reopened entry above), not to this narrower context, which
+  is already scoped to one specialist.
+- "Any specialist": choosing it does not narrow date/time availability
+  to one specialist. The date/time step computes availability as the
+  union across all qualifying specialists, reusing the existing
+  `compute_multi_specialist_availability`
+  (`backend/scheduling/services.py`, Stage 6.H) unchanged. The actual
+  specialist assignment happens later, only at the
+  booking-confirmation/review step immediately before payment — the
+  first point the customer learns which specialist was assigned.
+  Assignment rule (new logic — no "least busy" or auto-assignment
+  function existed anywhere before this, confirmed by recon): among
+  specialists qualified for the service, working that day, and
+  available at the chosen date/time, prefer whichever has fewer
+  appointments already booked that day.
+
+Rationale: the original Stage 14 planning entry assumed a bare
+`/booking` starting point and left "any specialist" unresolved past
+availability computation; both gaps were only surfaced by working
+through concrete entry points during Stage 14 planning, not decided or
+reviewed in advance of this entry — recorded here as a revision for
+that reason, not folded silently into the earlier entry.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
