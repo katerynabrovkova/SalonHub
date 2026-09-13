@@ -18,19 +18,47 @@ function searchParamsOf(params: Record<string, string | undefined>) {
 }
 
 describe("BookingPage routing skeleton", () => {
-  it("test_service_entry_step_1_or_omitted_renders_service_placeholder", async () => {
-    const withStep = await BookingPage({
-      searchParams: searchParamsOf({ entry: "service", step: "1" }),
-    });
-    const first = render(withStep);
-    expect(first.getByTestId("step-service")).toBeInTheDocument();
-    first.unmount();
+  it("test_explicit_step_1_calls_not_found", async () => {
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({ entry: "service", service: "5", step: "1" }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
 
-    const stepOmitted = await BookingPage({
-      searchParams: searchParamsOf({ entry: "service" }),
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({ entry: "specialist", specialist: "9", step: "1" }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("test_service_entry_step_omitted_with_service_renders_specialist_placeholder", async () => {
+    const element = await BookingPage({
+      searchParams: searchParamsOf({ entry: "service", service: "5" }),
     });
-    const second = render(stepOmitted);
-    expect(second.getByTestId("step-service")).toBeInTheDocument();
+    render(element);
+    expect(screen.getByTestId("step-specialist")).toBeInTheDocument();
+  });
+
+  it("test_specialist_entry_step_omitted_with_specialist_renders_service_placeholder", async () => {
+    const element = await BookingPage({
+      searchParams: searchParamsOf({ entry: "specialist", specialist: "9" }),
+    });
+    render(element);
+    expect(screen.getByTestId("step-service")).toBeInTheDocument();
+  });
+
+  it("test_service_entry_any_specialist_step_3_renders_datetime_placeholder", async () => {
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "any",
+        step: "3",
+      }),
+    });
+    render(element);
+    expect(screen.getByTestId("step-datetime")).toBeInTheDocument();
   });
 
   it("test_service_entry_step_2_renders_specialist_placeholder", async () => {
@@ -52,21 +80,6 @@ describe("BookingPage routing skeleton", () => {
     });
     render(element);
     expect(screen.getByTestId("step-datetime")).toBeInTheDocument();
-  });
-
-  it("test_specialist_entry_step_1_or_omitted_renders_specialist_placeholder", async () => {
-    const withStep = await BookingPage({
-      searchParams: searchParamsOf({ entry: "specialist", step: "1" }),
-    });
-    const first = render(withStep);
-    expect(first.getByTestId("step-specialist")).toBeInTheDocument();
-    first.unmount();
-
-    const stepOmitted = await BookingPage({
-      searchParams: searchParamsOf({ entry: "specialist" }),
-    });
-    const second = render(stepOmitted);
-    expect(second.getByTestId("step-specialist")).toBeInTheDocument();
   });
 
   it("test_specialist_entry_step_2_renders_service_placeholder", async () => {
@@ -130,7 +143,7 @@ describe("BookingPage routing skeleton", () => {
 
   it("test_step_beyond_3_renders_not_implemented_placeholder", async () => {
     const element = await BookingPage({
-      searchParams: searchParamsOf({ entry: "service", step: "4" }),
+      searchParams: searchParamsOf({ entry: "service", service: "5", step: "4" }),
     });
     render(element);
     expect(screen.getByTestId("step-not-implemented")).toBeInTheDocument();

@@ -26,28 +26,24 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
   const service = params.service;
   const specialist = params.specialist;
 
-  const parsedStep = Number(params.step);
-  const step = Number.isInteger(parsedStep) && parsedStep >= 1 ? parsedStep : 1;
-
-  if (step === 2) {
-    const prerequisite = entry === "service" ? service : specialist;
-    if (!prerequisite) {
-      notFound();
-    }
+  // There is no earlier step where the identifying id could still be
+  // absent — every real entry into /booking already carries it — so this
+  // check is unconditional, not gated behind a specific step value.
+  const requiredId = entry === "service" ? service : specialist;
+  if (!requiredId) {
+    notFound();
   }
+
+  const parsedStep = Number(params.step);
+  if (parsedStep === 1) {
+    notFound();
+  }
+  const step = Number.isInteger(parsedStep) && parsedStep >= 2 ? parsedStep : 2;
 
   if (step === 3) {
     if (!service || !specialist) {
       notFound();
     }
-  }
-
-  if (step === 1) {
-    return entry === "service" ? (
-      <div data-testid="step-service" />
-    ) : (
-      <div data-testid="step-specialist" />
-    );
   }
 
   if (step === 2) {
