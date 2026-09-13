@@ -28,6 +28,7 @@ class ServiceCategory(TenantScopedModel, TimeStamped):
     name = models.JSONField(default=dict)
     ordering = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    photo = models.CharField(max_length=1024, null=True, blank=True)
 
     class Meta(TenantScopedModel.Meta):
         abstract = False
@@ -71,6 +72,7 @@ class Service(TenantScopedModel, TimeStamped):
     buffer_minutes = models.PositiveIntegerField(default=0)
     ordering = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    description = models.CharField(max_length=600, null=True, blank=True)
 
     class Meta(TenantScopedModel.Meta):
         abstract = False

@@ -8,9 +8,10 @@ from django.db import IntegrityError
 from rest_framework.test import APIClient
 
 from catalog.models import Service, ServiceCategory
-from catalog.serializers import ServiceCategoryWriteSerializer
+from catalog.serializers import ServiceCategoryMiniSerializer, ServiceCategoryWriteSerializer
 from core.exceptions import exception_handler
 from core.tenancy import tenant_context
+from specialists.serializers import ServiceMiniSerializer
 
 pytestmark = pytest.mark.django_db
 
@@ -550,3 +551,92 @@ def test_search_matches_across_service_and_category(client, salon):
     response = client.get(_service_list_url(salon) + "?search=Глибокий")
     assert response.status_code == 200
     assert response.data["count"] == 1
+
+
+# --- RED phase: Service.description / ServiceCategory.photo (planned fields,
+# not yet added to the model) — these tests are written against the decided
+# contract and are expected to fail against the current, unmodified model
+# and serializers: either a TypeError on an unknown constructor kwarg,
+# django.core.exceptions.FieldDoesNotExist on save(update_fields=[...]), a
+# KeyError on a response key that doesn't exist yet, or an assertion failure
+# because there is no field to validate against yet (no 400).
+
+
+def test_service_description_field_exposed(client, salon, service_category):
+    with tenant_context(salon.id):
+        service = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Massage"},
+            duration_minutes=60,
+            price="500.00",
+            description="A relaxing full-body massage using warm oils.",
+        )
+
+    response = client.get(_service_detail_url(salon, service))
+
+    assert response.status_code == 200
+    assert response.data["description"] == "A relaxing full-body massage using warm oils."
+
+
+def test_service_description_field_is_null(client, salon, service):
+    response = client.get(_service_detail_url(salon, service))
+
+    assert response.status_code == 200
+    assert response.data["description"] is None
+
+
+def test_service_description_max_length_validation(client, salon, admin_account, service):
+    client.force_authenticate(user=admin_account)
+    response = client.patch(
+        _service_detail_url(salon, service),
+        {"description": "x" * 601},
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+
+def test_service_category_photo_field_exposed(client, salon, service_category):
+    with tenant_context(salon.id):
+        service_category.photo = "https://example.com/photos/category.jpg"
+        service_category.save(update_fields=["photo"])
+
+    response = client.get(_category_detail_url(salon, service_category))
+
+    assert response.status_code == 200
+    assert response.data["photo"] == "https://example.com/photos/category.jpg"
+
+
+def test_service_category_photo_field_is_null(client, salon, service_category):
+    response = client.get(_category_detail_url(salon, service_category))
+
+    assert response.status_code == 200
+    assert response.data["photo"] is None
+
+
+def test_service_mini_serializer_excludes_new_fields(salon, service_category):
+    with tenant_context(salon.id):
+        service = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Massage"},
+            duration_minutes=60,
+            price="500.00",
+        )
+        service.description = "A relaxing full-body massage."
+        service.save(update_fields=["description"])
+
+        data = ServiceMiniSerializer(service).data
+
+    assert set(data.keys()) == {"id", "name"}
+
+
+def test_service_category_mini_serializer_excludes_new_fields(salon, service_category):
+    with tenant_context(salon.id):
+        service_category.photo = "https://example.com/photos/category.jpg"
+        service_category.save(update_fields=["photo"])
+
+        data = ServiceCategoryMiniSerializer(service_category).data
+
+    assert set(data.keys()) == {"id", "name"}
