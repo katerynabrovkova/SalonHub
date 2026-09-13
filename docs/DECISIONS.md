@@ -2123,11 +2123,18 @@ code. Decided only; none of this is implemented yet.
   `ServiceInfoPopover`), receiving service data as props. The
   `/services` page itself remains a Server Component; `"use client"`
   is not added to the page.
-- The `ServiceCategory` list is fetched as a single unpaginated
-  request — no `DrfPage` envelope, unlike `Service` pagination
-  (`getServicesPage.ts`'s `PAGE_SIZE`/`totalPages` handling). Category
-  counts per salon are expected to stay small enough that pagination
-  isn't warranted.
+- The `ServiceCategory` list is fetched with `?page_size=100`
+  (`core.pagination.DefaultPagination.max_page_size`) as a single
+  request — the backend has no unpaginated mode, so the response is
+  still the standard `DrfPage` envelope (`{count, next, previous,
+  results}`), just requested at its maximum page size instead of
+  looped like `Service` pagination (`getServicesPage.ts`'s
+  `PAGE_SIZE`/`totalPages` handling). If the envelope's `count`
+  exceeds `results.length` (i.e. more categories exist than this one
+  page can hold), the helper throws rather than silently returning a
+  truncated category list — the same "raise on incomplete data, never
+  silently return partial results" principle as
+  `TenantScopedManager`.
 - Removing `/services/[id]` means deleting:
   `frontend/src/app/services/[id]/page.tsx` and its `not-found.tsx`,
   `frontend/src/lib/catalog/getServiceDetailPage.ts` and its test
