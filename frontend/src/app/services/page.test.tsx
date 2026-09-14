@@ -17,6 +17,11 @@ vi.mock("next/headers", () => ({
   headers: vi.fn(),
 }));
 
+const pushMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
+
 // Imported after the mocks above so the mocked modules are what page.tsx sees.
 import { getServiceCategories } from "@/lib/catalog/getServiceCategories";
 import { getServicesPage, type Service } from "@/lib/catalog/getServicesPage";
@@ -34,6 +39,7 @@ function searchParamsOf(params: Record<string, string | undefined>) {
 }
 
 beforeEach(() => {
+  pushMock.mockReset();
   mockedHeaders.mockReset();
   mockedGetServiceCategories.mockReset();
   mockedGetServicesPage.mockReset();
@@ -98,6 +104,7 @@ describe("ServicesPage: category-list / service-grid split", () => {
           salon: 1,
           category: { id: 1, name: "Nails" },
           name: "Manicure",
+          description: "A classic manicure with polish.",
           duration_minutes: 60,
           price: "500.00",
           buffer_minutes: 15,
@@ -132,6 +139,7 @@ describe("ServicesPage: category-list / service-grid split", () => {
           salon: 1,
           category: { id: 1, name: "Nails" },
           name: "Manicure",
+          description: "A classic manicure with polish.",
           duration_minutes: 60,
           price: "500.00",
           buffer_minutes: 15,
@@ -200,28 +208,35 @@ async function renderServiceGrid(service: ServiceWithDescription) {
 }
 
 describe("ServicesPage: service card restructure + info popover (not yet implemented)", () => {
-  it("test_service_card_links_to_booking_with_service_param", async () => {
+  it("test_selecting_service_card_marks_it_selected_without_navigating", async () => {
+    const user = userEvent.setup();
     await renderServiceGrid(serviceFixture({ id: 42, name: "Manicure" }));
 
-    // The stretched link has no visible text of its own (it's an
-    // absolutely-positioned, full-card click target) — it's given an
-    // aria-label matching the service name so it's still an accessible
-    // link, distinct from the visible <h2> heading with the same text.
-    const link = screen.getByRole("link", { name: "Manicure" });
-    expect(link).toHaveAttribute("href", "/booking?entry=service&service=42");
+    // Select-then-confirm pattern (docs/DECISIONS.md § "Service selection:
+    // select-then-confirm interaction pattern"): the card is a radio-style
+    // selectable control, not a navigating link. Clicking it only updates
+    // selection state.
+    const radio = screen.getByRole("radio", { name: "Manicure" });
+    expect(radio).not.toBeChecked();
+
+    await user.click(radio);
+
+    expect(radio).toBeChecked();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
-  it("test_info_button_is_not_nested_inside_link", async () => {
-    const { container } = await renderServiceGrid(serviceFixture({ name: "Manicure" }));
+  it("test_info_button_is_not_nested_inside_selection_control", async () => {
+    await renderServiceGrid(serviceFixture({ name: "Manicure" }));
 
-    const link = container.querySelector("a");
+    const radio = screen.getByRole("radio", { name: "Manicure" });
     const infoButton = screen.getByRole("button", { name: /інформац/i });
 
-    expect(link).not.toBeNull();
-    // Regression guard: a <button> nested inside an <a> is invalid HTML
-    // and produces unpredictable click behavior — checked via actual DOM
-    // containment, not just visual/z-index position.
-    expect(link?.contains(infoButton)).toBe(false);
+    // Regression guard, same spirit as the retired <a>-containment check:
+    // the info button must not be nested inside the selection control
+    // (radio input or its wrapping <label>), whatever container element
+    // the new pattern uses.
+    expect(radio.contains(infoButton)).toBe(false);
+    expect(radio.closest("label")?.contains(infoButton) ?? false).toBe(false);
   });
 
   it("test_info_button_renders_inline_with_service_name", async () => {
@@ -293,5 +308,60 @@ describe("ServicesPage: service card restructure + info popover (not yet impleme
     await user.click(dialog);
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("test_next_button_disabled_when_nothing_selected", async () => {
+    await renderServiceGrid(serviceFixture({ name: "Manicure" }));
+
+    const nextButton = screen.getByRole("button", { name: /продовж/i });
+    expect(nextButton).toBeDisabled();
+  });
+
+  it("test_next_button_enabled_after_selecting_a_service", async () => {
+    const user = userEvent.setup();
+    await renderServiceGrid(serviceFixture({ name: "Manicure" }));
+
+    await user.click(screen.getByRole("radio", { name: "Manicure" }));
+
+    const nextButton = screen.getByRole("button", { name: /продовж/i });
+    expect(nextButton).toBeEnabled();
+  });
+
+  it("test_next_button_navigates_with_selected_service", async () => {
+    const user = userEvent.setup();
+    await renderServiceGrid(serviceFixture({ id: 42, name: "Manicure" }));
+
+    await user.click(screen.getByRole("radio", { name: "Manicure" }));
+    await user.click(screen.getByRole("button", { name: /продовж/i }));
+
+    expect(pushMock).toHaveBeenCalledWith("/booking?entry=service&service=42");
+  });
+
+  it("test_selecting_different_service_switches_selection", async () => {
+    const user = userEvent.setup();
+    mockedGetServicesPage.mockResolvedValueOnce({
+      services: [
+        serviceFixture({ id: 1, name: "Manicure" }),
+        serviceFixture({ id: 2, name: "Pedicure" }),
+      ],
+      currentPage: 1,
+      totalPages: 1,
+    });
+
+    const element = await ServicesPage({ searchParams: searchParamsOf({ category: "1" }) });
+    render(element);
+
+    const manicureRadio = screen.getByRole("radio", { name: "Manicure" });
+    const pedicureRadio = screen.getByRole("radio", { name: "Pedicure" });
+
+    await user.click(manicureRadio);
+    expect(manicureRadio).toBeChecked();
+
+    await user.click(pedicureRadio);
+    expect(pedicureRadio).toBeChecked();
+    expect(manicureRadio).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: /продовж/i }));
+    expect(pushMock).toHaveBeenCalledWith("/booking?entry=service&service=2");
   });
 });
