@@ -15,6 +15,13 @@ export interface SpecialistDetail {
   photo: string | null;
   is_active: boolean;
   services: { id: number; name: string }[];
+  services_detail: {
+    id: number;
+    name: string;
+    duration_minutes: number;
+    price: string;
+    description: string | null;
+  }[];
   average_rating: number | null;
   review_count: number;
   created_at: string;

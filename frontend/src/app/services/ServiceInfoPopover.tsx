@@ -21,7 +21,7 @@ interface ServiceInfoPopoverProps {
     description: string | null;
     duration_minutes: number;
     price: string;
-    category: { name: string };
+    category?: { name: string };
   };
 }
 
@@ -78,7 +78,9 @@ export default function ServiceInfoPopover({ service }: ServiceInfoPopoverProps)
               {service.duration_minutes} хв
             </p>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">{service.price}</p>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">{service.category.name}</p>
+            {service.category !== undefined ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">{service.category.name}</p>
+            ) : null}
             <button type="button" onClick={handleClose} className="self-end text-sm underline">
               Закрити
             </button>

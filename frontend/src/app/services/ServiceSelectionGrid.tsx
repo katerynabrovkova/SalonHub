@@ -23,19 +23,32 @@ interface Service {
   description: string | null;
   duration_minutes: number;
   price: string;
-  category: { id: number; name: string };
+  category?: { id: number; name: string };
 }
+
+type ConfirmTarget = { mode: "service" } | { mode: "specialist"; specialistId: number };
 
 interface ServiceSelectionGridProps {
   services: Service[];
+  confirmTarget: ConfirmTarget;
 }
 
-export default function ServiceSelectionGrid({ services }: ServiceSelectionGridProps) {
+function buildConfirmUrl(confirmTarget: ConfirmTarget, selectedId: number): string {
+  if (confirmTarget.mode === "service") {
+    return `/booking?entry=service&service=${selectedId}`;
+  }
+  return `/booking?entry=specialist&specialist=${confirmTarget.specialistId}&service=${selectedId}&step=3`;
+}
+
+export default function ServiceSelectionGrid({ services, confirmTarget }: ServiceSelectionGridProps) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   function handleConfirm() {
-    router.push(`/booking?entry=service&service=${selectedId}`);
+    if (selectedId === null) {
+      return;
+    }
+    router.push(buildConfirmUrl(confirmTarget, selectedId));
   }
 
   return (

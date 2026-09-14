@@ -100,7 +100,7 @@ export default async function ServicesPage({ searchParams }: ServicesPageProps) 
 
   return (
     <main className="flex flex-col gap-6 p-8">
-      <ServiceSelectionGrid services={services} />
+      <ServiceSelectionGrid services={services} confirmTarget={{ mode: "service" }} />
 
       <nav className="flex items-center justify-center gap-4">
         {currentPage > 1 ? (

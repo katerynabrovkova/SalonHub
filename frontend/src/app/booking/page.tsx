@@ -9,7 +9,13 @@
  * state) so the flow survives a refresh and a step can be shared/returned
  * to — contact info stays out of the URL entirely (Stage 14.C).
  */
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+
+import { getSpecialistDetailPage } from "@/lib/specialists/getSpecialistDetailPage";
+import { SALON_SLUG_HEADER } from "@/middleware";
+
+import ServiceSelectionGrid from "../services/ServiceSelectionGrid";
 
 interface BookingPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -46,11 +52,37 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
     }
   }
 
+  if (step === 2 && entry === "service") {
+    return <div data-testid="step-specialist" />;
+  }
+
   if (step === 2) {
-    return entry === "service" ? (
-      <div data-testid="step-specialist" />
-    ) : (
-      <div data-testid="step-service" />
+    const slug = (await headers()).get(SALON_SLUG_HEADER);
+    if (slug === null) {
+      return (
+        <main className="p-8 text-center text-zinc-600 dark:text-zinc-400">
+          <p>The platform is still in development.</p>
+        </main>
+      );
+    }
+
+    const specialistId = Number(specialist);
+    if (Number.isNaN(specialistId)) {
+      notFound();
+    }
+
+    const specialistDetail = await getSpecialistDetailPage(slug, specialistId);
+    if (specialistDetail === null) {
+      notFound();
+    }
+
+    return (
+      <main className="flex flex-col gap-6 p-8">
+        <ServiceSelectionGrid
+          services={specialistDetail.services_detail}
+          confirmTarget={{ mode: "specialist", specialistId }}
+        />
+      </main>
     );
   }
 
