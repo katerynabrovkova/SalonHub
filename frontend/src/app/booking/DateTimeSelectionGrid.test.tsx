@@ -114,7 +114,7 @@ describe("DateTimeSelectionGrid", () => {
       />,
     );
 
-    const link = screen.getByRole("link", { name: /наступні 14 днів/i });
+    const link = screen.getByRole("link", { name: /далі/i });
 
     expect(link).toHaveAttribute(
       "href",

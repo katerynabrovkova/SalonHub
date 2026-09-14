@@ -117,6 +117,15 @@ export default function DateTimeSelectionGrid({
         })}
       </div>
 
+      {/* Own row directly under the day strip, right-aligned — not inline
+          within the horizontal day-scroll and not below the time-slot grid
+          below. Text and (lack of) styling mirror services/page.tsx's
+          pagination `<Link>` exactly: a bare `<Link>`, no className, inside
+          a flex row that does the layout. */}
+      <nav className="flex justify-end">
+        <Link href={buildNextWindowUrl(entry, service, specialist, dateFrom)}>Далі →</Link>
+      </nav>
+
       {selectedDay !== null && (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {slotsForSelectedDay.map((slot) => (
@@ -131,13 +140,6 @@ export default function DateTimeSelectionGrid({
           ))}
         </div>
       )}
-
-      <Link
-        href={buildNextWindowUrl(entry, service, specialist, dateFrom)}
-        className="self-start underline"
-      >
-        Наступні 14 днів →
-      </Link>
     </div>
   );
 }

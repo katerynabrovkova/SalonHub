@@ -27,11 +27,16 @@ vi.mock("@/lib/specialists/getSpecialistsPage", () => ({
   getSpecialistsPage: vi.fn(),
 }));
 
+vi.mock("@/lib/scheduling/getAvailability", () => ({
+  getAvailability: vi.fn(),
+}));
+
 vi.mock("next/headers", () => ({
   headers: vi.fn(),
 }));
 
 // Imported after the mocks above so the mocked modules are what page.tsx sees.
+import { getAvailability } from "@/lib/scheduling/getAvailability";
 import {
   getSpecialistDetailPage,
   type SpecialistDetail,
@@ -45,6 +50,7 @@ import BookingPage from "./page";
 const mockedHeaders = vi.mocked(headers);
 const mockedGetSpecialistDetailPage = vi.mocked(getSpecialistDetailPage);
 const mockedGetSpecialistsPage = vi.mocked(getSpecialistsPage);
+const mockedGetAvailability = vi.mocked(getAvailability);
 
 function searchParamsOf(params: Record<string, string | undefined>) {
   return Promise.resolve(params);
@@ -107,7 +113,14 @@ describe("BookingPage routing skeleton", () => {
     expect(screen.getByRole("radio", { name: "Olena" })).toBeInTheDocument();
   });
 
-  it("test_service_entry_any_specialist_step_3_renders_datetime_placeholder", async () => {
+  it("test_service_entry_any_specialist_step_3_renders_datetime_grid", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00Z"));
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({
+      availableTimes: ["2026-08-17T09:00:00+03:00"],
+    });
+
     const element = await BookingPage({
       searchParams: searchParamsOf({
         entry: "service",
@@ -117,7 +130,17 @@ describe("BookingPage routing skeleton", () => {
       }),
     });
     render(element);
-    expect(screen.getByTestId("step-datetime")).toBeInTheDocument();
+    vi.useRealTimers();
+
+    expect(mockedGetAvailability).toHaveBeenCalledWith(
+      "bella-demo",
+      "5",
+      "2026-08-17",
+      "2026-08-30",
+      undefined,
+    );
+    expect(screen.getByRole("button", { name: "2026-08-17" })).toBeEnabled();
+    expect(screen.getByRole("link", { name: /далі/i })).toBeInTheDocument();
   });
 
   it("test_service_entry_step_2_renders_specialist_selection", async () => {
@@ -138,7 +161,12 @@ describe("BookingPage routing skeleton", () => {
     expect(screen.getByRole("radio", { name: "Olena" })).toBeInTheDocument();
   });
 
-  it("test_service_entry_step_3_renders_datetime_placeholder", async () => {
+  it("test_service_entry_step_3_renders_datetime_grid", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00Z"));
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({ availableTimes: [] });
+
     const element = await BookingPage({
       searchParams: searchParamsOf({
         entry: "service",
@@ -148,10 +176,24 @@ describe("BookingPage routing skeleton", () => {
       }),
     });
     render(element);
-    expect(screen.getByTestId("step-datetime")).toBeInTheDocument();
+    vi.useRealTimers();
+
+    expect(mockedGetAvailability).toHaveBeenCalledWith(
+      "bella-demo",
+      "5",
+      "2026-08-17",
+      "2026-08-30",
+      "9",
+    );
+    expect(screen.getByRole("link", { name: /далі/i })).toBeInTheDocument();
   });
 
-  it("test_specialist_entry_step_3_renders_datetime_placeholder", async () => {
+  it("test_specialist_entry_step_3_renders_datetime_grid", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00Z"));
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({ availableTimes: [] });
+
     const element = await BookingPage({
       searchParams: searchParamsOf({
         entry: "specialist",
@@ -161,7 +203,16 @@ describe("BookingPage routing skeleton", () => {
       }),
     });
     render(element);
-    expect(screen.getByTestId("step-datetime")).toBeInTheDocument();
+    vi.useRealTimers();
+
+    expect(mockedGetAvailability).toHaveBeenCalledWith(
+      "bella-demo",
+      "5",
+      "2026-08-17",
+      "2026-08-30",
+      "9",
+    );
+    expect(screen.getByRole("link", { name: /далі/i })).toBeInTheDocument();
   });
 
   it("test_invalid_entry_calls_not_found", async () => {
