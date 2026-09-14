@@ -234,6 +234,34 @@ def test_malformed_service_id_returns_400(client, salon):
     assert "service" in response.data["error"]["details"]
 
 
+def test_cross_tenant_specialist_id_returns_400_not_404(client, salon, other_salon, service):
+    """
+    Same tenant-isolation assertion as test_cross_tenant_service_id_returns_400_not_404
+    above, for the `specialist` param instead: `other_specialist` genuinely
+    exists in the database, just under a different salon. Resolved against
+    `salon`'s scoped queryset, it is indistinguishable from a nonexistent id
+    — 400, never 404 (§ Stage 6.I decisions: this is a query-param
+    reference, not a URL-addressed resource). `service` is the ordinary
+    same-salon fixture, kept valid so the 400 is isolated to `specialist`.
+    """
+    with tenant_context(other_salon.id):
+        other_specialist = Specialist.objects.create(salon=other_salon, name={"en": "Other"})
+
+    response = client.get(
+        _availability_url(salon),
+        {
+            "service": service.id,
+            "specialist": other_specialist.id,
+            "date_from": MONDAY.isoformat(),
+            "date_to": MONDAY.isoformat(),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "invalid"
+    assert "specialist" in response.data["error"]["details"]
+
+
 def test_unknown_service_id_returns_400(client, salon):
     response = client.get(
         _availability_url(salon),
