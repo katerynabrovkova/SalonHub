@@ -85,4 +85,28 @@ describe("getSpecialistsPage", () => {
     // needing to check a result discriminant.
     await expect(getSpecialistsPage("bella-demo", 1)).rejects.toThrow();
   });
+
+  it("test_builds_url_with_service_param", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ count: 0, next: null, previous: null, results: [] }) as Response,
+    );
+
+    await getSpecialistsPage("bella-demo", 1, "5");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/salons/bella-demo/specialists/?service=5`,
+    );
+  });
+
+  it("test_omits_service_param_when_not_provided", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ count: 0, next: null, previous: null, results: [] }) as Response,
+    );
+
+    await getSpecialistsPage("bella-demo", 1);
+
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/specialists/`);
+  });
 });
