@@ -13,9 +13,11 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { getSpecialistDetailPage } from "@/lib/specialists/getSpecialistDetailPage";
+import { getSpecialistsPage } from "@/lib/specialists/getSpecialistsPage";
 import { SALON_SLUG_HEADER } from "@/middleware";
 
 import ServiceSelectionGrid from "../services/ServiceSelectionGrid";
+import SpecialistSelectionGrid from "../specialists/SpecialistSelectionGrid";
 
 interface BookingPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -53,7 +55,27 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
   }
 
   if (step === 2 && entry === "service") {
-    return <div data-testid="step-specialist" />;
+    const slug = (await headers()).get(SALON_SLUG_HEADER);
+    if (slug === null) {
+      return (
+        <main className="p-8 text-center text-zinc-600 dark:text-zinc-400">
+          <p>The platform is still in development.</p>
+        </main>
+      );
+    }
+
+    const serviceId = Number(service);
+    if (Number.isNaN(serviceId)) {
+      notFound();
+    }
+
+    const { specialists } = await getSpecialistsPage(slug, 1, String(serviceId));
+
+    return (
+      <main className="flex flex-col gap-6 p-8">
+        <SpecialistSelectionGrid specialists={specialists} serviceId={serviceId} />
+      </main>
+    );
   }
 
   if (step === 2) {

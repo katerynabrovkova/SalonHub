@@ -17,10 +17,14 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
-// Mock the data-fetch module boundary, not raw fetch — same convention as
-// specialists/[id]/page.test.tsx.
+// Mock the data-fetch module boundaries, not raw fetch — same convention as
+// specialists/[id]/page.test.tsx and specialists/page.test.tsx.
 vi.mock("@/lib/specialists/getSpecialistDetailPage", () => ({
   getSpecialistDetailPage: vi.fn(),
+}));
+
+vi.mock("@/lib/specialists/getSpecialistsPage", () => ({
+  getSpecialistsPage: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({
@@ -32,6 +36,7 @@ import {
   getSpecialistDetailPage,
   type SpecialistDetail,
 } from "@/lib/specialists/getSpecialistDetailPage";
+import { getSpecialistsPage, type Specialist } from "@/lib/specialists/getSpecialistsPage";
 import { SALON_SLUG_HEADER } from "@/middleware";
 import { headers } from "next/headers";
 
@@ -39,9 +44,34 @@ import BookingPage from "./page";
 
 const mockedHeaders = vi.mocked(headers);
 const mockedGetSpecialistDetailPage = vi.mocked(getSpecialistDetailPage);
+const mockedGetSpecialistsPage = vi.mocked(getSpecialistsPage);
 
 function searchParamsOf(params: Record<string, string | undefined>) {
   return Promise.resolve(params);
+}
+
+function specialistListFixture(overrides: Partial<Specialist> = {}): Specialist {
+  return {
+    id: 9,
+    salon: 1,
+    name: "Olena",
+    bio: "Nail artist",
+    photo: null,
+    is_active: true,
+    services: [{ id: 101, name: "Manicure" }],
+    average_rating: null,
+    review_count: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function mockSlug(slug: string | null) {
+  mockedHeaders.mockResolvedValueOnce({
+    get: (name: string) => (name === SALON_SLUG_HEADER ? slug : null),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal ReadonlyHeaders stand-in, only .get() is used by page.tsx
+  } as any);
 }
 
 describe("BookingPage routing skeleton", () => {
@@ -59,12 +89,22 @@ describe("BookingPage routing skeleton", () => {
     ).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
-  it("test_service_entry_step_omitted_with_service_renders_specialist_placeholder", async () => {
+  it("test_service_entry_step_omitted_with_service_renders_specialist_selection", async () => {
+    mockSlug("bella-demo");
+    mockedGetSpecialistsPage.mockResolvedValueOnce({
+      specialists: [specialistListFixture()],
+      currentPage: 1,
+      totalPages: 1,
+    });
+
     const element = await BookingPage({
       searchParams: searchParamsOf({ entry: "service", service: "5" }),
     });
     render(element);
-    expect(screen.getByTestId("step-specialist")).toBeInTheDocument();
+
+    expect(mockedGetSpecialistsPage).toHaveBeenCalledWith("bella-demo", 1, "5");
+    expect(screen.getByRole("radio", { name: "Будь-який спеціаліст" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Olena" })).toBeInTheDocument();
   });
 
   it("test_service_entry_any_specialist_step_3_renders_datetime_placeholder", async () => {
@@ -80,12 +120,22 @@ describe("BookingPage routing skeleton", () => {
     expect(screen.getByTestId("step-datetime")).toBeInTheDocument();
   });
 
-  it("test_service_entry_step_2_renders_specialist_placeholder", async () => {
+  it("test_service_entry_step_2_renders_specialist_selection", async () => {
+    mockSlug("bella-demo");
+    mockedGetSpecialistsPage.mockResolvedValueOnce({
+      specialists: [specialistListFixture()],
+      currentPage: 1,
+      totalPages: 1,
+    });
+
     const element = await BookingPage({
       searchParams: searchParamsOf({ entry: "service", service: "5", step: "2" }),
     });
     render(element);
-    expect(screen.getByTestId("step-specialist")).toBeInTheDocument();
+
+    expect(mockedGetSpecialistsPage).toHaveBeenCalledWith("bella-demo", 1, "5");
+    expect(screen.getByRole("radio", { name: "Будь-який спеціаліст" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Olena" })).toBeInTheDocument();
   });
 
   it("test_service_entry_step_3_renders_datetime_placeholder", async () => {
