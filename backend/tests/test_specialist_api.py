@@ -687,3 +687,51 @@ def test_services_detail_absent_from_list_view(client, salon, service_category, 
     assert response.status_code == 200
     for row in response.data["results"]:
         assert "services_detail" not in row
+
+
+# --- Stage 14 revision: services_detail gains description (RED phase) ---
+#
+# docs/DECISIONS.md § "Stage 14 implementation decisions: services_detail
+# gains a description field" (revised 14.09.2026). `description` is not yet
+# on `ServiceWithPricingSerializer` (specialists/serializers.py) — these two
+# tests are expected to fail red against current code: `response.data[...]`
+# on a row without a `description` key raises KeyError, not an assertion
+# failure, because the field doesn't exist in the response at all yet.
+
+
+def test_services_detail_includes_description(client, salon, service_category, specialist):
+    with tenant_context(salon.id):
+        service_a = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure"},
+            description="A relaxing hand treatment.",
+            duration_minutes=45,
+            price="350.00",
+        )
+        specialist.services.set([service_a], through_defaults={"salon_id": salon.id})
+
+    response = client.get(_specialist_detail_url(salon, specialist))
+
+    assert response.status_code == 200
+    returned = {row["id"]: row for row in response.data["services_detail"]}
+    assert returned[service_a.id]["description"] == "A relaxing hand treatment."
+
+
+def test_services_detail_handles_null_description(client, salon, service_category, specialist):
+    with tenant_context(salon.id):
+        service_a = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure"},
+            description=None,
+            duration_minutes=45,
+            price="350.00",
+        )
+        specialist.services.set([service_a], through_defaults={"salon_id": salon.id})
+
+    response = client.get(_specialist_detail_url(salon, specialist))
+
+    assert response.status_code == 200
+    returned = {row["id"]: row for row in response.data["services_detail"]}
+    assert returned[service_a.id]["description"] is None

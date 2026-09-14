@@ -146,16 +146,22 @@ class ServiceWithPricingSerializer(serializers.ModelSerializer):
     Nested read-only summary of a Service on a Specialist's `services_detail`
     list (docs/DECISIONS.md § Stage 14 implementation decisions). Same
     ``?lang=`` name resolution as `ServiceMiniSerializer`, plus
-    `duration_minutes`/`price` — the shape booking step 2 needs for
-    `entry=specialist`. Deliberately a separate serializer rather than an
+    `duration_minutes`/`price`/`description` — the shape booking step 2 needs
+    for `entry=specialist`. Deliberately a separate serializer rather than an
     extension of `ServiceMiniSerializer`, which stays id/name-only.
+
+    `description` is a plain passthrough `Meta.fields` entry, not a
+    `SerializerMethodField` — `Service.description` is a plain string field,
+    not a translatable `{lang: str}` dict like `name` (docs/DECISIONS.md §
+    "Stage 14 implementation decisions: services_detail gains a description
+    field").
     """
 
     name = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
-        fields = ["id", "name", "duration_minutes", "price"]
+        fields = ["id", "name", "description", "duration_minutes", "price"]
         read_only_fields = fields
 
     def get_name(self, obj: Service) -> str:
