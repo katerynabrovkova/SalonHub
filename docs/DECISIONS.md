@@ -2519,6 +2519,22 @@ workflow, during read-only recon ahead of building step 3.
   user scrolls past the loaded 14 days, fetches the next 14-day range.
   Rationale: avoids both an oversized single response across the full
   booking window and a chatty per-day request pattern.
+  - Clarification (14.09.2026): the 14-day window boundary is
+    represented as a URL search param (e.g. `date_from`) on
+    `booking/page.tsx`, consistent with the existing URL-based state
+    approach for service/specialist/slot/step. "Load next window" is a
+    plain server-navigated `<Link>`, mirroring the existing pagination
+    pattern in `/services/page.tsx` (full Server Component re-render,
+    not a client-side fetch) — not a client-side incremental fetch.
+    Rationale: `getAvailability.ts` is server-only (reads
+    `INTERNAL_API_URL`); building a client-safe fetch variant would mean
+    a third client auth/fetch pattern in the codebase (alongside
+    `api/client.ts`'s cookie model and `guestClient.ts`'s token model)
+    for an endpoint that actually needs none (`AllowAny`). This is a
+    deliberate simplicity tradeoff for the current pre-design-polish
+    stage — a smoother client-fetched "load more" can be revisited
+    during Stage 18-21 if the full-navigation reload proves noticeably
+    jarring.
 - **Days with no available times render as disabled/unselectable in the
   day strip, with no distinction between "outside the booking window,"
   "fully booked," or any other reason.** The API returns absence, not a
