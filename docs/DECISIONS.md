@@ -2296,6 +2296,35 @@ booking flow.
   clearly as the fuller shape (e.g. `services_detail` or similar)
   rather than overloading `services` itself.
 
+### Stage 14 implementation decisions: `services_detail` gains a `description` field
+
+Revised 14.09.2026, after review — revising the services-with-pricing
+shape scoped in the "Stage 14 implementation decisions" entry above,
+which specified `name` + `duration_minutes` + `price` only, with no
+`description`.
+
+- **`services_detail` gains a `description` field.** Rationale: the "i"
+  info popover (`ServiceInfoPopover`) must show the same description on
+  booking step 2 (`entry=specialist`) as it does on `/services` — the
+  customer sees identical information regardless of which entry path
+  they took into booking.
+- `ServiceWithPricingSerializer` (`specialists/serializers.py`) needs a
+  `description` field added, sourced the same way
+  `ServiceReadSerializer`'s `description` already is
+  (`catalog/serializers.py`): a plain passthrough `Meta.fields` entry,
+  not a `SerializerMethodField`/`resolve_translation` call —
+  `Service.description` is a plain string field, not a translatable
+  `{lang: str}` dict like `name`.
+- **`ServiceSelectionGrid.tsx`'s generalization is unchanged by this
+  decision.** It is still being generalized, not duplicated, for reuse
+  between `/services` and booking step 2: its hardcoded
+  `router.push("/booking?entry=service&service=...")` becomes an
+  `onConfirm(selectedId)` callback prop supplied by the caller. The
+  navigation target still legitimately differs between the two callers
+  (`/booking?entry=service&service=<id>` vs.
+  `/booking?entry=specialist&specialist=<id>&service=<id>&step=3`) even
+  though both callers' service shape now includes `description`.
+
 ### Service selection: select-then-confirm interaction pattern
 
 Decided 14.09.2026 — agreed before any code, per the stage-by-stage
