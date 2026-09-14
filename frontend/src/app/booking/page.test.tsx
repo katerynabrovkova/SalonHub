@@ -2,9 +2,9 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-// notFound() throws in real Next.js to halt rendering (see
-// src/app/services/[id]/page.tsx's use of it) — the mock must throw too so
-// this test observes the same control-flow halt, not a silent fall-through.
+// notFound() throws in real Next.js to halt rendering — the mock must
+// throw too so this test observes the same control-flow halt, not a
+// silent fall-through.
 vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
