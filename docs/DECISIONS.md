@@ -2328,6 +2328,42 @@ workflow, during read-only recon ahead of building booking step 2 for
 - `ServiceInfoPopover` (the "i" info popover) is unaffected — it
   remains a separate, non-selection interaction.
 
+### Deferred: frontend price display shows no currency unit
+
+Noted 14.09.2026, during recon after the select-then-confirm retrofit
+above. Not fixed now — recorded as a known, deliberately deferred gap
+rather than folded in as a quick fix at the end of an unrelated
+session.
+
+- Every price shown in the frontend today (`ServiceSelectionGrid`,
+  used by `services/page.tsx`; `ServiceInfoPopover.tsx`) renders the
+  raw `Service.price` string with no currency unit at all — e.g.
+  `500.00`, not `500.00 UAH` or `$500.00`. This is a **pre-existing
+  gap, not a regression from today's select-then-confirm work** — the
+  stretched-link card it replaced had exactly the same unadorned
+  `{service.price}` display.
+- **Not a hardcoded-symbol fix.** Confirmed via the live BellaBeauty
+  salon record: its `Salon.currency` is set to `USD`, not the
+  product-default `UAH` (§ Currency above) — different salons use
+  different ISO 4217 currencies, so any fix must read each salon's
+  actual `currency` value, never assume one symbol platform-wide.
+- Fixing this properly requires three pieces, none of which exist yet:
+  1. **A new Salon-info API endpoint.** Confirmed by recon: the
+     `tenants` app currently has zero DRF surface — no
+     `serializers.py`, `views.py`, or `urls.py`, only `models.py`,
+     `middleware.py`, `admin.py`. `Salon.currency` is backend-internal
+     only today, read solely by `payments` to freeze onto
+     `Payment.currency` at creation (`payments/models.py`,
+     `payments/services.py`) — never serialized out to any client.
+  2. **A frontend fetch for that endpoint** — nothing in
+     `frontend/src` currently fetches salon-level data at all; the
+     frontend only ever learns the salon's `slug` (via
+     `middleware.ts`'s `SALON_SLUG_HEADER` /
+     `resolveSlugFromHost`), never anything else about the salon.
+  3. **A currency-aware price-formatting utility** (e.g. wrapping
+     `Intl.NumberFormat` with the fetched ISO 4217 code), not a
+     hardcoded `₴`/`$` suffix — no such utility exists yet.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
