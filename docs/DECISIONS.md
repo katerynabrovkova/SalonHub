@@ -107,6 +107,20 @@ on them.
   the candidate list jumps (…01:40, 02:00, 03:00, 03:20…) because 02:xx
   doesn't exist locally. Show as-is / label / suppress — a presentation
   decision for the local-time formatting substage.
+- **UI chrome i18n — not yet scheduled to a specific stage.** Static
+  interface labels (button text, navigation, empty-state messages — e.g.
+  "Далі", "Назад", "Забронювати", "Інформація про послугу") have no
+  translation mechanism. This is distinct from the existing Stage 11.5
+  content-localization system (`?lang=en|uk` for salon-provided data:
+  service/category names, `Salon.about`, `Specialist.bio`) — Stage 11.5's
+  own "Explicitly out of scope" section already named frontend UI-string
+  translation as a separate, future frontend concern, not a backend data
+  concern. Until UI i18n lands, all interface chrome is hardcoded
+  Ukrainian, with no locale-switching mechanism. `docs/ARCHITECTURE.md`
+  §§ on Stage 11.5 notification formatting record the same carve-out for
+  admin/staff interface language. Flagged here rather than left to fall
+  out of a stage's scope discovery, since no stage in the roadmap above
+  currently commits to building it.
 - **Max-advance boundary at local midnight can land on a non-existent
   local time.** In zones whose DST transition is exactly at midnight
   (`America/Santiago`, `America/Havana`), `zoneinfo` shifts rather than
