@@ -577,3 +577,113 @@ def test_no_n_plus_one_queries(client, salon, service_category, customer, servic
         f"expected a fixed small query count, got {len(ctx.captured_queries)}: "
         + "\n".join(q["sql"] for q in ctx.captured_queries)
     )
+
+
+# --- Stage 14: services_detail (services-with-pricing, detail-view-only) ---
+#
+# RED phase (docs/DECISIONS.md § Stage 14 implementation decisions). The
+# decided shape: a new `ServiceWithPricingSerializer` (id/name/duration_minutes/
+# price) backs a new `services_detail` field, added only on a new
+# `SpecialistDetailReadSerializer(SpecialistReadSerializer)` subclass that
+# `SpecialistDetailView` returns for GET — `SpecialistReadSerializer` itself
+# (still used as-is by `SpecialistListCreateView`) and its existing `services`
+# field (still `ServiceMiniSerializer`-backed) are untouched.
+#
+# None of this exists yet. Tests 1-2 are expected to fail red against the
+# current code (KeyError on response.data["services_detail"], which isn't a
+# key in the current response at all). Tests 3-4 are regression guards for
+# behavior that already holds today (the existing `services` field's shape,
+# and the absence of any `services_detail` key from the list view) — they
+# pass now and are written to keep passing once `services_detail` exists, so
+# a future implementation that overloads `services` or adds the new field to
+# the shared `SpecialistReadSerializer` (leaking it into the list view) fails
+# them instead of silently getting it wrong.
+
+
+def test_specialist_detail_includes_services_detail(client, salon, service_category, specialist):
+    with tenant_context(salon.id):
+        service_a = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure"},
+            duration_minutes=45,
+            price="350.00",
+        )
+        service_b = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Pedicure"},
+            duration_minutes=60,
+            price="500.00",
+        )
+        specialist.services.set([service_a, service_b], through_defaults={"salon_id": salon.id})
+
+    response = client.get(_specialist_detail_url(salon, specialist))
+
+    assert response.status_code == 200
+    returned = {row["id"]: row for row in response.data["services_detail"]}
+    assert returned[service_a.id]["name"] == "Manicure"
+    assert returned[service_a.id]["duration_minutes"] == 45
+    assert returned[service_a.id]["price"] == "350.00"
+    assert returned[service_b.id]["name"] == "Pedicure"
+    assert returned[service_b.id]["duration_minutes"] == 60
+    assert returned[service_b.id]["price"] == "500.00"
+
+
+def test_services_detail_resolves_name_per_lang(client, salon, service_category, specialist):
+    with tenant_context(salon.id):
+        service_a = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure", "uk": "Манікюр"},
+            duration_minutes=45,
+            price="350.00",
+        )
+        specialist.services.set([service_a], through_defaults={"salon_id": salon.id})
+
+    response = client.get(_specialist_detail_url(salon, specialist) + "?lang=uk")
+
+    assert response.status_code == 200
+    assert response.data["services_detail"][0]["name"] == "Манікюр"
+
+
+def test_existing_services_field_unchanged(client, salon, service_category, specialist):
+    """Regression guard, mirrors test_services_nested_not_bare_ids: the
+    pre-existing `services` field (ServiceMiniSerializer-backed) must still
+    return only id/name — duration_minutes/price must never appear on it,
+    now or after services_detail is added alongside it."""
+    with tenant_context(salon.id):
+        service_a = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure"},
+            duration_minutes=45,
+            price="350.00",
+        )
+        specialist.services.set([service_a], through_defaults={"salon_id": salon.id})
+
+    response = client.get(_specialist_detail_url(salon, specialist))
+
+    assert response.status_code == 200
+    assert response.data["services"] == [{"id": service_a.id, "name": "Manicure"}]
+
+
+def test_services_detail_absent_from_list_view(client, salon, service_category, specialist):
+    """services_detail is detail-view-only (docs/DECISIONS.md § Stage 14): it
+    must never appear on GET /specialists/ rows, which keep using the shared
+    SpecialistReadSerializer unchanged."""
+    with tenant_context(salon.id):
+        service_a = Service.objects.create(
+            salon=salon,
+            category=service_category,
+            name={"en": "Manicure"},
+            duration_minutes=45,
+            price="350.00",
+        )
+        specialist.services.set([service_a], through_defaults={"salon_id": salon.id})
+
+    response = client.get(_specialist_list_url(salon))
+
+    assert response.status_code == 200
+    for row in response.data["results"]:
+        assert "services_detail" not in row

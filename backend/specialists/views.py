@@ -17,7 +17,11 @@ from rest_framework.serializers import BaseSerializer
 from core.permissions import IsSalonStaff
 from core.tenancy import get_current_salon_id
 from specialists.models import Specialist
-from specialists.serializers import SpecialistReadSerializer, SpecialistWriteSerializer
+from specialists.serializers import (
+    SpecialistDetailReadSerializer,
+    SpecialistReadSerializer,
+    SpecialistWriteSerializer,
+)
 from specialists.services import soft_delete_specialist
 
 
@@ -114,6 +118,19 @@ class SpecialistListCreateView(
 class SpecialistDetailView(
     _SpecialistSerializerMixin, _SpecialistViewMixin, generics.RetrieveUpdateDestroyAPIView
 ):
+    """
+    GET returns `SpecialistDetailReadSerializer` (adds `services_detail`,
+    docs/DECISIONS.md § Stage 14 implementation decisions) instead of the
+    plain `SpecialistReadSerializer` `_SpecialistSerializerMixin` would give
+    every other SAFE_METHODS view; writes still use `SpecialistWriteSerializer`
+    via the mixin, unchanged.
+    """
+
+    def get_serializer_class(self) -> type[BaseSerializer]:
+        if self.request.method in SAFE_METHODS:
+            return SpecialistDetailReadSerializer
+        return super().get_serializer_class()
+
     def get_queryset(self) -> QuerySet[Specialist]:
         return self._with_card_annotations(self._apply_visibility(Specialist.objects.all()))
 

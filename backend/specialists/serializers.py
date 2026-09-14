@@ -141,6 +141,29 @@ class ServiceMiniSerializer(serializers.ModelSerializer):
         return resolve_translation(obj.name, requested_lang)
 
 
+class ServiceWithPricingSerializer(serializers.ModelSerializer):
+    """
+    Nested read-only summary of a Service on a Specialist's `services_detail`
+    list (docs/DECISIONS.md § Stage 14 implementation decisions). Same
+    ``?lang=`` name resolution as `ServiceMiniSerializer`, plus
+    `duration_minutes`/`price` — the shape booking step 2 needs for
+    `entry=specialist`. Deliberately a separate serializer rather than an
+    extension of `ServiceMiniSerializer`, which stays id/name-only.
+    """
+
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Service
+        fields = ["id", "name", "duration_minutes", "price"]
+        read_only_fields = fields
+
+    def get_name(self, obj: Service) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
+
+
 class SpecialistReadSerializer(serializers.ModelSerializer):
     """
     Read representation: `name`/`bio` resolved to a plain string for the
@@ -190,3 +213,22 @@ class SpecialistReadSerializer(serializers.ModelSerializer):
 
     def get_bio(self, obj: Specialist) -> str:
         return self._resolved(obj.bio)
+
+
+class SpecialistDetailReadSerializer(SpecialistReadSerializer):
+    """
+    Detail-view-only extension of `SpecialistReadSerializer`
+    (docs/DECISIONS.md § Stage 14 implementation decisions): adds
+    `services_detail`, the services-with-pricing shape booking step 2 needs
+    for `entry=specialist`, sourced from the same prefetched `services`
+    relation the existing `services` field already reads (`source="services"`
+    — no new query). `SpecialistListCreateView` keeps using the parent
+    `SpecialistReadSerializer` unchanged, so `services_detail` never appears
+    on list rows; only `SpecialistDetailView`'s GET returns this subclass.
+    """
+
+    services_detail = ServiceWithPricingSerializer(source="services", many=True, read_only=True)
+
+    class Meta(SpecialistReadSerializer.Meta):
+        fields = [*SpecialistReadSerializer.Meta.fields, "services_detail"]
+        read_only_fields = fields
