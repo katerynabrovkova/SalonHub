@@ -2296,6 +2296,38 @@ booking flow.
   clearly as the fuller shape (e.g. `services_detail` or similar)
   rather than overloading `services` itself.
 
+### Service selection: select-then-confirm interaction pattern
+
+Decided 14.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during read-only recon ahead of building booking step 2 for
+`entry=specialist`.
+
+- Service selection (the "final choice before proceeding to booking"
+  step) uses a select-then-confirm pattern: cards are selectable
+  (visually indicate selection, e.g. a highlighted border or radio
+  input for accessibility) but do **not** navigate on click. A "Далі"
+  button, disabled until a selection is made, is the only way to
+  proceed.
+- Applies to: (a) the service-selection grid on `/services` (within a
+  category — **not** the category-selection grid itself, which stays
+  instant-navigate/unchanged, since browsing categories is not a final
+  choice), and (b) the new booking step 2 for `entry=specialist`
+  (choosing which of a specialist's services to book).
+- Rationale: gives the customer a chance to reconsider before
+  committing to navigate away, rather than an irreversible single
+  click. Applies uniformly across the app wherever a "final selection
+  before proceeding" pattern occurs.
+- **Supersedes** the service-card click-target decision recorded in
+  "Stage 13 reopened: implementation decisions for the popup, category
+  fetch, and detail-page removal" (13.09.2026): that entry's
+  stretched-link-to-`/booking` pattern is retired for the
+  service-selection grid. That entry's HTML-structure guidance (the
+  "i" info button as a sibling of the click target, not nested inside
+  it) still applies conceptually, but the card is no longer a `Link`
+  at all under this new pattern.
+- `ServiceInfoPopover` (the "i" info popover) is unaffected — it
+  remains a separate, non-selection interaction.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
