@@ -2281,6 +2281,20 @@ booking flow.
   its data already exists via the existing `SpecialistDetailView`
   (`GET /specialists/<id>/`) — no new backend endpoint is needed for
   the detail page itself.
+- **The new services-with-pricing serializer (the open question left
+  by the previous bullet) is wired in as a new field on
+  `SpecialistReadSerializer`, not a new endpoint.** It's added
+  alongside the existing `services` field (still `ServiceMiniSerializer`-
+  backed, completely untouched) on the serializer already returned by
+  `GET /specialists/<id>/` (`SpecialistDetailView`). Rejected
+  alternative: a separate endpoint — `SpecialistDetailView` and its
+  frontend fetch helper (`getSpecialistDetailPage.ts`) already exist
+  and are tested, and the only consumer of this shape is booking step
+  2 for `entry=specialist`, so a dedicated endpoint would duplicate
+  that surface for a single caller. The new field's name is not final
+  — to be decided in the implementation step — but it must read
+  clearly as the fuller shape (e.g. `services_detail` or similar)
+  rather than overloading `services` itself.
 
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
