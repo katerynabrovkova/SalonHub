@@ -18,6 +18,7 @@ export interface Service {
   salon: number;
   category: { id: number; name: string };
   name: string;
+  description: string | null;
   duration_minutes: number;
   price: string;
   buffer_minutes: number;

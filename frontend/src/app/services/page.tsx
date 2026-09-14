@@ -6,6 +6,8 @@ import { getServicesPage } from "@/lib/catalog/getServicesPage";
 import { initials } from "@/lib/format/initials";
 import { SALON_SLUG_HEADER } from "@/middleware";
 
+import ServiceInfoPopover from "./ServiceInfoPopover";
+
 interface ServicesPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
@@ -100,17 +102,24 @@ export default async function ServicesPage({ searchParams }: ServicesPageProps) 
     <main className="flex flex-col gap-6 p-8">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {services.map((service) => (
-          <Link
+          <div
             key={service.id}
-            href={`/services/${service.id}`}
-            className="block rounded border border-zinc-200 p-4 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500"
+            className="relative rounded border border-zinc-200 p-4 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500"
           >
-            <h2 className="font-semibold">{service.name}</h2>
+            <Link
+              href={`/booking?entry=service&service=${service.id}`}
+              aria-label={service.name}
+              className="absolute inset-0"
+            />
+            <div className="relative z-10 flex items-center justify-between gap-2">
+              <h2 className="font-semibold">{service.name}</h2>
+              <ServiceInfoPopover service={service} />
+            </div>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
               {service.duration_minutes} хв
             </p>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">{service.price}</p>
-          </Link>
+          </div>
         ))}
       </div>
 
