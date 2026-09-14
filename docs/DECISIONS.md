@@ -2453,6 +2453,44 @@ browser.
 
 Frontend test suite: 21/21 passing (3 files) after the change.
 
+### Stage 14 UI decisions: booking step 2 for `entry=service` (specialist selection)
+
+Decided 14.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during read-only recon ahead of building step 2 for
+`entry=service`.
+
+- **`SpecialistCard` is extracted as a shared presentational component**
+  (photo/initials fallback + rating line), currently duplicated between
+  `frontend/src/app/specialists/page.tsx` and
+  `frontend/src/app/specialists/[id]/page.tsx`. This booking step is the
+  third caller of that visual pattern, so the duplication is extracted
+  now per the project's existing "extract on second/third caller"
+  approach — extraction of this exact component was previously deferred
+  in the Stage 13 entry "`/specialists` cards are inline JSX, not a
+  reusable `SpecialistCard` component — extraction deferred until a
+  second caller with known requirements exists," and this booking step
+  is that caller (in fact the third, counting the detail page).
+- **A new component, not an extension of `ServiceSelectionGrid.tsx`,**
+  renders the list of real specialists returned by
+  `GET /specialists/?service=<id>`, built from the shared `SpecialistCard`
+  and reusing the existing select-then-confirm interaction pattern (card
+  selection + a "Продовжити" button disabled until something is
+  selected). Rationale: specialist cards and service cards have
+  materially different data shapes (photo/rating/bio vs.
+  duration/price/description), so generalizing `ServiceSelectionGrid`
+  itself would mean branching its rendering on shape rather than reusing
+  it cleanly.
+- **"Any specialist" is not a synthetic card inside this grid.** It is
+  rendered as a separate selectable element positioned above the grid,
+  labeled "Будь-який спеціаліст".
+- **Selecting "any specialist" and selecting a specific specialist card
+  are mutually exclusive:** choosing one clears the other's selected
+  state. The confirm button is enabled when either is selected.
+- **URL encoding is unchanged by this entry.** Choosing a specific
+  specialist still resolves to `specialist=<id>`; choosing "any" still
+  resolves to `specialist=any` — both already decided in the "Stage 14
+  implementation decisions" entry above.
+
 This surfaced a second, pre-existing gap: the container-to-container
 request reaches Django but is rejected with `DisallowedHost` — see next
 entry.
