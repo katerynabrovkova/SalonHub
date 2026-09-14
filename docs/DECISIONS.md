@@ -2495,6 +2495,44 @@ This surfaced a second, pre-existing gap: the container-to-container
 request reaches Django but is rejected with `DisallowedHost` — see next
 entry.
 
+### Stage 14 UI decisions: booking step 3 (date/time selection)
+
+Decided 14.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during read-only recon ahead of building step 3.
+
+- **Step 3's scope is time selection only.** It calls `AvailabilityView`
+  exclusively, never `SpecialistsAtTimeView`. Resolving which specific
+  specialist serves an "any specialist" booking is explicitly out of
+  scope here — that resolution (the "least busy that day" rule) happens
+  later, at the confirmation step immediately before payment, per the
+  "Stage 14 scope revision" entry above.
+- **Both entry paths render through the same UI and the same
+  `AvailabilityView` call.** A specific specialist already chosen and
+  `specialist=any` differ only in whether the `specialist` query param
+  is included in the request — no branching UI for the two cases.
+- **Data fetching is one `AvailabilityView` call per 14-day window**
+  (`date_from`/`date_to`), not one call per day and not the full
+  `max_advance_days` range in a single call. The flat `available_times`
+  list returned is grouped into per-day buckets client-side (JS), so
+  selecting a different day within the loaded window renders instantly
+  with no additional request. A "next window" action, triggered when the
+  user scrolls past the loaded 14 days, fetches the next 14-day range.
+  Rationale: avoids both an oversized single response across the full
+  booking window and a chatty per-day request pattern.
+- **Days with no available times render as disabled/unselectable in the
+  day strip, with no distinction between "outside the booking window,"
+  "fully booked," or any other reason.** The API returns absence, not a
+  reason code — existing backend behavior, not a gap to fix here.
+- **Selecting a time slot appends `slot=<iso datetime>` to the URL** and
+  advances the flow to the next step. This value must be built with
+  `encodeURIComponent()` (or equivalent): `available_times` are
+  salon-local ISO datetimes with a timezone offset (e.g. `+03:00`), and a
+  literal `+` is unsafe unescaped in a query string. No appointment row
+  and no hold exist yet at this point.
+- **This is the first date/time UI in the codebase.** No existing
+  calendar/date-picker component is being reused — recon confirmed none
+  exists anywhere in the project.
+
 ### Fix: add `backend` to DJANGO_ALLOWED_HOSTS
 
 Decided and implemented 11.09.2026.
