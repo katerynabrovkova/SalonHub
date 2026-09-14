@@ -2149,6 +2149,29 @@ code. Decided only; none of this is implemented yet.
   `frontend/src/app/booking/page.test.tsx:6`, which currently cites
   `services/[id]/page.tsx`'s `notFound()` usage as the reason its own
   `notFound` mock throws.
+- The service card's click target navigates straight to
+  `/booking?entry=service&service=<id>` (confirmed against
+  `booking/page.tsx`'s `entry`/`service` param handling) — clicking the
+  card books the service directly, rather than opening the popup. A
+  separate "i" (info) button opens `ServiceInfoPopover` instead.
+- Card HTML structure: the card is a relatively-positioned container;
+  the `Link` inside it uses the "stretched link" pattern (`absolute
+  inset-0`, covering the full card) for its click target, rather than
+  wrapping the whole card in an `<a>`. The "i" button is a sibling of
+  the `Link` (not nested inside it), given a higher `z-index` so it
+  remains clickable above the stretched link. An interactive `<button>`
+  nested inside an `<a>` is invalid HTML and produces unpredictable
+  click behavior, which is why the stretched-link pattern is used
+  instead of the naive "wrap everything in one link" approach.
+- `getServicesPage.ts`'s `Service` interface gets `description: string
+  | null` added. The field has been present in the API response
+  (`ServiceReadSerializer.Meta.fields`) since the `d1cd709 feat: add
+  Service.description and ServiceCategory.photo fields` migration; it
+  was simply never added to this frontend type, confirmed by re-
+  checking the serializer's field list during recon.
+- `ServiceInfoPopover` shows: `name`, `description`, `duration_minutes`,
+  `price`, `category.name`. `buffer_minutes`, `ordering`, `is_active`,
+  and the timestamps are operational fields, not shown.
 
 ### Stage 14 scope revision: booking flow entry points and specialist assignment
 
