@@ -2227,6 +2227,47 @@ through concrete entry points during Stage 14 planning, not decided or
 reviewed in advance of this entry — recorded here as a revision for
 that reason, not folded silently into the earlier entry.
 
+### Stage 14 implementation decisions: "any specialist" encoding, specialist-services shape, specialist filter/detail page
+
+Decided 14.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during read-only recon ahead of building step 2+ of the
+booking flow.
+
+- **"Any specialist" is encoded as the literal URL value
+  `specialist=any`**, not an empty/omitted param. Rationale:
+  `booking/page.tsx`'s existing step-3 guard already requires
+  `specialist` to be truthy for that step to render at all; `any` is
+  short and unambiguous as a URL value alongside real numeric ids.
+- **Step 2 for `entry=specialist` (the flat list of that specialist's
+  services) needs `name` + `duration_minutes` + `price`**, not just
+  `id`/`name`. This will **not** be added to `ServiceMiniSerializer`
+  (`specialists/serializers.py`) — it is deliberately minimal
+  (id/name only), guarded by
+  `test_service_mini_serializer_excludes_new_fields` and
+  `test_service_category_mini_serializer_excludes_new_fields` from the
+  Stage 13 reopened work; extending its field list would weaken/
+  contradict those tests. Instead, a new dedicated serializer will be
+  added for this endpoint's needs, sourced from the same prefetched
+  `Specialist.services` relation `SpecialistReadSerializer` already
+  uses (`specialists/views.py`'s `_with_card_annotations`) — no new
+  query pattern, just a different output shape over the same data.
+- **`GET /specialists/` already supports `?service=<id>`**, confirmed
+  by recon: it landed ahead of schedule in the Stage 13
+  "specialists-by-service filter" amendment
+  (`specialists/views.py`'s `SpecialistListCreateView.get_queryset`),
+  before Stage 14 planning even asked for it. `getSpecialistsPage.ts`
+  needs the same optional-param extension `getServicesPage.ts` already
+  got for `category` — including switching its current manual ternary
+  URL-building (`page === 1 ? ... : ...?page=...`) to the
+  `URLSearchParams` approach `getServicesPage.ts` uses, for consistency
+  between the two fetch helpers.
+- **`/specialists/[id]` (detail page, "Book" button →
+  `/booking?entry=specialist&specialist=<id>&step=2`) doesn't exist
+  yet** and is the next concrete piece to build. Confirmed by recon:
+  its data already exists via the existing `SpecialistDetailView`
+  (`GET /specialists/<id>/`) — no new backend endpoint is needed for
+  the detail page itself.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
