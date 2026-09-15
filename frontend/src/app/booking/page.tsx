@@ -20,6 +20,7 @@ import { SALON_SLUG_HEADER } from "@/middleware";
 
 import ServiceSelectionGrid from "../services/ServiceSelectionGrid";
 import SpecialistSelectionGrid from "../specialists/SpecialistSelectionGrid";
+import ContactInfoForm from "./ContactInfoForm";
 import DateTimeSelectionGrid from "./DateTimeSelectionGrid";
 
 interface BookingPageProps {
@@ -80,6 +81,12 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
 
   if (step === 3) {
     if (!service || !specialist) {
+      notFound();
+    }
+  }
+
+  if (step === 4) {
+    if (!service || !specialist || !paramToString(params.slot)) {
       notFound();
     }
   }
@@ -177,6 +184,38 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
           entry={entry === "service" ? "service" : "specialist"}
           service={service}
           specialist={specialist}
+        />
+      </main>
+    );
+  }
+
+  if (step === 4) {
+    const slug = (await headers()).get(SALON_SLUG_HEADER);
+    if (slug === null) {
+      return (
+        <main className="p-8 text-center text-zinc-600 dark:text-zinc-400">
+          <p>The platform is still in development.</p>
+        </main>
+      );
+    }
+
+    // Re-asserts the same non-undefined condition the earlier step-4 guard
+    // above already enforces at runtime — needed here only because that
+    // guard's type narrowing doesn't survive past its own `if` block, same
+    // reasoning as step 3's own re-check above.
+    const slot = paramToString(params.slot);
+    if (service === undefined || specialist === undefined || slot === undefined) {
+      notFound();
+    }
+
+    return (
+      <main className="flex flex-col gap-6 p-8">
+        <ContactInfoForm
+          slug={slug}
+          entry={entry === "service" ? "service" : "specialist"}
+          service={service}
+          specialist={specialist}
+          startDatetime={decodeURIComponent(slot)}
         />
       </main>
     );

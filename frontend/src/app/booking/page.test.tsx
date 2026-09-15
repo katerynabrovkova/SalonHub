@@ -45,6 +45,7 @@ import { getSpecialistsPage, type Specialist } from "@/lib/specialists/getSpecia
 import { SALON_SLUG_HEADER } from "@/middleware";
 import { headers } from "next/headers";
 
+import { BookingContactInfoProvider } from "./BookingContactInfoContext";
 import BookingPage from "./page";
 
 const mockedHeaders = vi.mocked(headers);
@@ -253,12 +254,74 @@ describe("BookingPage routing skeleton", () => {
     ).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
-  it("test_step_beyond_3_renders_not_implemented_placeholder", async () => {
+  it("test_step_beyond_4_renders_not_implemented_placeholder", async () => {
     const element = await BookingPage({
-      searchParams: searchParamsOf({ entry: "service", service: "5", step: "4" }),
+      searchParams: searchParamsOf({ entry: "service", service: "5", step: "5" }),
     });
     render(element);
     expect(screen.getByTestId("step-not-implemented")).toBeInTheDocument();
+  });
+
+  it("test_step4_renders_contact_info_form_with_decoded_slot", async () => {
+    mockSlug("bella-demo");
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "any",
+        step: "4",
+        slot: encodeURIComponent("2026-08-17T09:00:00+03:00"),
+      }),
+    });
+    render(<BookingContactInfoProvider>{element}</BookingContactInfoProvider>);
+
+    expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByLabelText("Телефон")).toBeInTheDocument();
+  });
+
+  it("test_step4_null_slug_shows_platform_message", async () => {
+    mockSlug(null);
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "any",
+        step: "4",
+        slot: encodeURIComponent("2026-08-17T09:00:00+03:00"),
+      }),
+    });
+    render(element);
+
+    expect(screen.getByText("The platform is still in development.")).toBeInTheDocument();
+  });
+
+  it("test_step4_without_specialist_calls_not_found", async () => {
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          step: "4",
+          slot: encodeURIComponent("2026-08-17T09:00:00+03:00"),
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("test_step4_without_slot_calls_not_found", async () => {
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          specialist: "any",
+          step: "4",
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });
 
