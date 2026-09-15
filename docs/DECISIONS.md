@@ -2051,17 +2051,28 @@ stage-by-stage workflow.
   before contact info — service, specialist, slot, and the current
   step number — are held in URL query params, so the flow survives a
   page refresh and a specific step can be shared or returned to.
-  Contact info (name, phone) is held only in local component state
-  (React `useState`), never persisted to the URL, storage, or
-  elsewhere — deliberately, since it is personal data and the earlier
-  steps' choices are not.
+  Contact info (name, email, phone — corrected 15.09.2026; this entry
+  originally named only "name, phone" and omitted email despite the
+  serializer requiring all three, see "Stage 14 implementation
+  decisions: step 4 contact-info form" below) is held only in local
+  component state (React `useState`), never persisted to the URL,
+  storage, or elsewhere — deliberately, since it is personal data and
+  the earlier steps' choices are not. The "local component state
+  (React `useState`)" mechanism named here is itself superseded by the
+  entry below (a React Context in a new client `layout.tsx`), for
+  reasons recorded there — this entry's field list is corrected in
+  place, but its state-container detail is now stale and should be
+  read alongside that entry.
 - **Slot conflict handling:** if the backend rejects appointment
   creation because the exclusion constraint caught a concurrent
   booking of the same slot, the frontend returns the user to the
-  date/time selection step. Contact info already entered (name, phone)
-  is preserved in local component state rather than cleared — a slot
-  conflict is unrelated to the privacy rationale for keeping contact
-  info out of the URL, so there is no reason to discard it.
+  date/time selection step. Contact info already entered (name, email,
+  phone — corrected 15.09.2026, same reason as above) is preserved in
+  local component state rather than cleared — a slot conflict is
+  unrelated to the privacy rationale for keeping contact info out of
+  the URL, so there is no reason to discard it. This behavior itself is
+  unchanged by the entry below; only its technical mechanism is
+  revised there.
 - **`/booking/pay` must branch on appointment status, not just
   guest-token validity.** `HasValidGuestToken` only confirms the token
   itself hasn't expired or been tampered with — that is orthogonal to
@@ -2560,6 +2571,49 @@ workflow, during read-only recon ahead of building step 3.
 - **This is the first date/time UI in the codebase.** No existing
   calendar/date-picker component is being reused — recon confirmed none
   exists anywhere in the project.
+
+### Stage 14 implementation decisions: step 4 contact-info form
+
+Decided 15.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during read-only recon ahead of building step 4 of the
+booking flow.
+
+- **Contact-info state (name, email, phone) is held in a React
+  Context, defined in a new client `layout.tsx` for the `/booking`
+  route** — not in local `useState` inside a step-4 form component, as
+  the earlier "Stage 14 planning" entry's now-corrected text implied.
+  This is necessary, not merely a style choice: `booking/page.tsx` is a
+  Server Component, confirmed by recon to hold no state across step
+  navigations — each step's page render is independent, and no
+  `layout.tsx` currently exists under `/booking` (recon also confirmed
+  this: only the root `layout.tsx` exists, itself a stateless Server
+  Component). A plain `useState` local to a step-4 form component
+  cannot survive the "return to step 3 on slot conflict, then forward
+  to step 4 again" round trip the existing slot-conflict-recovery
+  decision (above) requires, because that round trip is two separate
+  Server Component page renders with no shared instance between them.
+  A client `layout.tsx` is the one part of the App Router tree that
+  persists across page-level navigations within the same route,
+  making it the correct — and minimal — place for this state: no
+  existing step 2/3 component needs to change to accommodate it.
+- **This does not change the existing slot-conflict recovery behavior
+  itself** (return to step 3, preserve contact info, docs/DECISIONS.md
+  § Stage 14 planning, "Slot conflict handling"). It only supplies the
+  technical mechanism that makes that behavior actually possible given
+  the Server Component structure — the earlier entry's "local
+  component state (React `useState`)" mechanism detail is superseded
+  by this one; the behavior it describes is not.
+- **The guest booking `POST bookings/` call needs a new, minimal
+  client-side fetch helper.** Neither existing client fetcher fits:
+  `guestClient.ts`'s `guestApiRequest` requires an already-issued guest
+  token as a parameter, but this call is the one that *issues* the
+  token — there is no token yet to send. `client.ts`'s `apiRequest`
+  sends cookie credentials (`credentials: "include"`) and echoes a CSRF
+  cookie, built for the cookie/session-authenticated admin/client
+  flows; this endpoint is `AllowAny` with no session to speak of. The
+  new helper mirrors both existing ones' URL-building convention
+  (`NEXT_PUBLIC_API_URL` + `/api/v1/salons/<slug>` + path) without a
+  token header or cookie credentials.
 
 ### Fix: add `backend` to DJANGO_ALLOWED_HOSTS
 
