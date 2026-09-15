@@ -2233,6 +2233,18 @@ and how "any specialist" is resolved.
   specialists qualified for the service, working that day, and
   available at the chosen date/time, prefer whichever has fewer
   appointments already booked that day.
+  - Clarification (15.09.2026), tie-break: when two or more candidates
+    have an equal count of same-day appointments, the tie is broken
+    randomly among them. This same ordering (sorted by busyness
+    ascending, randomized within tie groups) also defines the retry
+    sequence used when the first-choice specialist's slot creation
+    fails due to a concurrent booking conflict (per the
+    `create_appointment` retry-on-`ExclusionViolation` approach already
+    discussed for this feature) — not a separate re-roll each time, one
+    ordering computed once and walked in sequence. Testability: the
+    randomization must be injectable/mockable (e.g. accept an optional
+    `random.Random` instance or equivalent seam), so tests asserting
+    tie-break behavior are deterministic and not flaky.
 
 Rationale: the original Stage 14 planning entry assumed a bare
 `/booking` starting point and left "any specialist" unresolved past
