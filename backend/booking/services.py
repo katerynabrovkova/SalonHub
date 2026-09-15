@@ -20,10 +20,13 @@ tests/test_booking_create_appointment.py in the same change.
 
 import datetime as dt
 import logging
+import random
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import psycopg
 from django.db import IntegrityError, transaction
+from django.db.models import Count
 
 from accounts.models import Customer
 from accounts.services import get_or_create_guest_customer
@@ -34,7 +37,7 @@ from catalog.models import Service
 from core.exceptions import InvalidStateTransitionError, SlotNotOfferedError, SlotUnavailableError
 from notifications.models import NotificationTrigger
 from notifications.services import record_and_dispatch_notification
-from scheduling.services import compute_candidate_start_times
+from scheduling.services import compute_candidate_start_times, compute_multi_specialist_availability
 from specialists.models import Specialist
 from tenants.models import Salon
 
@@ -121,16 +124,129 @@ def create_appointment(
             raise
 
 
+def select_specialist_for_any(
+    candidates: list[Specialist],
+    salon: Salon,
+    date: dt.date,
+    rng: random.Random | None = None,
+) -> list[Specialist]:
+    """
+    docs/DECISIONS.md § Stage 14 scope revision ("Assignment rule") and its
+    15.09.2026 tie-break clarification. `candidates` is a list of
+    specialists already confirmed free at the chosen slot — e.g. one value
+    from compute_multi_specialist_availability's per-slot mapping, not the
+    full qualifying-specialist set.
+
+    Orders `candidates` by same-day ACTIVE_APPOINTMENT_STATUSES appointment
+    count ascending (one aggregate query, not one per candidate),
+    randomizing within equal-count groups via `rng` — a real random.Random()
+    built here when not passed, so tests inject a seeded instance for a
+    deterministic order. Returns the full ordering, not just the top pick:
+    create_appointment_for_any_specialist walks it as the retry sequence on
+    a later candidate's booking conflict — one ordering computed once, not
+    re-rolled per attempt.
+    """
+    if not candidates:
+        return []
+    if rng is None:
+        rng = random.Random()
+
+    tz = ZoneInfo(salon.timezone)
+    day_start = dt.datetime.combine(date, dt.time.min, tzinfo=tz)
+    day_end = day_start + dt.timedelta(days=1)
+
+    candidate_ids = [specialist.id for specialist in candidates]
+    counts = dict.fromkeys(candidate_ids, 0)
+    rows = (
+        Appointment.objects.filter(
+            salon=salon,
+            specialist_id__in=candidate_ids,
+            status__in=ACTIVE_APPOINTMENT_STATUSES,
+            start_datetime__gte=day_start,
+            start_datetime__lt=day_end,
+        )
+        .values("specialist_id")
+        .annotate(appointment_count=Count("id"))
+    )
+    for row in rows:
+        counts[row["specialist_id"]] = row["appointment_count"]
+
+    groups: dict[int, list[Specialist]] = {}
+    for specialist in candidates:
+        groups.setdefault(counts[specialist.id], []).append(specialist)
+
+    ordered: list[Specialist] = []
+    for count in sorted(groups):
+        group = groups[count]
+        rng.shuffle(group)
+        ordered.extend(group)
+    return ordered
+
+
+def create_appointment_for_any_specialist(
+    *,
+    salon: Salon,
+    service: Service,
+    customer: Customer,
+    start_datetime: dt.datetime,
+    now: dt.datetime,
+    rng: random.Random | None = None,
+) -> Appointment:
+    """
+    docs/DECISIONS.md § Stage 14 scope revision + tie-break clarification.
+    Resolves who's free at `start_datetime` via
+    compute_multi_specialist_availability, orders them with
+    select_specialist_for_any, then attempts create_appointment once per
+    candidate in that order — the same ordering is the retry sequence, not
+    a fresh roll per attempt. A candidate's SlotUnavailableError (raised
+    inside create_appointment, including its own ExclusionViolation
+    translation) moves on to the next candidate; SlotUnavailableError is
+    only re-raised once every candidate has been tried and failed.
+
+    create_appointment itself is untouched by this — the specific-specialist
+    path it already serves keeps its exact existing shape.
+    """
+    local_date = start_datetime.astimezone(ZoneInfo(salon.timezone)).date()
+    availability = compute_multi_specialist_availability(
+        service=service, salon=salon, date_from=local_date, date_to=local_date, now=now
+    )
+    candidates = availability.get(start_datetime, [])
+    if not candidates:
+        logger.warning(
+            "create_appointment_for_any_specialist: slot not offered (start_datetime=%s)",
+            start_datetime.isoformat(),
+        )
+        raise SlotNotOfferedError()
+
+    ordered = select_specialist_for_any(candidates, salon, local_date, rng=rng)
+
+    last_error = SlotUnavailableError()
+    for specialist in ordered:
+        try:
+            return create_appointment(
+                salon=salon,
+                specialist=specialist,
+                service=service,
+                customer=customer,
+                start_datetime=start_datetime,
+                now=now,
+            )
+        except SlotUnavailableError as exc:
+            last_error = exc
+    raise last_error
+
+
 def create_guest_appointment(
     *,
     salon: Salon,
-    specialist: Specialist,
+    specialist: Specialist | Literal["any"],
     service: Service,
     start_datetime: dt.datetime,
     now: dt.datetime,
     customer_name: str,
     customer_email: str,
     customer_phone: str,
+    rng: random.Random | None = None,
 ) -> tuple[Appointment, str]:
     """
     docs/DECISIONS.md § Stage 7.C-bis decisions. Guest path only. The outer
@@ -138,20 +254,37 @@ def create_guest_appointment(
     "no orphaned Customer / no appointment without a token" guarantee —
     ATOMIC_REQUESTS is not set, so there is no request-level atomicity to
     lean on. create_appointment's own internal atomic() nests as a
-    savepoint inside this one.
+    savepoint inside this one, same as create_appointment_for_any_specialist's
+    own nested per-candidate atomic() blocks.
+
+    `specialist` is either an already-resolved Specialist (existing path,
+    unchanged) or the literal string "any" (docs/DECISIONS.md § Stage 14
+    scope revision), dispatched to create_appointment_for_any_specialist.
+    `rng` only matters on the "any" path — passed through for test
+    determinism, ignored otherwise.
     """
     with transaction.atomic():
         customer = get_or_create_guest_customer(
             salon=salon, name=customer_name, email=customer_email, phone=customer_phone
         )
-        appointment = create_appointment(
-            salon=salon,
-            specialist=specialist,
-            service=service,
-            customer=customer,
-            start_datetime=start_datetime,
-            now=now,
-        )
+        if specialist == "any":
+            appointment = create_appointment_for_any_specialist(
+                salon=salon,
+                service=service,
+                customer=customer,
+                start_datetime=start_datetime,
+                now=now,
+                rng=rng,
+            )
+        else:
+            appointment = create_appointment(
+                salon=salon,
+                specialist=specialist,
+                service=service,
+                customer=customer,
+                start_datetime=start_datetime,
+                now=now,
+            )
         raw_token, _token_row = issue_guest_token(appointment)
         record_and_dispatch_notification(
             salon=salon,

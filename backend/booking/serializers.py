@@ -25,6 +25,22 @@ class AppointmentGuestSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):
+    """
+    Accepts either a real specialist pk or the literal string "any"
+    (docs/DECISIONS.md § Stage 14 implementation decisions, "'Any
+    specialist' is encoded as the literal URL value specialist=any").
+    Anything else falls through to PrimaryKeyRelatedField's own pk
+    validation/error — this is exact acceptance of "any" or a valid pk, not
+    a loosened "accept anything" field.
+    """
+
+    def to_internal_value(self, data: object) -> "Specialist | str":
+        if data == "any":
+            return "any"
+        return super().to_internal_value(data)
+
+
 class GuestBookingRequestSerializer(serializers.Serializer):
     """
     Input validation for the guest booking POST endpoint (docs/DECISIONS.md §
@@ -38,10 +54,12 @@ class GuestBookingRequestSerializer(serializers.Serializer):
     class-body placeholder queryset is a harmless, always-empty,
     non-tenant-scoped one. `start_datetime` reuses
     scheduling/serializers.py's `_OffsetRequiredDateTimeField` rather than
-    duplicating the naive-datetime rejection.
+    duplicating the naive-datetime rejection. `specialist` uses
+    SpecialistOrAnyField, above, so `specialist=any` (docs/DECISIONS.md §
+    Stage 14 scope revision) validates alongside a real pk.
     """
 
-    specialist = serializers.PrimaryKeyRelatedField(queryset=Specialist.unscoped_objects.none())
+    specialist = SpecialistOrAnyField(queryset=Specialist.unscoped_objects.none())
     service = serializers.PrimaryKeyRelatedField(queryset=Service.unscoped_objects.none())
     start_datetime = _OffsetRequiredDateTimeField()
     customer_name = serializers.CharField(max_length=255)
