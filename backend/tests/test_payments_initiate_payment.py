@@ -102,7 +102,9 @@ def _make_pending_appointment(salon, specialist, service, customer, *, start=STA
     )
 
 
-def _make_existing_payment(salon, appt, *, status, provider_reference_id="existing_ref"):
+def _make_existing_payment(
+    salon, appt, *, status, provider_reference_id="existing_ref", provider_data=None
+):
     with tenant_context(salon.id):
         return Payment.objects.create(
             salon=salon,
@@ -111,6 +113,7 @@ def _make_existing_payment(salon, appt, *, status, provider_reference_id="existi
             currency=salon.currency,
             status=status,
             provider_reference_id=provider_reference_id,
+            provider_data=provider_data,
         )
 
 
@@ -179,7 +182,7 @@ def test_initiate_payment_returns_provider_data_from_provider_response(
     assert provider_data == "mock_provider_data"
 
 
-def test_initiate_payment_does_not_store_provider_data_on_the_payment_row(
+def test_initiate_payment_persists_provider_data_on_the_payment_row(
     salon, specialist, service, customer
 ):
     appt = _make_pending_appointment(salon, specialist, service, customer)
@@ -190,10 +193,10 @@ def test_initiate_payment_does_not_store_provider_data_on_the_payment_row(
             appointment_id=appt.id, salon=salon, provider=provider, now=NOW
         )
 
-    assert not hasattr(payment, "provider_data")
+    assert payment.provider_data == "mock_provider_data"
     with tenant_context(salon.id):
         row = Payment.objects.get(pk=payment.pk)
-    assert not hasattr(row, "provider_data")
+    assert row.provider_data == "mock_provider_data"
 
 
 # --- 2. Amount / currency snapshot rules ---------------------------------
@@ -386,6 +389,28 @@ def test_initiate_payment_existing_pending_payment_returns_provider_data_none(
     assert provider_data is None
 
 
+def test_initiate_payment_existing_pending_payment_returns_stored_provider_data(
+    salon, specialist, service, customer
+):
+    appt = _make_pending_appointment(salon, specialist, service, customer)
+    _make_existing_payment(
+        salon,
+        appt,
+        status=PaymentStatus.PENDING,
+        provider_data="https://secure.example/invoice/abc",
+    )
+    provider = _FakeProvider()
+
+    with tenant_context(salon.id):
+        payment, provider_data, _ = initiate_payment(
+            appointment_id=appt.id, salon=salon, provider=provider, now=NOW
+        )
+
+    assert provider_data == "https://secure.example/invoice/abc"
+    assert payment.provider_data == "https://secure.example/invoice/abc"
+    assert provider.calls == []
+
+
 def test_initiate_payment_existing_pending_payment_does_not_call_provider_again(
     salon, specialist, service, customer
 ):
@@ -451,6 +476,28 @@ def test_initiate_payment_existing_failed_payment_calls_provider_again(
         initiate_payment(appointment_id=appt.id, salon=salon, provider=provider, now=NOW)
 
     assert len(provider.calls) == 1
+
+
+def test_initiate_payment_existing_failed_payment_retry_overwrites_stale_provider_data(
+    salon, specialist, service, customer
+):
+    appt = _make_pending_appointment(salon, specialist, service, customer)
+    existing = _make_existing_payment(
+        salon, appt, status=PaymentStatus.FAILED, provider_data="stale_old_url"
+    )
+    provider = _FakeProvider()
+
+    with tenant_context(salon.id):
+        payment, provider_data, _ = initiate_payment(
+            appointment_id=appt.id, salon=salon, provider=provider, now=NOW
+        )
+
+    assert payment.pk == existing.pk
+    assert provider_data == "mock_provider_data"
+    assert payment.provider_data == "mock_provider_data"
+    with tenant_context(salon.id):
+        row = Payment.objects.get(pk=existing.pk)
+    assert row.provider_data == "mock_provider_data"
 
 
 # --- 7. Nonexistent appointment / tenant isolation ------------------------

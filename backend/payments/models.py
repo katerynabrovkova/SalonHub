@@ -35,6 +35,14 @@ class Payment(TenantScopedModel, TimeStamped):
         max_length=32, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
     )
     provider_reference_id = models.CharField(max_length=255, blank=True, db_index=True)
+    # Provider-neutral hand-off data returned alongside provider_reference_id
+    # by PaymentIntent (e.g. a hosted-payment-page URL) — whatever the
+    # frontend needs to continue payment, or None. Stored so a guest
+    # re-requesting pay while the Payment is still PENDING sees the same
+    # link again instead of losing it (docs/DECISIONS.md § Stage 14 payment
+    # step). null for MockPaymentProvider, which always returns None, and
+    # for every pre-existing row.
+    provider_data = models.CharField(max_length=1024, null=True, blank=True)
     # Stuck-refund alert marker, not a new state-machine status — REFUND_PENDING
     # already describes the state; this is a flag on top of it, set by a
     # future background sweep (docs/DECISIONS.md § Stage 8 decisions). No

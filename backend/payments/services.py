@@ -54,11 +54,14 @@ def initiate_payment(
     network call to the provider, mirroring the booking/payment-separation
     rule (DB transactions stay short; network calls live outside them).
 
-    Idempotency: an existing PENDING Payment is returned as-is, with
-    provider_data=None, and the provider is not called again. An existing
-    FAILED Payment is retried in place — same row (same pk), transitioned
-    FAILED -> PENDING with a new provider_reference_id — never a second row,
-    since Payment.appointment is a OneToOneField.
+    Idempotency: an existing PENDING Payment is returned as-is, with its
+    already-stored provider_data (whatever the original start_payment call
+    got back — None for MockPaymentProvider), and the provider is not
+    called again. An existing FAILED Payment is retried in place — same row
+    (same pk), transitioned FAILED -> PENDING with a new
+    provider_reference_id and provider_data overwritten from the new
+    intent — never a second row, since Payment.appointment is a
+    OneToOneField.
 
     The third return element, `created`, is a domain fact for the caller to
     map to an HTTP status (docs/DECISIONS.md § Stage 8.D decisions) — this
@@ -73,7 +76,7 @@ def initiate_payment(
 
         existing_payment = Payment.objects.filter(appointment=appointment).first()
         if existing_payment is not None and existing_payment.status == PaymentStatus.PENDING:
-            return existing_payment, None, False
+            return existing_payment, existing_payment.provider_data, False
 
     deposit_amount = _compute_deposit_amount(appointment)
     try:
@@ -88,7 +91,8 @@ def initiate_payment(
     if existing_payment is not None:
         existing_payment.status = PaymentStatus.PENDING
         existing_payment.provider_reference_id = intent.provider_reference_id
-        existing_payment.save(update_fields=["status", "provider_reference_id"])
+        existing_payment.provider_data = intent.provider_data
+        existing_payment.save(update_fields=["status", "provider_reference_id", "provider_data"])
         payment = existing_payment
     else:
         payment = Payment.objects.create(
@@ -98,6 +102,7 @@ def initiate_payment(
             currency=salon.currency,
             status=PaymentStatus.PENDING,
             provider_reference_id=intent.provider_reference_id,
+            provider_data=intent.provider_data,
         )
 
     return payment, intent.provider_data, True
