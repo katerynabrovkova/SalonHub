@@ -227,6 +227,17 @@ PLATFORM_DOMAIN = env("PLATFORM_DOMAIN", default="salonhub.com")
 # (docs/DECISIONS.md § Stage 3 decisions).
 PASSWORD_RESET_TIMEOUT = 60 * 60  # 1 hour
 
+# --- Payments: WayForPay -----------------------------------------------------
+# Optional, empty-string default — mirrors EMAIL_HOST_USER's pattern above,
+# not DJANGO_SECRET_KEY's hard-required one — so `docker compose up` boots
+# without real sandbox keys. WayForPayProvider is not wired as any view's
+# default provider_class yet; MockPaymentProvider remains the default
+# everywhere (docs/DECISIONS.md § "WayForPayProvider: first-time technical
+# conventions").
+WAYFORPAY_MERCHANT_ACCOUNT = env("WAYFORPAY_MERCHANT_ACCOUNT", default="")
+WAYFORPAY_SECRET_KEY = env("WAYFORPAY_SECRET_KEY", default="")
+WAYFORPAY_DOMAIN_NAME = env("WAYFORPAY_DOMAIN_NAME", default="")
+
 # --- CORS ------------------------------------------------------------------
 #
 # The browser frontend calls this API from a different origin and must send

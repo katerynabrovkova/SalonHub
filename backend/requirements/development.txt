@@ -9,3 +9,11 @@ mypy==1.19.1
 # 5.2.x line matches our pinned Django 5.2 LTS (full support, vs. only
 # partial 5.2 support from the 6.0.x line built for Django 6.0).
 django-stubs[compatible-mypy]==5.2.9
+# Mocks WayForPayProvider's outbound `requests` call in tests, asserting on
+# the real request shape (URL, body, signature) rather than only that a
+# function was called — see docs/DECISIONS.md § "WayForPayProvider:
+# first-time technical conventions". Test-only.
+responses==0.26.3
+# Type stubs for requests (base.txt), required for mypy per Coding
+# conventions in CLAUDE.md. Type-checking only, not a runtime dependency.
+types-requests==2.33.0.20260906

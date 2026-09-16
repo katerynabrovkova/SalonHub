@@ -14,3 +14,7 @@ django-environ==0.14.0
 # credentials (httpOnly session cookie) — see docs/DECISIONS.md § Stage 12.
 # 4.9.0 requires django>=4.2, asgiref>=3.6 — both satisfied.
 django-cors-headers==4.9.0
+# WayForPayProvider's outbound Create Invoice call — see docs/DECISIONS.md
+# § "WayForPayProvider: first-time technical conventions". Runtime
+# dependency, not dev-only: this provider runs in production, not just tests.
+requests==2.32.5
