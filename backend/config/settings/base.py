@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 import environ
+from corsheaders.defaults import default_headers
 
 # backend/config/settings/base.py -> backend/config/settings -> backend/config -> backend/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -244,6 +245,15 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^http://[\w-]+\.localhost:3000$",
     rf"^https://[\w-]+\.{re.escape(PLATFORM_DOMAIN)}$",
 ]
+
+# guestApiRequest (frontend/src/lib/api/guestClient.ts) sends a custom
+# X-Guest-Token header on every guest-token-authenticated request
+# (detail/cancel/pay), which forces a CORS preflight. django-cors-headers'
+# own default_headers list doesn't include it, so the preflight never
+# advertised it as allowed and the browser silently blocked the real
+# request after a 200 OPTIONS — extend, don't replace, the defaults so
+# Content-Type and the rest keep working.
+CORS_ALLOW_HEADERS = [*default_headers, "x-guest-token"]
 
 # --- CSRF ------------------------------------------------------------------
 #
