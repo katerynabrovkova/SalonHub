@@ -2791,3 +2791,35 @@ not going live). None of this is implemented yet.
   Verify's) — this must be implemented and tested against real
   documented signature examples, not a single generic helper assumed to
   work for every WayForPay endpoint.
+
+### Stage 8 refund decision, revisited: `PaymentProvider.refund()` gains an `amount` parameter
+
+Decided 16.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during the same WayForPay integration recon as the entry above.
+None of this is implemented yet.
+
+The original Stage 8 decision, in `payments/providers/base.py`'s `refund`
+docstring, reads:
+
+> Reverses the specific existing transaction identified by
+> provider_reference_id. No amount argument: business rules always
+> refund the full deposit or nothing, so the amount is implied by the
+> original payment.
+
+- **That business rule is unchanged.** Refunds are still always the full
+  deposit or nothing — this decision does not reopen partial refunds.
+  `initiate_refund` (`payments/services.py`) will always pass
+  `payment.amount`, the value already on the row it just fetched under
+  `select_for_update`, never a partial or separately-computed value.
+- **What changes is mechanical, not business logic: `refund()` gains an
+  explicit `amount: Decimal` parameter**, mirroring `start_payment`'s
+  existing `amount` param. Cause: WayForPay's real refund API requires an
+  explicit amount field even for a full refund — a requirement the
+  original Stage 8 design couldn't anticipate, since it was written
+  before any real provider was integrated and reasonably assumed the
+  amount could stay implied.
+- **This is a technical interface widening prompted by a concrete
+  external-API constraint discovered during WayForPay integration, not a
+  reversal of the "full deposit or nothing" business decision.** The two
+  are easy to conflate because they touch the same method signature; they
+  are independent.
