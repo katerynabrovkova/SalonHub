@@ -89,7 +89,7 @@ class _FakeProvider:
     def start_payment(self, *, amount, currency, reference):
         raise NotImplementedError("not exercised by webhook tests")
 
-    def refund(self, *, provider_reference_id, reference):
+    def refund(self, *, provider_reference_id, reference, amount):
         type(self).calls.append(
             {"provider_reference_id": provider_reference_id, "reference": reference}
         )

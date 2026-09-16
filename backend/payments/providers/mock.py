@@ -23,7 +23,9 @@ class MockPaymentProvider(PaymentProvider):
             provider_data=None,
         )
 
-    def refund(self, *, provider_reference_id: str, reference: str) -> RefundIntent:
+    def refund(
+        self, *, provider_reference_id: str, reference: str, amount: Decimal
+    ) -> RefundIntent:
         return RefundIntent(provider_reference_id=f"mock_refund_{uuid4().hex}")
 
     def verify_signature(self, *, payload: bytes, signature: str) -> bool:

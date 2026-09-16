@@ -150,6 +150,7 @@ def initiate_refund(
         provider.refund(
             provider_reference_id=payment.provider_reference_id,
             reference=str(payment.appointment_id),
+            amount=payment.amount,
         )
     except Exception as exc:
         raise PaymentProviderError() from exc

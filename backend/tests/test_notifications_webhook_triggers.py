@@ -62,7 +62,7 @@ class _FakeProvider:
     def start_payment(self, *, amount, currency, reference):
         raise NotImplementedError("not exercised by these tests")
 
-    def refund(self, *, provider_reference_id, reference):
+    def refund(self, *, provider_reference_id, reference, amount):
         type(self).refund_calls.append((provider_reference_id, reference))
         return None
 

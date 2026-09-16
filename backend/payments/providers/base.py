@@ -56,12 +56,18 @@ class PaymentProvider(ABC):
         """
 
     @abstractmethod
-    def refund(self, *, provider_reference_id: str, reference: str) -> RefundIntent:
+    def refund(
+        self, *, provider_reference_id: str, reference: str, amount: Decimal
+    ) -> RefundIntent:
         """
         Reverses the specific existing transaction identified by
-        provider_reference_id. No amount argument: business rules always
-        refund the full deposit or nothing, so the amount is implied by the
-        original payment.
+        provider_reference_id. `amount` mirrors start_payment's own `amount`
+        param. docs/DECISIONS.md § "Stage 8 refund decision, revisited"
+        widened the interface to this explicit parameter for a real
+        provider's API requirement (an explicit amount even for a full
+        refund) — Stage 8's underlying business rule, always the full
+        deposit or nothing, is unchanged; callers always pass the original
+        payment's own amount, never a partial or separately computed value.
         """
 
     def verify_signature(self, *, payload: bytes, signature: str) -> bool:
