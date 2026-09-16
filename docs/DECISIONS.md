@@ -2663,3 +2663,49 @@ becomes part of the expression's deconstruct() output, so migration
 state no longer matches the model without it, even though the
 generated SQL is byte-identical to the existing constraints. This
 migration is a schema no-op in Postgres.
+
+### Stage 14 step 5: `/booking/pay` architecture
+
+Decided 16.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during read-only recon ahead of building step 5 of the
+booking flow. None of this is implemented yet.
+
+- **This step builds full status-branching
+  (`PENDING_PAYMENT`/`CONFIRMED`/`EXPIRED`/`CANCELLED`) and a working
+  mock payment action, but deliberately does not integrate a real
+  payment provider.** Real provider integration (LiqPay/Fondy/WayForPay
+  — candidates only per § Payments, none chosen) is deferred to a
+  separate future decision. Rationale: status branching, routing, and
+  token handling are stable regardless of which provider eventually
+  lands; only the pay-action UI itself (currently a button that calls
+  the mock endpoint directly) will need rework into a redirect-based
+  flow once a real provider is integrated — a narrow, contained piece
+  to redo later, not the whole page.
+- **`/booking/pay` is a Client Component**, per the existing Stage 14
+  planning decision ("the frontend `/booking/pay` page must be a
+  Client Component"), since it must read `appointment_id` and `token`
+  from the URL fragment (`window.location.hash`) — fragment values are
+  never sent to the server as part of any HTTP request, which is why
+  the token is transported this way (§ Stage 3, "Credential-token
+  transport: URL fragment"). This read must happen client-side after
+  mount (e.g. inside `useEffect`), not during any server render, since
+  the fragment isn't available server-side at all.
+- **On mount, the page calls `GET guest/appointments/<id>/`** (via
+  `guestApiRequest`, with the token read from the fragment) to get the
+  appointment's current status, then branches:
+  - `PENDING_PAYMENT` → renders a pay button labeled "Оплатити" that
+    calls `POST guest/appointments/<id>/pay/` (currently
+    `MockPaymentProvider` — no real charge, no real redirect).
+  - `CONFIRMED` → renders an "already paid" message, no button.
+  - `EXPIRED` or `CANCELLED` → renders a "no longer available" message.
+  - After a successful pay call, the page renders a "pending
+    confirmation" state — payment status stays `pending` until a
+    webhook (currently nothing real triggers it) confirms it. This is
+    an honest reflection of current mock behavior, not a bug to fix
+    here.
+- **An invalid or expired token, or a missing fragment entirely** (e.g.
+  someone navigates to `/booking/pay` directly with nothing after
+  `#`), renders a generic "link invalid or expired" message — not a
+  crash, not `notFound()`. This isn't a routing-level 404; it's a
+  runtime token-validation outcome, so it's handled as page state, not
+  as a Next.js not-found route.
