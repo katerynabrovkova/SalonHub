@@ -2664,6 +2664,37 @@ state no longer matches the model without it, even though the
 generated SQL is byte-identical to the existing constraints. This
 migration is a schema no-op in Postgres.
 
+### Fix: CORS_ALLOW_HEADERS missing X-Guest-Token
+
+Decided and implemented 16.09.2026.
+
+`guestApiRequest` (`frontend/src/lib/api/guestClient.ts`) sends a custom
+`X-Guest-Token` header on every guest-token-authenticated request
+(detail/cancel/pay), which forces a CORS preflight. No
+`CORS_ALLOW_HEADERS` setting existed anywhere in the backend, so
+django-cors-headers fell back to its own `default_headers` list
+(accept, authorization, content-type, user-agent, x-csrftoken,
+x-requested-with) — `x-guest-token` was never advertised as allowed.
+The preflight `OPTIONS` request itself still returned 200 (backend
+logs showed it), but the browser then silently blocked the real
+`GET`/`POST` before sending it — no error surfaced anywhere in the
+frontend, since `PaymentStatus.tsx` treats a failed `guestApiRequest`
+call identically to an invalid/expired token by design (§ Stage 14
+step 5). Fixed by extending, not replacing, the defaults:
+`CORS_ALLOW_HEADERS = [*default_headers, "x-guest-token"]`
+(`backend/config/settings/base.py`).
+
+**Lesson: mocked-fetch frontend tests cannot catch a CORS
+misconfiguration.** All 149 frontend tests were green throughout —
+`guestClient.test.ts` and `PaymentStatus.test.tsx` both stub `fetch`
+directly, so no real browser, no real preflight, and no
+`Access-Control-Allow-Headers` check ever entered the test run. The
+break was only visible in an actual browser session hitting the real
+backend. Same broader lesson as the "stale Next.js dev-cache hit"
+aside in the DJANGO_ALLOWED_HOSTS fix entry above — green tests plus
+a working build is not the same claim as a working live app — just at
+a different layer (network/CORS here, dev-server caching there).
+
 ### Stage 14 step 5: `/booking/pay` architecture
 
 Decided 16.09.2026 — agreed before any code, per the stage-by-stage
