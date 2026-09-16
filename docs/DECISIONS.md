@@ -2823,3 +2823,46 @@ docstring, reads:
   reversal of the "full deposit or nothing" business decision.** The two
   are easy to conflate because they touch the same method signature; they
   are independent.
+
+### WayForPayProvider: first-time technical conventions (HTTP, mocking, Decimal-to-string, errors, credentials)
+
+Decided 16.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during read-only recon ahead of implementing `WayForPayProvider`.
+None of this is implemented yet. Recorded here rather than left implicit
+because every item below is a genuine first for this codebase — no prior
+outbound HTTP call, no prior HTTP-mocking pattern, no prior Decimal-to-
+string convention — so each choice sets precedent for any future external
+integration, not just this one.
+
+- **HTTP library: `requests`**, added to `requirements/base.txt` as a
+  runtime dependency (not dev-only) — `WayForPayProvider` runs in
+  production, not only in tests.
+- **Test mocking: `responses`**, added to `requirements/development.txt`
+  (test-only). Chosen over `unittest.mock.patch`-ing the call site directly
+  because it verifies the actual outbound request shape — URL, method,
+  headers, signed body — rather than only that some function was called
+  with some arguments.
+- **Decimal-to-string for signature construction: explicit
+  `str(amount.quantize(Decimal("0.01")))`** — quantize first, then convert
+  — rather than relying on whatever precision the `Decimal` happens to
+  already carry. This guards the HMAC input against a `Decimal` that
+  arrived non-normalized (e.g. `Decimal("100")` vs `Decimal("100.00")`
+  stringify differently) producing a signature mismatch against WayForPay's
+  own computation.
+- **Error handling: `WayForPayProvider` raises no custom exceptions of its
+  own.** HTTP/network/parsing failures propagate naturally as ordinary
+  exceptions. No change to `payments/services.py`, which already wraps any
+  `Exception` from a provider call into `PaymentProviderError` at its two
+  existing call sites (`initiate_payment`, `initiate_refund`) — that
+  translation is the service layer's job and doesn't need duplicating
+  inside the provider.
+- **Credentials: `WAYFORPAY_MERCHANT_ACCOUNT` / `WAYFORPAY_SECRET_KEY` /
+  `WAYFORPAY_DOMAIN_NAME` are optional env vars with empty-string
+  defaults**, mirroring `EMAIL_HOST_USER`'s existing pattern
+  (`config/settings/base.py`) rather than `DJANGO_SECRET_KEY`'s
+  hard-required one — so `docker compose up` boots without real sandbox
+  keys. **`WayForPayProvider` is not wired as any view's default
+  `provider_class` in this step** — `MockPaymentProvider` remains the
+  default everywhere; going live is separate future work, already scoped
+  out as such in the earlier "Stage 14 payment step: WayForPayProvider
+  architecture" entry above.
