@@ -11,11 +11,11 @@
  * they survive the "return to step 3 on slot conflict, then forward to
  * step 4 again" round trip (BookingContactInfoContext.tsx).
  *
- * Explicitly out of scope here (per docs/DECISIONS.md § Stage 14
- * implementation decisions): navigation to `/booking/pay` and anything
- * beyond receiving `guest_token` from a successful response — that
- * routing/token-carrying decision is undecided. Success renders a minimal
- * inline state only.
+ * On success, redirects to `/booking/pay` with `appointment_id`/`token` in
+ * the URL fragment — the same format the backend's BOOKING_CREATED email
+ * link uses (`build_salon_frontend_url(...) + "#appointment_id=...&token=..."`,
+ * `backend/notifications/services.py`), which `PaymentStatus.tsx` reads on
+ * mount (docs/DECISIONS.md § Stage 14 step 5).
  */
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
@@ -70,7 +70,6 @@ export default function ContactInfoForm({
   } = useBookingContactInfo();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [createdAppointmentId, setCreatedAppointmentId] = useState<number | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,7 +86,8 @@ export default function ContactInfoForm({
         customerEmail,
         customerPhone,
       });
-      setCreatedAppointmentId(result.appointment.id);
+      router.push(`/booking/pay#appointment_id=${result.appointment.id}&token=${result.guestToken}`);
+      return;
     } catch (err) {
       if (err instanceof ApiError && err.code === "SLOT_NO_LONGER_AVAILABLE") {
         router.push(buildStep3Url(entry, service, specialist, startDatetime));
@@ -97,15 +97,6 @@ export default function ContactInfoForm({
     } finally {
       setPending(false);
     }
-  }
-
-  if (createdAppointmentId !== null) {
-    return (
-      <div>
-        <p>Booking created</p>
-        <p>Appointment #{createdAppointmentId}</p>
-      </div>
-    );
   }
 
   return (

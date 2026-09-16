@@ -101,7 +101,7 @@ describe("ContactInfoForm", () => {
     });
   });
 
-  it("test_success_renders_success_state", async () => {
+  it("test_success_redirects_to_booking_pay_with_appointment_id_and_token_fragment", async () => {
     const user = userEvent.setup();
     createGuestBookingMock.mockResolvedValueOnce(SUCCESS_RESULT);
 
@@ -114,11 +114,9 @@ describe("ContactInfoForm", () => {
     await fillForm(user);
     await user.click(screen.getByRole("button", { name: "Забронювати" }));
 
-    expect(await screen.findByText("Booking created")).toBeInTheDocument();
-    expect(screen.getByText("Appointment #42")).toBeInTheDocument();
-    // No navigation, and nothing beyond receiving guest_token — an
-    // intentional stopping point, not a missed step.
-    expect(pushMock).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(pushMock).toHaveBeenCalledWith("/booking/pay#appointment_id=42&token=tok-abc"),
+    );
   });
 
   it("test_409_slot_unavailable_navigates_to_step3_preserving_params_and_leaves_context_intact", async () => {
