@@ -2740,3 +2740,54 @@ booking flow. None of this is implemented yet.
   crash, not `notFound()`. This isn't a routing-level 404; it's a
   runtime token-validation outcome, so it's handled as page state, not
   as a Next.js not-found route.
+
+### Stage 14 payment step: WayForPayProvider architecture
+
+Decided 16.09.2026 — agreed before any code, per the stage-by-stage
+workflow, during read-only recon ahead of adding a real
+`WayForPayProvider` alongside `MockPaymentProvider` (test/sandbox mode,
+not going live). None of this is implemented yet.
+
+- **`WayForPayProvider.start_payment()` uses WayForPay's
+  server-to-server "Create Invoice" API** (`CREATE_INVOICE`,
+  HMAC_MD5-signed POST to `api.wayforpay.com/api`), not the
+  client-rendered signed-form "Purchase" flow
+  (`secure.wayforpay.com/pay`). Rationale: Create Invoice returns a
+  plain `invoiceUrl` string in its JSON response, which fits the
+  existing `PaymentIntent.provider_data: str | None` contract directly
+  — no new frontend form-generation/auto-submit mechanism needed.
+- **`WayForPayProvider` generates its own unique `orderReference`
+  internally for each actual `start_payment()` call** — not the bare
+  `reference` argument passed in (which stays a stable
+  appointment-derived identifier at the interface level) — because
+  WayForPay rejects a reused `orderReference` with a "(1112) Duplicate
+  Order ID" error (confirmed via a real-world SDK workaround, not
+  assumed). The unique value generated is returned as
+  `PaymentIntent.provider_reference_id`, so `Payment.provider_reference_id`'s
+  existing overwrite-in-place behavior on retry (already implemented,
+  unchanged) continues to correlate correctly with inbound webhooks.
+  This is entirely internal to `WayForPayProvider` — the
+  `PaymentProvider` interface, `GuestAppointmentPayView`, and
+  `payments/services.py` are not changed by this.
+- **`Payment` gains a provider-neutral `provider_data` field** (not
+  WayForPay-specific naming), persisted at creation time from
+  `PaymentIntent.provider_data`. The existing-PENDING short-circuit
+  path in `initiate_payment` (`payments/services.py`) is updated to
+  return the stored value instead of hardcoding `None`, so a guest
+  reloading `/booking/pay` or clicking "Оплатити" again while a payment
+  is still pending sees the same payment link again rather than
+  nothing. This fixes a gap in the existing mock-shaped design (a real
+  provider can return something worth re-showing; the mock always
+  returns `None` so this was never exercised) — it is a general
+  interface fix, not a WayForPay-specific workaround.
+  `MockPaymentProvider`'s behavior (always `None`) is unaffected.
+- **Frontend: `PaymentStatus.tsx` needs a small addition** (not present
+  today) — when the pay response includes `provider_data`, redirect the
+  guest to it (`window.location.href`) instead of only rendering the
+  static "pending confirmation" message. The mock path (`provider_data`
+  always null) keeps rendering the existing static message unchanged.
+- **`verify_signature`'s HMAC_MD5 field order is endpoint-specific**
+  per WayForPay's own docs (Create Invoice's signed string differs from
+  Verify's) — this must be implemented and tested against real
+  documented signature examples, not a single generic helper assumed to
+  work for every WayForPay endpoint.
