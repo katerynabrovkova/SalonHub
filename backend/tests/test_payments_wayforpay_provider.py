@@ -1,9 +1,8 @@
 """
-WayForPayProvider.start_payment() (docs/ARCHITECTURE.md § 8;
-docs/DECISIONS.md § "Stage 14 payment step: WayForPayProvider architecture"
-and § "WayForPayProvider: first-time technical conventions"). start_payment
-only — refund() and verify_signature() are separate future steps, not
-covered here.
+WayForPayProvider.start_payment() and verify_signature() (docs/ARCHITECTURE.md
+§ 8; docs/DECISIONS.md § "Stage 14 payment step: WayForPayProvider
+architecture" and § "WayForPayProvider: first-time technical conventions").
+refund() is a separate future step, not covered here.
 
 Pure unit tests using `responses` to mock the real outbound HTTP call
 (docs/DECISIONS.md's chosen library, over patching the call site directly)
@@ -14,13 +13,17 @@ made. No @pytest.mark.django_db: this layer never touches the database.
 WAYFORPAY_MERCHANT_ACCOUNT/WAYFORPAY_SECRET_KEY/WAYFORPAY_DOMAIN_NAME are
 overridden per-test via pytest-django's `settings` fixture (same pattern as
 test_account_password_reset.py's FRONTEND_URL override) to known values, so
-the expected HMAC signature can be hand-computed and asserted exactly.
+the expected HMAC signature can be hand-computed and asserted exactly. The
+verify_signature tests use this same fake SECRET_KEY, never a real WayForPay
+merchant secret — the field shape/order is what's under test, not any real
+credential.
 """
 
 import hashlib
 import hmac
 import json
 from decimal import Decimal
+from urllib.parse import urlencode
 
 import pytest
 import requests
@@ -58,11 +61,16 @@ def _expected_signature(*, order_reference: str, order_date: int, amount: str, c
     ).hexdigest()
 
 
-def _mock_success(*, invoice_url="https://secure.wayforpay.com/pay/abc123", reason_code="Ok"):
+def _mock_success(
+    *, invoice_url="https://secure.wayforpay.com/pay/abc123", reason="Ok", reason_code=1100
+):
+    # reasonCode is numeric and reason is the separate string field, matching
+    # WayForPay's actual Create Invoice response shape (reasonCode=1100,
+    # reason="Ok" on success) rather than both fields sharing one value.
     responses.add(
         responses.POST,
         _CREATE_INVOICE_URL,
-        json={"reasonCode": reason_code, "reason": reason_code, "invoiceUrl": invoice_url},
+        json={"reasonCode": reason_code, "reason": reason, "invoiceUrl": invoice_url},
         status=200,
     )
 
@@ -152,8 +160,8 @@ def test_start_payment_raises_on_non_2xx_response():
 
 
 @responses.activate
-def test_start_payment_raises_on_non_ok_reason_code():
-    _mock_success(reason_code="Declined")
+def test_start_payment_raises_on_non_ok_reason():
+    _mock_success(reason="Declined", reason_code=1101)
     provider = WayForPayProvider()
 
     with pytest.raises(RuntimeError):
@@ -165,10 +173,184 @@ def test_start_payment_raises_on_missing_invoice_url():
     responses.add(
         responses.POST,
         _CREATE_INVOICE_URL,
-        json={"reasonCode": "Ok", "reason": "Ok"},
+        json={"reasonCode": 1100, "reason": "Ok"},
         status=200,
     )
     provider = WayForPayProvider()
 
     with pytest.raises(RuntimeError):
         provider.start_payment(amount=Decimal("50.00"), currency="UAH", reference="789")
+
+
+@responses.activate
+def test_start_payment_treats_numeric_reason_code_1100_with_reason_ok_as_success():
+    """Regression test for the exact real WayForPay response shape that was
+    incorrectly treated as a failure: numeric reasonCode=1100 (not the
+    string "Ok") alongside reason="Ok". The old check compared reasonCode
+    against the string "Ok", which is never true for this field, so every
+    successful Create Invoice call raised RuntimeError instead of returning
+    the invoiceUrl.
+    """
+    responses.add(
+        responses.POST,
+        _CREATE_INVOICE_URL,
+        json={
+            "invoiceUrl": "https://secure.wayforpay.com/invoice/abc123",
+            "reason": "Ok",
+            "reasonCode": 1100,
+        },
+        status=200,
+    )
+    provider = WayForPayProvider()
+
+    result = provider.start_payment(amount=Decimal("50.00"), currency="UAH", reference="789")
+
+    body = json.loads(responses.calls[0].request.body)
+    assert result == PaymentIntent(
+        provider_reference_id=body["orderReference"],
+        provider_data="https://secure.wayforpay.com/invoice/abc123",
+    )
+
+
+# --- verify_signature: webhook callback signature -------------------------
+#
+# Confirmed field order (WayForPay support, wiki.wayforpay.com/view/608996852):
+# merchantAccount;orderReference;amount;currency;authCode;cardPan;
+# transactionStatus;reasonCode, HMAC_MD5. Non-signature fields below
+# (fee, paymentSystem, reason) mirror a real captured payload's shape
+# without carrying any real PII — they exist only to prove verify_signature
+# ignores fields outside the 8 that matter.
+_WEBHOOK_FIELDS = {
+    "merchantAccount": MERCHANT_ACCOUNT,
+    "orderReference": "73-f58fee78",
+    "amount": "24",
+    "currency": "USD",
+    "authCode": "",
+    "cardPan": "41****1111",
+    "transactionStatus": "Declined",
+    "reasonCode": "1105",
+}
+_WEBHOOK_SIGNATURE_FIELD_ORDER = (
+    "merchantAccount",
+    "orderReference",
+    "amount",
+    "currency",
+    "authCode",
+    "cardPan",
+    "transactionStatus",
+    "reasonCode",
+)
+
+
+def _expected_webhook_signature(fields: dict[str, str]) -> str:
+    ordered = [fields.get(name, "") for name in _WEBHOOK_SIGNATURE_FIELD_ORDER]
+    return hmac.new(
+        SECRET_KEY.encode("utf-8"), ";".join(ordered).encode("utf-8"), hashlib.md5
+    ).hexdigest()
+
+
+def _webhook_body(fields: dict[str, str], signature: str) -> bytes:
+    # application/x-www-form-urlencoded, matching WayForPay's real callback
+    # Content-Type — not JSON. Includes a couple of incidental extra fields
+    # (fee, paymentSystem, reason) alongside merchantSignature, same as a
+    # real payload, none of which are part of the signed field set.
+    payload = {
+        **fields,
+        "merchantSignature": signature,
+        "fee": "0",
+        "paymentSystem": "card",
+        "reason": "Invalid card number",
+    }
+    return urlencode(payload).encode("utf-8")
+
+
+def test_verify_signature_accepts_a_correctly_signed_real_shaped_payload():
+    """Regression test for the exact real WayForPay webhook shape captured
+    in production: a declined-card notification, form-urlencoded body,
+    signature computed over merchantAccount;orderReference;amount;currency;
+    authCode;cardPan;transactionStatus;reasonCode.
+    """
+    signature = _expected_webhook_signature(_WEBHOOK_FIELDS)
+    payload = _webhook_body(_WEBHOOK_FIELDS, signature)
+    provider = WayForPayProvider()
+
+    assert provider.verify_signature(payload=payload, signature=signature) is True
+
+
+def _webhook_body_json(fields: dict[str, str], signature: str) -> bytes:
+    # Regression shape: a real captured WayForPay callback had
+    # Content-Type: application/x-www-form-urlencoded but a JSON-encoded
+    # body — this constructs that exact mismatch (JSON bytes, whatever the
+    # header claims) to prove verify_signature detects it from the payload
+    # itself rather than trusting a header it isn't even given here.
+    payload = {
+        **fields,
+        "merchantSignature": signature,
+        "fee": 0,
+        "paymentSystem": "card",
+        "reason": "Invalid card number",
+    }
+    return json.dumps(payload).encode("utf-8")
+
+
+def test_verify_signature_accepts_a_json_encoded_body_despite_form_urlencoded_content_type():
+    """Regression test for the real captured mismatch: WayForPay's callback
+    arrived with Content-Type: application/x-www-form-urlencoded but a
+    JSON-encoded body. parse_qs on that body returns {} (every field would
+    sign as ""), so verify_signature must detect JSON from the bytes
+    themselves, not assume form-encoding from the (unreliable) header.
+    """
+    signature = _expected_webhook_signature(_WEBHOOK_FIELDS)
+    payload = _webhook_body_json(_WEBHOOK_FIELDS, signature)
+    provider = WayForPayProvider()
+
+    assert provider.verify_signature(payload=payload, signature=signature) is True
+
+
+def test_verify_signature_rejects_a_tampered_field():
+    signature = _expected_webhook_signature(_WEBHOOK_FIELDS)
+    tampered_fields = {**_WEBHOOK_FIELDS, "amount": "999"}
+    payload = _webhook_body(tampered_fields, signature)
+    provider = WayForPayProvider()
+
+    assert provider.verify_signature(payload=payload, signature=signature) is False
+
+
+def test_verify_signature_rejects_the_wrong_signature():
+    payload = _webhook_body(_WEBHOOK_FIELDS, "not-the-real-signature")
+    provider = WayForPayProvider()
+
+    assert provider.verify_signature(payload=payload, signature="not-the-real-signature") is False
+
+
+def test_verify_signature_is_sensitive_to_field_order():
+    """Same field values, wrong order (currency/amount swapped) — proves
+    the field order matters and isn't accidentally order-independent (e.g.
+    via a dict/set instead of the confirmed tuple order).
+    """
+    wrong_order = (
+        "merchantAccount",
+        "orderReference",
+        "currency",
+        "amount",
+        "authCode",
+        "cardPan",
+        "transactionStatus",
+        "reasonCode",
+    )
+    wrong_signature = hmac.new(
+        SECRET_KEY.encode("utf-8"),
+        ";".join(_WEBHOOK_FIELDS[name] for name in wrong_order).encode("utf-8"),
+        hashlib.md5,
+    ).hexdigest()
+    payload = _webhook_body(_WEBHOOK_FIELDS, wrong_signature)
+    provider = WayForPayProvider()
+
+    assert provider.verify_signature(payload=payload, signature=wrong_signature) is False
+
+
+def test_verify_signature_rejects_an_unparseable_payload_without_raising():
+    provider = WayForPayProvider()
+    garbage = b"not json and not form-encoded either \x00\xff"
+
+    assert provider.verify_signature(payload=garbage, signature="anything") is False
