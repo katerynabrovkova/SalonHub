@@ -91,6 +91,7 @@ def _make_refund_pending_payment(
     refund_initiated_at,
     status=PaymentStatus.REFUND_PENDING,
     flagged_for_review=False,
+    provider_reference_id="stuck_ref",
 ):
     with tenant_context(salon.id):
         return Payment.objects.create(
@@ -99,7 +100,7 @@ def _make_refund_pending_payment(
             amount=Decimal("100.00"),
             currency=salon.currency,
             status=status,
-            provider_reference_id="stuck_ref",
+            provider_reference_id=provider_reference_id,
             refund_initiated_at=refund_initiated_at,
             flagged_for_review=flagged_for_review,
         )
@@ -272,13 +273,18 @@ def test_flag_stuck_refunds_flags_only_the_stuck_ones_in_a_mixed_batch(
     already_flagged_appt = _make_confirmed_appointment(
         salon, specialist, service, customer, start=START + dt.timedelta(hours=6)
     )
-    stuck = _make_refund_pending_payment(salon, stuck_appt, refund_initiated_at=STUCK_SINCE)
-    fresh = _make_refund_pending_payment(salon, fresh_appt, refund_initiated_at=FRESH_SINCE)
+    stuck = _make_refund_pending_payment(
+        salon, stuck_appt, refund_initiated_at=STUCK_SINCE, provider_reference_id="stuck_ref"
+    )
+    fresh = _make_refund_pending_payment(
+        salon, fresh_appt, refund_initiated_at=FRESH_SINCE, provider_reference_id="fresh_ref"
+    )
     already_flagged = _make_refund_pending_payment(
         salon,
         already_flagged_appt,
         refund_initiated_at=STUCK_SINCE,
         flagged_for_review=True,
+        provider_reference_id="already_flagged_ref",
     )
 
     with tenant_context(salon.id):

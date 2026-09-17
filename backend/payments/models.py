@@ -34,7 +34,14 @@ class Payment(TenantScopedModel, TimeStamped):
     status = models.CharField(
         max_length=32, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
     )
-    provider_reference_id = models.CharField(max_length=255, blank=True, db_index=True)
+    # unique=True: the webhook lookup (payments/views.py's PaymentWebhookView)
+    # does Payment.unscoped_objects.get(provider_reference_id=...) and assumes
+    # exactly one match — a DB-level guarantee, not just an app-level
+    # assumption that each start_payment() call happens to produce a fresh
+    # value (docs/DECISIONS.md § "Stage 14 payment step: WayForPay webhook
+    # -> PaymentWebhookView mapping"). unique=True already creates its own
+    # index, so the separate db_index=True this replaces is redundant.
+    provider_reference_id = models.CharField(max_length=255, blank=True, unique=True)
     # Provider-neutral hand-off data returned alongside provider_reference_id
     # by PaymentIntent (e.g. a hosted-payment-page URL) — whatever the
     # frontend needs to continue payment, or None. Stored so a guest
