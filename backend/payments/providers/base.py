@@ -89,3 +89,28 @@ class PaymentProvider(ABC):
         loudly instead of leaving the webhook endpoint an open door.
         """
         raise NotImplementedError
+
+    def parse_webhook_event(self, *, payload: bytes) -> dict[str, str]:
+        """
+        Normalizes a provider's raw webhook body into the provider-neutral
+        {event_id, event_type, provider_reference_id} envelope that
+        payments.serializers.PaymentWebhookEventSerializer validates
+        (docs/DECISIONS.md § "Stage 14 payment step: WayForPay webhook ->
+        PaymentWebhookView mapping"). Called by PaymentWebhookView.post
+        after verify_signature succeeds, against the same raw `payload`
+        bytes — not the parsed request.data, for the same
+        Content-Type-can't-be-trusted reason verify_signature already
+        works from raw bytes.
+
+        A missing/unmappable field should come back as a missing or blank
+        string in the returned dict, not raise — PaymentWebhookEventSerializer
+        already turns a blank/missing required field into the existing
+        400 "malformed body" response; this method doesn't need to
+        duplicate that check.
+
+        Deliberately NOT @abstractmethod, same reasoning as
+        verify_signature above: every concrete provider must still
+        override it, and the base implementation raises loudly rather than
+        silently returning an empty envelope.
+        """
+        raise NotImplementedError

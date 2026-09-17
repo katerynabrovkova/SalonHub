@@ -28,9 +28,11 @@ from urllib.parse import urlencode
 import pytest
 import requests
 import responses
+from rest_framework.test import APIClient
 
 from payments.providers.base import PaymentIntent
 from payments.providers.wayforpay import _CREATE_INVOICE_URL, WayForPayProvider
+from payments.views import PaymentWebhookView
 
 MERCHANT_ACCOUNT = "test_merchant"
 DOMAIN_NAME = "test.salonhub.example"
@@ -354,3 +356,146 @@ def test_verify_signature_rejects_an_unparseable_payload_without_raising():
     garbage = b"not json and not form-encoded either \x00\xff"
 
     assert provider.verify_signature(payload=garbage, signature="anything") is False
+
+
+# --- parse_webhook_event: WayForPay webhook -> generic envelope mapping ----
+#
+# docs/DECISIONS.md § "Stage 14 payment step: WayForPay webhook ->
+# PaymentWebhookView mapping". Reuses _WEBHOOK_FIELDS/_webhook_body from the
+# verify_signature section above — parse_webhook_event doesn't itself check
+# the signature, so the signature value passed to _webhook_body is
+# arbitrary in these tests.
+
+
+def test_parse_webhook_event_maps_approved_to_payment_succeeded():
+    fields = {**_WEBHOOK_FIELDS, "transactionStatus": "Approved"}
+    payload = _webhook_body(fields, "irrelevant-signature")
+    provider = WayForPayProvider()
+
+    event = provider.parse_webhook_event(payload=payload)
+
+    assert event["event_type"] == "payment_succeeded"
+    assert event["provider_reference_id"] == fields["orderReference"]
+
+
+def test_parse_webhook_event_maps_declined_to_payment_failed():
+    fields = {**_WEBHOOK_FIELDS, "transactionStatus": "Declined"}
+    payload = _webhook_body(fields, "irrelevant-signature")
+    provider = WayForPayProvider()
+
+    event = provider.parse_webhook_event(payload=payload)
+
+    assert event["event_type"] == "payment_failed"
+
+
+def test_parse_webhook_event_maps_refunded_to_refund_succeeded():
+    fields = {**_WEBHOOK_FIELDS, "transactionStatus": "Refunded"}
+    payload = _webhook_body(fields, "irrelevant-signature")
+    provider = WayForPayProvider()
+
+    event = provider.parse_webhook_event(payload=payload)
+
+    assert event["event_type"] == "refund_succeeded"
+
+
+def test_parse_webhook_event_maps_voided_to_refund_succeeded():
+    fields = {**_WEBHOOK_FIELDS, "transactionStatus": "Voided"}
+    payload = _webhook_body(fields, "irrelevant-signature")
+    provider = WayForPayProvider()
+
+    event = provider.parse_webhook_event(payload=payload)
+
+    assert event["event_type"] == "refund_succeeded"
+
+
+def test_parse_webhook_event_unmapped_status_falls_through_as_raw_status():
+    fields = {**_WEBHOOK_FIELDS, "transactionStatus": "Pending"}
+    payload = _webhook_body(fields, "irrelevant-signature")
+    provider = WayForPayProvider()
+
+    event = provider.parse_webhook_event(payload=payload)
+
+    # Not one of the three handled event_type strings -> PaymentWebhookView's
+    # existing unrecognized-event_type no-op path, unchanged.
+    assert event["event_type"] == "Pending"
+
+
+def test_parse_webhook_event_composite_event_id_format():
+    fields = {
+        **_WEBHOOK_FIELDS,
+        "orderReference": "73-f58fee78",
+        "transactionStatus": "Declined",
+        "reasonCode": "1105",
+    }
+    payload = _webhook_body(fields, "irrelevant-signature")
+    provider = WayForPayProvider()
+
+    event = provider.parse_webhook_event(payload=payload)
+
+    assert event["event_id"] == "73-f58fee78;Declined;1105"
+    assert event["provider_reference_id"] == "73-f58fee78"
+
+
+def test_parse_webhook_event_distinguishes_retries_from_status_progression():
+    """A bare orderReference would collide across a Declined-then-Approved
+    progression on the same order while still (correctly) deduping a true
+    delivery retry of the identical status — the composite event_id must
+    do both."""
+    declined = {**_WEBHOOK_FIELDS, "transactionStatus": "Declined", "reasonCode": "1105"}
+    approved = {**_WEBHOOK_FIELDS, "transactionStatus": "Approved", "reasonCode": "1100"}
+    provider = WayForPayProvider()
+
+    declined_event = provider.parse_webhook_event(
+        payload=_webhook_body(declined, "irrelevant-signature")
+    )
+    declined_retry_event = provider.parse_webhook_event(
+        payload=_webhook_body(declined, "irrelevant-signature")
+    )
+    approved_event = provider.parse_webhook_event(
+        payload=_webhook_body(approved, "irrelevant-signature")
+    )
+
+    assert declined_event["event_id"] == declined_retry_event["event_id"]
+    assert declined_event["event_id"] != approved_event["event_id"]
+
+
+@pytest.mark.django_db
+def test_missing_order_reference_is_400_at_the_view_level(monkeypatch):
+    """The one test in this file that crosses into PaymentWebhookView
+    rather than exercising WayForPayProvider in isolation (hence the
+    django_db marker this file otherwise has no use for) — proving the
+    mapping's blank-field behavior actually produces the existing
+    malformed-body 400 contract end to end, not just at the provider's own
+    return value."""
+    monkeypatch.setattr(PaymentWebhookView, "provider_class", WayForPayProvider)
+    fields = {k: v for k, v in _WEBHOOK_FIELDS.items() if k != "orderReference"}
+    signature = _expected_webhook_signature(fields)
+    payload = _webhook_body(fields, signature)
+    client = APIClient()
+
+    response = client.post(
+        "/api/v1/webhooks/payments/",
+        data=payload,
+        content_type="application/x-www-form-urlencoded",
+        HTTP_X_SIGNATURE=signature,
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_missing_transaction_status_is_400_at_the_view_level(monkeypatch):
+    monkeypatch.setattr(PaymentWebhookView, "provider_class", WayForPayProvider)
+    fields = {k: v for k, v in _WEBHOOK_FIELDS.items() if k != "transactionStatus"}
+    signature = _expected_webhook_signature(fields)
+    payload = _webhook_body(fields, signature)
+    client = APIClient()
+
+    response = client.post(
+        "/api/v1/webhooks/payments/",
+        data=payload,
+        content_type="application/x-www-form-urlencoded",
+        HTTP_X_SIGNATURE=signature,
+    )
+
+    assert response.status_code == 400

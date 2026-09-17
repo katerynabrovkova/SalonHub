@@ -45,6 +45,7 @@ values are fixed tz-aware UTC literals, never timezone.now().
 """
 
 import datetime as dt
+import json
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
@@ -86,6 +87,22 @@ class _FakeProvider:
     def verify_signature(self, *, payload: bytes, signature: str) -> bool:
         return True
 
+    def parse_webhook_event(self, *, payload: bytes) -> dict[str, str]:
+        # Same generic-envelope-from-raw-bytes shape as
+        # MockPaymentProvider.parse_webhook_event — this test file's bodies
+        # already speak that envelope directly.
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return {
+            "event_id": str(data.get("event_id", "")),
+            "event_type": str(data.get("event_type", "")),
+            "provider_reference_id": str(data.get("provider_reference_id", "")),
+        }
+
     def start_payment(self, *, amount, currency, reference):
         raise NotImplementedError("not exercised by webhook tests")
 
@@ -103,6 +120,9 @@ class _RejectingProvider:
 
     def verify_signature(self, *, payload: bytes, signature: str) -> bool:
         return False
+
+    def parse_webhook_event(self, *, payload: bytes) -> dict[str, str]:
+        raise AssertionError("must not be called past an invalid signature")
 
     def start_payment(self, *, amount, currency, reference):
         raise AssertionError("must not be called past an invalid signature")

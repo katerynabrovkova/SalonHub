@@ -62,6 +62,19 @@ _WEBHOOK_SIGNATURE_FIELD_NAMES = (
     "reasonCode",
 )
 
+# docs/DECISIONS.md § "Stage 14 payment step: WayForPay webhook ->
+# PaymentWebhookView mapping". A transactionStatus not in this mapping
+# (e.g. "Pending", "InProcessing", "Expired") falls through as the raw
+# status string in parse_webhook_event below — never one of these three
+# values, so it always lands on PaymentWebhookView's existing unrecognized-
+# event_type no-op path, unchanged.
+_EVENT_TYPE_BY_TRANSACTION_STATUS = {
+    "Approved": "payment_succeeded",
+    "Declined": "payment_failed",
+    "Refunded": "refund_succeeded",
+    "Voided": "refund_succeeded",
+}
+
 
 def parse_webhook_fields(payload: bytes) -> dict[str, str]:
     """
@@ -223,3 +236,24 @@ class WayForPayProvider(PaymentProvider):
             hashlib.md5,
         ).hexdigest()
         return hmac.compare_digest(expected_signature, signature)
+
+    def parse_webhook_event(self, *, payload: bytes) -> dict[str, str]:
+        # provider_reference_id maps directly to WayForPay's own
+        # orderReference — already stored on Payment by start_payment().
+        # event_id is a composite of orderReference;transactionStatus;
+        # reasonCode, not orderReference alone: a bare orderReference would
+        # collide across distinct lifecycle events on the same order (e.g.
+        # Declined then later Approved, or Approved then later Refunded),
+        # while the composite still dedupes true delivery retries of the
+        # identical status (WayForPay resends the same notification
+        # unchanged on retry).
+        fields = parse_webhook_fields(payload)
+        order_reference = fields.get("orderReference", "")
+        transaction_status = fields.get("transactionStatus", "")
+        reason_code = fields.get("reasonCode", "")
+        event_type = _EVENT_TYPE_BY_TRANSACTION_STATUS.get(transaction_status, transaction_status)
+        return {
+            "event_id": f"{order_reference};{transaction_status};{reason_code}",
+            "event_type": event_type,
+            "provider_reference_id": order_reference,
+        }

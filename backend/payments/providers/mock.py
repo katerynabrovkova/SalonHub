@@ -8,6 +8,7 @@ real provider would trigger it, so tests exercise the real asynchronous
 shape rather than a self-completing shortcut.
 """
 
+import json
 from decimal import Decimal
 from uuid import uuid4
 
@@ -34,3 +35,25 @@ class MockPaymentProvider(PaymentProvider):
         # network and has no real secret to check against; a real adapter
         # computes an HMAC over `payload` and compares it to `signature`.
         return True
+
+    def parse_webhook_event(self, *, payload: bytes) -> dict[str, str]:
+        # The mock's webhook body already *is* the generic envelope
+        # (tests build {event_id, event_type, provider_reference_id}
+        # directly) — read straight from raw `payload` bytes rather than
+        # request.data, for the same reason WayForPayProvider does: this
+        # method runs against the same bytes verify_signature already saw,
+        # not a Content-Type-dependent parse. Malformed/non-dict JSON comes
+        # back as an empty envelope rather than raising — every field then
+        # arrives blank/missing, which PaymentWebhookEventSerializer already
+        # turns into the existing 400 "malformed body" response.
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return {
+            "event_id": str(data.get("event_id", "")),
+            "event_type": str(data.get("event_type", "")),
+            "provider_reference_id": str(data.get("provider_reference_id", "")),
+        }

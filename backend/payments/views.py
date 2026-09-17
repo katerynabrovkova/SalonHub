@@ -98,13 +98,22 @@ class PaymentWebhookView(APIView):
         if not provider.verify_signature(payload=request.body, signature=signature):
             return Response(status=status.HTTP_401_UNAUTHORIZED)
 
-        # Step 2: parse/validate the body. request.data parses lazily and
-        # raises DRF's ParseError on malformed JSON; is_valid(raise_exception=True)
-        # raises ValidationError on a missing required field. Both propagate
-        # uncaught to the existing core.exceptions.exception_handler (DRF's
-        # global EXCEPTION_HANDLER), which already maps ordinary DRF
-        # exceptions to 400 — no try/except needed here.
-        serializer = PaymentWebhookEventSerializer(data=request.data)
+        # Step 2: normalize the provider's own raw body into the
+        # provider-neutral {event_id, event_type, provider_reference_id}
+        # envelope (docs/DECISIONS.md § "Stage 14 payment step: WayForPay
+        # webhook -> PaymentWebhookView mapping"), against the same raw
+        # `request.body` bytes verify_signature just checked — not
+        # request.data, which trusts a Content-Type header a real
+        # provider's callback doesn't reliably match (see
+        # WayForPayProvider.verify_signature's own docstring). A malformed
+        # body or a missing required field comes back blank/missing from
+        # parse_webhook_event and is caught here by
+        # is_valid(raise_exception=True), which raises DRF's ValidationError
+        # — propagating uncaught to the existing
+        # core.exceptions.exception_handler (DRF's global EXCEPTION_HANDLER),
+        # which already maps it to 400. No try/except needed here.
+        normalized_event = provider.parse_webhook_event(payload=request.body)
+        serializer = PaymentWebhookEventSerializer(data=normalized_event)
         serializer.is_valid(raise_exception=True)
         event_id = serializer.validated_data["event_id"]
         event_type = serializer.validated_data["event_type"]

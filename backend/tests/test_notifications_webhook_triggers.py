@@ -17,6 +17,7 @@ execute=True); test 8 uses execute=False to prove the deferral.
 """
 
 import datetime as dt
+import json
 from decimal import Decimal
 from typing import ClassVar
 
@@ -58,6 +59,22 @@ class _FakeProvider:
 
     def verify_signature(self, *, payload: bytes, signature: str) -> bool:
         return True
+
+    def parse_webhook_event(self, *, payload: bytes) -> dict[str, str]:
+        # Same generic-envelope-from-raw-bytes shape as
+        # MockPaymentProvider.parse_webhook_event — this file's _post()
+        # bodies already speak that envelope directly.
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return {
+            "event_id": str(data.get("event_id", "")),
+            "event_type": str(data.get("event_type", "")),
+            "provider_reference_id": str(data.get("provider_reference_id", "")),
+        }
 
     def start_payment(self, *, amount, currency, reference):
         raise NotImplementedError("not exercised by these tests")
