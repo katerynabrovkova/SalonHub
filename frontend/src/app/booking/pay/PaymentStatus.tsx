@@ -14,10 +14,15 @@
  * distinguished from a missing/malformed fragment — both render the same
  * "link invalid or expired" message, per the decision.
  *
- * Real payment-provider integration is out of scope here (still
- * `MockPaymentProvider` on the backend) — a successful pay call renders a
- * "pending confirmation" state, since payment status stays `pending` until
- * a webhook (nothing real triggers it yet) confirms it.
+ * A successful pay call's `provider_data` decides what renders next:
+ * `null` (MockPaymentProvider, and any provider with nothing further for
+ * the guest to do) keeps the existing static "pending confirmation"
+ * message, since payment status stays `pending` until a webhook confirms
+ * it. A non-empty string (e.g. WayForPayProvider's invoiceUrl) is a link
+ * the guest must follow to actually pay — rendered as a link rather than
+ * an automatic `window.location` redirect, consistent with this file's
+ * existing pattern of an explicit user action (the "Оплатити" button)
+ * rather than anything auto-navigating on its own.
  */
 import { useEffect, useState } from "react";
 
@@ -35,8 +40,12 @@ interface AppointmentDetail {
 type Phase =
   | { kind: "loading" }
   | { kind: "invalid" }
-  | { kind: "paid" }
+  | { kind: "paid"; providerData: string | null }
   | { kind: "status"; appointmentId: number; token: string; status: string };
+
+interface PayResponse {
+  provider_data: string | null;
+}
 
 const INVALID_LINK_MESSAGE = "Посилання недійсне або застаріле.";
 
@@ -114,10 +123,13 @@ export default function PaymentStatus({ slug }: PaymentStatusProps) {
     setError(null);
     setPending(true);
     try {
-      await guestApiRequest(slug, `/guest/appointments/${appointmentId}/pay/`, token, {
-        method: "POST",
-      });
-      setPhase({ kind: "paid" });
+      const response = await guestApiRequest<PayResponse>(
+        slug,
+        `/guest/appointments/${appointmentId}/pay/`,
+        token,
+        { method: "POST" },
+      );
+      setPhase({ kind: "paid", providerData: response.provider_data });
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -134,6 +146,13 @@ export default function PaymentStatus({ slug }: PaymentStatusProps) {
   }
 
   if (phase.kind === "paid") {
+    if (phase.providerData !== null && phase.providerData !== "") {
+      return (
+        <a href={phase.providerData}>
+          Перейти до оплати
+        </a>
+      );
+    }
     return <p>Очікуємо підтвердження оплати.</p>;
   }
 

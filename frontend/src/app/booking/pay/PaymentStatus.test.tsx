@@ -117,6 +117,24 @@ describe("PaymentStatus", () => {
     );
   });
 
+  it("test_successful_pay_with_provider_data_renders_a_link_to_it", async () => {
+    const user = userEvent.setup();
+    setHash("#appointment_id=42&token=tok-abc");
+    guestApiRequestMock.mockResolvedValueOnce({ id: 42, status: "pending_payment" });
+    guestApiRequestMock.mockResolvedValueOnce({
+      payment: { id: 1, status: "pending", amount: "100.00", currency: "UAH" },
+      provider_data: "https://secure.wayforpay.com/invoice/abc123",
+    });
+
+    render(<PaymentStatus slug="bella-demo" />);
+
+    await user.click(await screen.findByRole("button", { name: "Оплатити" }));
+
+    const link = await screen.findByRole("link", { name: "Перейти до оплати" });
+    expect(link).toHaveAttribute("href", "https://secure.wayforpay.com/invoice/abc123");
+    expect(screen.queryByText("Очікуємо підтвердження оплати.")).not.toBeInTheDocument();
+  });
+
   it("test_failed_detail_fetch_renders_invalid_link_message", async () => {
     setHash("#appointment_id=42&token=tok-abc");
     guestApiRequestMock.mockRejectedValueOnce(new Error("Request failed."));
