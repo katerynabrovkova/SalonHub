@@ -2866,3 +2866,33 @@ integration, not just this one.
   default everywhere; going live is separate future work, already scoped
   out as such in the earlier "Stage 14 payment step: WayForPayProvider
   architecture" entry above.
+
+### Stage 14 payment step: WayForPay webhook → PaymentWebhookView mapping
+
+Decided 17.09.2026.
+
+- **`provider_reference_id`** maps directly to WayForPay's `orderReference`
+  — already stored on `Payment` by `start_payment()`, no new field needed.
+- **`event_type`** is derived from WayForPay's `transactionStatus`:
+  `Approved` → `payment_succeeded`, `Declined` → `payment_failed`,
+  `Refunded`/`Voided` → `refund_succeeded`. Any other `transactionStatus`
+  is an unrecognized `event_type` — the existing no-op path in
+  `PaymentWebhookView.post` is unchanged.
+- **`event_id`** (the idempotency key) is the composite
+  `f"{orderReference};{transactionStatus};{reasonCode}"`, not
+  `orderReference` alone — a bare `orderReference` would collide across
+  distinct lifecycle events on the same order (e.g. `Declined` then later
+  `Approved`, or `Approved` then later `Refunded`), while the composite
+  still dedupes true delivery retries of the identical status (WayForPay
+  resends the same notification unchanged on retry).
+- **`Payment.provider_reference_id` gets a DB-level `unique=True`** (it was
+  `db_index`-only). The webhook lookup in `PaymentWebhookView.post`
+  (`Payment.unscoped_objects.get(provider_reference_id=...)`) already
+  assumes exactly one matching row per value; nothing currently guarantees
+  that at the DB layer, only that each `start_payment()` call happens to
+  produce a fresh value.
+
+This decision is recorded now, ahead of writing the migration — the
+`unique=True` change touches `Payment`'s field definition, which
+`CLAUDE.md` requires be raised and approved before the model change (or
+the migration containing the resulting `AlterField`) is written.
