@@ -237,6 +237,10 @@ PASSWORD_RESET_TIMEOUT = 60 * 60  # 1 hour
 WAYFORPAY_MERCHANT_ACCOUNT = env("WAYFORPAY_MERCHANT_ACCOUNT", default="")
 WAYFORPAY_SECRET_KEY = env("WAYFORPAY_SECRET_KEY", default="")
 WAYFORPAY_DOMAIN_NAME = env("WAYFORPAY_DOMAIN_NAME", default="")
+# Callback URL passed as Create Invoice's serviceUrl — where WayForPay POSTs
+# the payment-status webhook. Same optional/empty-default pattern as the
+# three settings above.
+WAYFORPAY_SERVICE_URL = env("WAYFORPAY_SERVICE_URL", default="")
 
 # --- CORS ------------------------------------------------------------------
 #
@@ -283,3 +287,30 @@ CSRF_COOKIE_HTTPONLY = False
 # subdomain — docs/DECISIONS.md § "Frontend routing: subdomain-based". Django
 # supports a leading-wildcard host here.
 CSRF_TRUSTED_ORIGINS = [f"https://*.{PLATFORM_DOMAIN}"]
+
+# --- Logging -----------------------------------------------------------------
+#
+# Without this, app loggers (logging.getLogger(__name__) anywhere outside the
+# "django"/"django.server" namespaces — e.g. payments.views,
+# payments.providers.wayforpay) have no handler of their own, so they
+# propagate to the root logger. Django's own DEFAULT_LOGGING never configures
+# a root logger or a catch-all handler, so with no LOGGING setting at all the
+# root logger falls back to logging.lastResort, which only emits WARNING and
+# above — every logger.info()/logger.debug() call in app code is silently
+# dropped, while django.server's own access log line (its own explicitly
+# configured logger+handler) keeps appearing regardless. This is not
+# PYTHONUNBUFFERED (already set to 1 in Dockerfile) — the record never
+# reaches a handler at all, buffered or not.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}
