@@ -16,6 +16,11 @@ Appointment.
 GuestBookingCreateView (§ Stage 7.D decisions) is the one write path with no
 object to guard yet — it creates the Appointment — so it's a plain APIView,
 not a generic.
+
+AccountAppointmentListView (§ Stage 15 planning, item 1) is Account-JWT
+authenticated, not guest-token authenticated — a separate, additive list
+endpoint alongside the guest-token views above, not a replacement for any
+of them.
 """
 
 from django.db.models import QuerySet
@@ -30,6 +35,7 @@ from rest_framework.views import APIView
 
 from booking.models import Appointment, CancelledBy
 from booking.serializers import (
+    AppointmentAccountSerializer,
     AppointmentCreatedSerializer,
     AppointmentGuestSerializer,
     GuestBookingRequestSerializer,
@@ -158,6 +164,45 @@ class GuestAppointmentPayView(_GuestTokenAppointmentMixin, generics.GenericAPIVi
         return Response(
             {"payment": self.get_serializer(payment).data, "provider_data": provider_data},
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class AccountAppointmentListView(generics.ListAPIView):
+    """
+    ``GET appointments/mine/`` — appointments belonging to the
+    authenticated Account's linked Customer in the current salon
+    (docs/DECISIONS.md § Stage 15 planning, item 1). Separate, additive
+    endpoint: does not touch the guest-token views above.
+
+    No explicit `authentication_classes`/`permission_classes` override:
+    relies on the project-wide defaults (`AccountJWTCookieAuthentication` +
+    `IsAuthenticated`), same posture as `accounts.views.MeView` — an
+    unauthenticated request is already rejected with 401 before this view's
+    code runs.
+
+    `Appointment.objects` is tenant-scoped (`core.models.TenantScopedManager`),
+    so a Customer belonging to another salon can never surface here even if
+    its id were somehow guessed — the `customer_id` filter below narrows
+    further, to the requesting Account's own linked Customer, the same
+    "resolve from identity, never the URL" shape as
+    `reviews.views.ReviewCreateView._resolve_owned_appointment`. An Account
+    with no linked Customer yet (unverified, or verified but no matching
+    guest Customer ever existed) legitimately has none, so the queryset is
+    empty rather than an error.
+
+    Ordered newest-appointment-first (`-start_datetime`, tie-broken by
+    `-id`), the same newest-first convention `reviews.views.ReviewListView`
+    already uses for a per-recipient list.
+    """
+
+    serializer_class = AppointmentAccountSerializer
+
+    def get_queryset(self) -> QuerySet[Appointment]:
+        customer_id = self.request.user.customer_id  # type: ignore[union-attr]
+        if customer_id is None:
+            return Appointment.objects.none()
+        return Appointment.objects.filter(customer_id=customer_id).order_by(
+            "-start_datetime", "-id"
         )
 
 

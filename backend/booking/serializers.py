@@ -25,6 +25,30 @@ class AppointmentGuestSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class AppointmentAccountSerializer(serializers.ModelSerializer):
+    """
+    Read-only representation for AccountAppointmentListView (docs/DECISIONS.md
+    § Stage 15 planning, item 1). Same field set as AppointmentGuestSerializer
+    — kept as a separate class rather than reused, since the two endpoints
+    have different identities/permissions and are free to diverge later.
+    """
+
+    class Meta:
+        model = Appointment
+        fields = [
+            "id",
+            "status",
+            "start_datetime",
+            "end_datetime",
+            "specialist",
+            "service",
+            "cancelled_at",
+            "cancelled_by",
+            "cancellation_reason",
+        ]
+        read_only_fields = fields
+
+
 class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):
     """
     Accepts either a real specialist pk or the literal string "any"

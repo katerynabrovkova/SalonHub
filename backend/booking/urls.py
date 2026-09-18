@@ -25,4 +25,9 @@ urlpatterns = [
         views.GuestAppointmentPayView.as_view(),
         name="guest-appointment-pay",
     ),
+    path(
+        "appointments/mine/",
+        views.AccountAppointmentListView.as_view(),
+        name="account-appointment-list",
+    ),
 ]
