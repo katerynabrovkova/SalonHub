@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { useAuth } from "@/app/AuthContext";
 import { apiRequest } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
@@ -12,13 +13,9 @@ import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 // (docs/DECISIONS.md § "Frontend routing: subdomain-based").
 const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "salonhub.com";
 
-interface Me {
-  email: string;
-  role: "admin" | "client";
-}
-
 export default function LoginPage() {
   const router = useRouter();
+  const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -45,11 +42,7 @@ export default function LoginPage() {
     setPending(true);
 
     try {
-      await apiRequest(slug, "/auth/login/", {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
-      const me = await apiRequest<Me>(slug, "/auth/me/");
+      const me = await login(email, password);
       router.push(me.role === "admin" ? "/admin" : "/client");
     } catch (err) {
       if (err instanceof ApiError) {

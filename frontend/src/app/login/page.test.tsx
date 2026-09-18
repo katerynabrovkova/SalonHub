@@ -18,8 +18,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
-// Imported after the mocks above so the mocked module is what page.tsx sees.
+// Imported after the mocks above so the mocked module is what page.tsx and
+// AuthContext.tsx see.
 import { apiRequest } from "@/lib/api/client";
+import { AuthProvider } from "@/app/AuthContext";
 import LoginPage from "./page";
 
 const mockedApiRequest = vi.mocked(apiRequest);
@@ -28,10 +30,58 @@ function findCall(path: string) {
   return mockedApiRequest.mock.calls.find(([, calledPath]) => calledPath.includes(path));
 }
 
+function renderLoginPage() {
+  return render(
+    <AuthProvider>
+      <LoginPage />
+    </AuthProvider>,
+  );
+}
+
 async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/email/i), "person@example.com");
   await user.type(screen.getByLabelText(/password/i), "correct-horse-battery-staple");
   await user.click(screen.getByRole("button", { name: /log in/i }));
+}
+
+/**
+ * AuthProvider (root layout, docs/DECISIONS.md § Stage 15 planning, item 2)
+ * now issues its own `GET auth/me/` on mount, independently of
+ * LoginPage's `GET auth/csrf/` mount effect — the two effects' relative
+ * firing order is a React/JSDOM implementation detail, not part of this
+ * page's contract. Routing every mocked apiRequest call by its `path`
+ * argument (rather than a positional `mockResolvedValueOnce` queue) keeps
+ * these tests correct regardless of that order, and matches what a real
+ * backend would do (respond based on which endpoint was hit).
+ */
+function mockApiRoutes({
+  meBeforeLogin,
+  login,
+  meAfterLogin,
+}: {
+  meBeforeLogin?: () => Promise<unknown>;
+  login?: () => Promise<unknown>;
+  meAfterLogin?: () => Promise<unknown>;
+} = {}) {
+  let loginCalled = false;
+  mockedApiRequest.mockImplementation((...args) => {
+    const [, path, options] = args as [string, string, RequestInit | undefined];
+    if (path.includes("/auth/csrf/")) {
+      return Promise.resolve(undefined);
+    }
+    if (path.includes("/auth/login/") && (options?.method ?? "GET").toUpperCase() === "POST") {
+      loginCalled = true;
+      return login ? login() : Promise.resolve(undefined);
+    }
+    if (path.includes("/auth/me/")) {
+      return loginCalled && meAfterLogin
+        ? meAfterLogin()
+        : meBeforeLogin
+          ? meBeforeLogin()
+          : Promise.reject(new ApiError(401, "not_authenticated", "Not authenticated."));
+    }
+    throw new Error(`unexpected apiRequest call: ${path}`);
+  });
 }
 
 beforeEach(() => {
@@ -41,9 +91,9 @@ beforeEach(() => {
 
 describe("LoginPage", () => {
   test("test_primes_csrf_cookie_on_mount", async () => {
-    mockedApiRequest.mockResolvedValueOnce(undefined);
+    mockApiRoutes();
 
-    render(<LoginPage />);
+    renderLoginPage();
 
     await waitFor(() => {
       const csrfCall = findCall("/auth/csrf/");
@@ -59,45 +109,44 @@ describe("LoginPage", () => {
 
   test("test_successful_login_redirects_by_role", async () => {
     const user = userEvent.setup();
-    mockedApiRequest
-      .mockResolvedValueOnce(undefined) // csrf priming on mount
-      .mockResolvedValueOnce(undefined) // POST auth/login/
-      .mockResolvedValueOnce({ email: "person@example.com", role: "admin" }); // GET auth/me/
+    mockApiRoutes({
+      login: () => Promise.resolve(undefined),
+      meAfterLogin: () => Promise.resolve({ email: "person@example.com", role: "admin" }),
+    });
 
-    render(<LoginPage />);
+    renderLoginPage();
     await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
 
     await fillAndSubmit(user);
 
-    await waitFor(() => expect(findCall("/auth/me/")).toBeDefined());
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/admin"));
   });
 
   test("test_successful_login_client_role_redirects_to_client", async () => {
     const user = userEvent.setup();
-    mockedApiRequest
-      .mockResolvedValueOnce(undefined) // csrf priming on mount
-      .mockResolvedValueOnce(undefined) // POST auth/login/
-      .mockResolvedValueOnce({ email: "person@example.com", role: "client" }); // GET auth/me/
+    mockApiRoutes({
+      login: () => Promise.resolve(undefined),
+      meAfterLogin: () => Promise.resolve({ email: "person@example.com", role: "client" }),
+    });
 
-    render(<LoginPage />);
+    renderLoginPage();
     await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
 
     await fillAndSubmit(user);
 
-    await waitFor(() => expect(findCall("/auth/me/")).toBeDefined());
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/client"));
   });
 
   test("test_invalid_credentials_shows_generic_error", async () => {
     const user = userEvent.setup();
-    mockedApiRequest
-      .mockResolvedValueOnce(undefined) // csrf priming on mount
-      .mockRejectedValueOnce(
-        new ApiError(401, "invalid_credentials", "Email or password is incorrect."),
-      );
+    mockApiRoutes({
+      login: () =>
+        Promise.reject(
+          new ApiError(401, "invalid_credentials", "Email or password is incorrect."),
+        ),
+    });
 
-    render(<LoginPage />);
+    renderLoginPage();
     await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
 
     await fillAndSubmit(user);
@@ -116,13 +165,12 @@ describe("LoginPage", () => {
 
   test("test_rate_limited_shows_throttle_message", async () => {
     const user = userEvent.setup();
-    mockedApiRequest
-      .mockResolvedValueOnce(undefined) // csrf priming on mount
-      .mockRejectedValueOnce(
-        new ApiError(429, "throttled", "Too many attempts. Please try again later."),
-      );
+    mockApiRoutes({
+      login: () =>
+        Promise.reject(new ApiError(429, "throttled", "Too many attempts. Please try again later.")),
+    });
 
-    render(<LoginPage />);
+    renderLoginPage();
     await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
 
     await fillAndSubmit(user);
@@ -142,11 +190,11 @@ describe("LoginPage", () => {
       resolveLogin = resolve;
     });
 
-    mockedApiRequest
-      .mockResolvedValueOnce(undefined) // csrf priming on mount
-      .mockReturnValueOnce(pendingLogin); // POST auth/login/ — never resolves during this test
+    mockApiRoutes({
+      login: () => pendingLogin, // never resolves during this test
+    });
 
-    render(<LoginPage />);
+    renderLoginPage();
     await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
 
     await fillAndSubmit(user);
