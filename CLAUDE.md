@@ -151,6 +151,13 @@ salons without rework.
   leaves validation running against the empty class-body placeholder, rejecting every id
   from every tenant. Recurs on every future `many=True` tenant-scoped relation. Full
   account: `docs/DECISIONS.md` § Stage 5.
+- **`Intl.NumberFormat` inserts U+00A0 (non-breaking space) as a separator, not a
+  regular space** — a literal string passed to Testing Library's `getByText`/
+  `queryByText` won't match DOM-rendered `Intl.NumberFormat` output even when visually
+  identical, since `getByText`'s default normalizer collapses whitespace in the
+  extracted DOM text but not in a literal-string matcher. Fix: match with a regex that
+  escapes the target string and replaces whitespace runs with `\s+`, or use a custom
+  normalizer.
 
 ## Coding conventions
 
