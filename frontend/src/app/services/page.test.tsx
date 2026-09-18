@@ -13,6 +13,10 @@ vi.mock("@/lib/catalog/getServicesPage", () => ({
   getServicesPage: vi.fn(),
 }));
 
+vi.mock("@/lib/tenants/getSalonInfoPage", () => ({
+  getSalonInfoPage: vi.fn(),
+}));
+
 vi.mock("next/headers", () => ({
   headers: vi.fn(),
 }));
@@ -25,6 +29,8 @@ vi.mock("next/navigation", () => ({
 // Imported after the mocks above so the mocked modules are what page.tsx sees.
 import { getServiceCategories } from "@/lib/catalog/getServiceCategories";
 import { getServicesPage, type Service } from "@/lib/catalog/getServicesPage";
+import { formatPrice } from "@/lib/pricing/formatPrice";
+import { getSalonInfoPage } from "@/lib/tenants/getSalonInfoPage";
 import { SALON_SLUG_HEADER } from "@/middleware";
 import { headers } from "next/headers";
 
@@ -33,6 +39,19 @@ import ServicesPage from "./page";
 const mockedHeaders = vi.mocked(headers);
 const mockedGetServiceCategories = vi.mocked(getServiceCategories);
 const mockedGetServicesPage = vi.mocked(getServicesPage);
+const mockedGetSalonInfoPage = vi.mocked(getSalonInfoPage);
+
+// formatPrice's Intl.NumberFormat output contains a literal non-breaking
+// space (U+00A0). getByText's default normalizer collapses whitespace only
+// in the DOM's own text before comparing, not in a literal string matcher —
+// so an exact-string query would mismatch against the (nbsp-collapsed)
+// rendered text despite them being visually identical. A regex sidesteps
+// this: `\s` matches nbsp on the DOM side, and there's no separate
+// normalization step on the matcher side to go wrong.
+function formattedPriceRegex(price: string, currency: string): RegExp {
+  const escaped = formatPrice(price, currency).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped.replace(/\s+/g, "\\s+"));
+}
 
 function searchParamsOf(params: Record<string, string | undefined>) {
   return Promise.resolve(params);
@@ -43,6 +62,8 @@ beforeEach(() => {
   mockedHeaders.mockReset();
   mockedGetServiceCategories.mockReset();
   mockedGetServicesPage.mockReset();
+  mockedGetSalonInfoPage.mockReset();
+  mockedGetSalonInfoPage.mockResolvedValue({ currency: "UAH" });
 
   mockedHeaders.mockResolvedValue({
     get: (name: string) => (name === SALON_SLUG_HEADER ? "bella-demo" : null),
@@ -129,6 +150,40 @@ describe("ServicesPage: category-list / service-grid split", () => {
     expect(mockedGetServicesPage).toHaveBeenCalledWith("bella-demo", 1, "1");
     expect(mockedGetServiceCategories).not.toHaveBeenCalled();
     expect(screen.getByText("Manicure")).toBeInTheDocument();
+  });
+
+  it("test_service_grid_fetches_salon_info_and_passes_currency_to_price_display", async () => {
+    // currency=USD, distinct from the file's default UAH stub (beforeEach),
+    // so a passing rendered-price assertion proves the prop actually flows
+    // from getSalonInfoPage's result through to the grid, not just that
+    // *some* formatted string happens to appear.
+    mockedGetSalonInfoPage.mockResolvedValueOnce({ currency: "USD" });
+    mockedGetServicesPage.mockResolvedValueOnce({
+      services: [
+        {
+          id: 1,
+          salon: 1,
+          category: { id: 1, name: "Nails" },
+          name: "Manicure",
+          description: "A classic manicure with polish.",
+          duration_minutes: 60,
+          price: "500.00",
+          buffer_minutes: 15,
+          ordering: 0,
+          is_active: true,
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+      currentPage: 1,
+      totalPages: 1,
+    });
+
+    const element = await ServicesPage({ searchParams: searchParamsOf({ category: "1" }) });
+    render(element);
+
+    expect(mockedGetSalonInfoPage).toHaveBeenCalledWith("bella-demo");
+    expect(screen.getByText(formattedPriceRegex("500.00", "USD"))).toBeInTheDocument();
   });
 
   it("test_pagination_links_forward_category_param", async () => {
@@ -279,7 +334,9 @@ describe("ServicesPage: service card restructure + info popover (not yet impleme
     expect(dialog).toHaveTextContent("Manicure");
     expect(dialog).toHaveTextContent("A classic manicure with polish.");
     expect(dialog).toHaveTextContent("60");
-    expect(dialog).toHaveTextContent("500.00");
+    // beforeEach stubs getSalonInfoPage to resolve { currency: "UAH" } by
+    // default — the price is now the formatted string, not the bare value.
+    expect(dialog).toHaveTextContent(formattedPriceRegex("500.00", "UAH"));
     expect(dialog).toHaveTextContent("Nails");
   });
 

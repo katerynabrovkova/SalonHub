@@ -15,6 +15,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { formatPrice } from "@/lib/pricing/formatPrice";
+
 import ServiceInfoPopover from "./ServiceInfoPopover";
 
 interface Service {
@@ -31,6 +33,7 @@ type ConfirmTarget = { mode: "service" } | { mode: "specialist"; specialistId: n
 interface ServiceSelectionGridProps {
   services: Service[];
   confirmTarget: ConfirmTarget;
+  currency: string;
 }
 
 function buildConfirmUrl(confirmTarget: ConfirmTarget, selectedId: number): string {
@@ -40,7 +43,11 @@ function buildConfirmUrl(confirmTarget: ConfirmTarget, selectedId: number): stri
   return `/booking?entry=specialist&specialist=${confirmTarget.specialistId}&service=${selectedId}&step=3`;
 }
 
-export default function ServiceSelectionGrid({ services, confirmTarget }: ServiceSelectionGridProps) {
+export default function ServiceSelectionGrid({
+  services,
+  confirmTarget,
+  currency,
+}: ServiceSelectionGridProps) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
@@ -84,12 +91,14 @@ export default function ServiceSelectionGrid({ services, confirmTarget }: Servic
                   inside a <label> has its own click-propagation quirks with
                   the label's associated control, the same reason the info
                   button previously stayed a sibling of the stretched <Link>. */}
-              <ServiceInfoPopover service={service} />
+              <ServiceInfoPopover service={service} currency={currency} />
             </div>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
               {service.duration_minutes} хв
             </p>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">{service.price}</p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              {formatPrice(service.price, currency)}
+            </p>
           </div>
         ))}
       </div>

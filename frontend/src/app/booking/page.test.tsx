@@ -31,17 +31,23 @@ vi.mock("@/lib/scheduling/getAvailability", () => ({
   getAvailability: vi.fn(),
 }));
 
+vi.mock("@/lib/tenants/getSalonInfoPage", () => ({
+  getSalonInfoPage: vi.fn(),
+}));
+
 vi.mock("next/headers", () => ({
   headers: vi.fn(),
 }));
 
 // Imported after the mocks above so the mocked modules are what page.tsx sees.
+import { formatPrice } from "@/lib/pricing/formatPrice";
 import { getAvailability } from "@/lib/scheduling/getAvailability";
 import {
   getSpecialistDetailPage,
   type SpecialistDetail,
 } from "@/lib/specialists/getSpecialistDetailPage";
 import { getSpecialistsPage, type Specialist } from "@/lib/specialists/getSpecialistsPage";
+import { getSalonInfoPage } from "@/lib/tenants/getSalonInfoPage";
 import { SALON_SLUG_HEADER } from "@/middleware";
 import { headers } from "next/headers";
 
@@ -52,6 +58,19 @@ const mockedHeaders = vi.mocked(headers);
 const mockedGetSpecialistDetailPage = vi.mocked(getSpecialistDetailPage);
 const mockedGetSpecialistsPage = vi.mocked(getSpecialistsPage);
 const mockedGetAvailability = vi.mocked(getAvailability);
+const mockedGetSalonInfoPage = vi.mocked(getSalonInfoPage);
+
+// formatPrice's Intl.NumberFormat output contains a literal non-breaking
+// space (U+00A0). getByText's default normalizer collapses whitespace only
+// in the DOM's own text before comparing, not in a literal string matcher —
+// so an exact-string query would mismatch against the (nbsp-collapsed)
+// rendered text despite them being visually identical. A regex sidesteps
+// this: `\s` matches nbsp on the DOM side, and there's no separate
+// normalization step on the matcher side to go wrong.
+function formattedPriceRegex(price: string, currency: string): RegExp {
+  const escaped = formatPrice(price, currency).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped.replace(/\s+/g, "\\s+"));
+}
 
 function searchParamsOf(params: Record<string, string | undefined>) {
   return Promise.resolve(params);
@@ -381,6 +400,8 @@ describe("BookingPage step 2, entry=specialist: fetches and renders services_det
     pushMock.mockReset();
     mockedHeaders.mockReset();
     mockedGetSpecialistDetailPage.mockReset();
+    mockedGetSalonInfoPage.mockReset();
+    mockedGetSalonInfoPage.mockResolvedValue({ currency: "UAH" });
 
     mockedHeaders.mockResolvedValue({
       get: (name: string) => (name === SALON_SLUG_HEADER ? "bella-demo" : null),
@@ -432,12 +453,32 @@ describe("BookingPage step 2, entry=specialist: fetches and renders services_det
     render(element);
 
     expect(mockedGetSpecialistDetailPage).toHaveBeenCalledWith("bella-demo", 9);
+    expect(mockedGetSalonInfoPage).toHaveBeenCalledWith("bella-demo");
     expect(screen.getByRole("radio", { name: "Manicure" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Pedicure" })).toBeInTheDocument();
     expect(screen.getByText("45 хв")).toBeInTheDocument();
-    expect(screen.getByText("350.00")).toBeInTheDocument();
+    // beforeEach stubs getSalonInfoPage to resolve { currency: "UAH" } by
+    // default — the price is now the formatted string, not the bare value.
+    expect(screen.getByText(formattedPriceRegex("350.00", "UAH"))).toBeInTheDocument();
     expect(screen.getByText("60 хв")).toBeInTheDocument();
-    expect(screen.getByText("500.00")).toBeInTheDocument();
+    expect(screen.getByText(formattedPriceRegex("500.00", "UAH"))).toBeInTheDocument();
+  });
+
+  it("test_step2_specialist_fetches_salon_info_and_passes_currency_to_price_display", async () => {
+    // currency=USD, distinct from the describe block's default UAH stub, so
+    // a passing rendered-price assertion proves the prop actually flows
+    // from getSalonInfoPage's result through to the grid, not just that
+    // *some* formatted string happens to appear.
+    mockedGetSalonInfoPage.mockResolvedValueOnce({ currency: "USD" });
+    mockedGetSpecialistDetailPage.mockResolvedValueOnce(specialistFixture());
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({ entry: "specialist", specialist: "9" }),
+    });
+    render(element);
+
+    expect(mockedGetSalonInfoPage).toHaveBeenCalledWith("bella-demo");
+    expect(screen.getByText(formattedPriceRegex("350.00", "USD"))).toBeInTheDocument();
   });
 
   it("test_step2_specialist_confirm_navigates_to_step3", async () => {

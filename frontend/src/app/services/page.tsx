@@ -4,6 +4,7 @@ import Link from "next/link";
 import { getServiceCategories, type ServiceCategory } from "@/lib/catalog/getServiceCategories";
 import { getServicesPage } from "@/lib/catalog/getServicesPage";
 import { initials } from "@/lib/format/initials";
+import { getSalonInfoPage } from "@/lib/tenants/getSalonInfoPage";
 import { SALON_SLUG_HEADER } from "@/middleware";
 
 import ServiceSelectionGrid from "./ServiceSelectionGrid";
@@ -88,7 +89,10 @@ export default async function ServicesPage({ searchParams }: ServicesPageProps) 
   }
 
   const page = parsePage(resolvedSearchParams.page);
-  const { services, currentPage, totalPages } = await getServicesPage(slug, page, category);
+  const [{ services, currentPage, totalPages }, { currency }] = await Promise.all([
+    getServicesPage(slug, page, category),
+    getSalonInfoPage(slug),
+  ]);
 
   if (totalPages === 0) {
     return (
@@ -100,7 +104,11 @@ export default async function ServicesPage({ searchParams }: ServicesPageProps) 
 
   return (
     <main className="flex flex-col gap-6 p-8">
-      <ServiceSelectionGrid services={services} confirmTarget={{ mode: "service" }} />
+      <ServiceSelectionGrid
+        services={services}
+        confirmTarget={{ mode: "service" }}
+        currency={currency}
+      />
 
       <nav className="flex items-center justify-center gap-4">
         {currentPage > 1 ? (

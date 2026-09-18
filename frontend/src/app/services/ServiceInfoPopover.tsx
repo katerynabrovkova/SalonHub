@@ -15,6 +15,8 @@
  */
 import { useRef, useState } from "react";
 
+import { formatPrice } from "@/lib/pricing/formatPrice";
+
 interface ServiceInfoPopoverProps {
   service: {
     name: string;
@@ -23,9 +25,10 @@ interface ServiceInfoPopoverProps {
     price: string;
     category?: { name: string };
   };
+  currency: string;
 }
 
-export default function ServiceInfoPopover({ service }: ServiceInfoPopoverProps) {
+export default function ServiceInfoPopover({ service, currency }: ServiceInfoPopoverProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -77,7 +80,9 @@ export default function ServiceInfoPopover({ service }: ServiceInfoPopoverProps)
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
               {service.duration_minutes} хв
             </p>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">{service.price}</p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              {formatPrice(service.price, currency)}
+            </p>
             {service.category !== undefined ? (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">{service.category.name}</p>
             ) : null}

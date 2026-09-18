@@ -16,6 +16,7 @@ import { getAvailability } from "@/lib/scheduling/getAvailability";
 import { groupAvailabilityByDay } from "@/lib/scheduling/groupAvailabilityByDay";
 import { getSpecialistDetailPage } from "@/lib/specialists/getSpecialistDetailPage";
 import { getSpecialistsPage } from "@/lib/specialists/getSpecialistsPage";
+import { getSalonInfoPage } from "@/lib/tenants/getSalonInfoPage";
 import { SALON_SLUG_HEADER } from "@/middleware";
 
 import ServiceSelectionGrid from "../services/ServiceSelectionGrid";
@@ -130,7 +131,10 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
       notFound();
     }
 
-    const specialistDetail = await getSpecialistDetailPage(slug, specialistId);
+    const [specialistDetail, { currency }] = await Promise.all([
+      getSpecialistDetailPage(slug, specialistId),
+      getSalonInfoPage(slug),
+    ]);
     if (specialistDetail === null) {
       notFound();
     }
@@ -140,6 +144,7 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
         <ServiceSelectionGrid
           services={specialistDetail.services_detail}
           confirmTarget={{ mode: "specialist", specialistId }}
+          currency={currency}
         />
       </main>
     );
