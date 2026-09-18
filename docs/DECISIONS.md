@@ -2989,3 +2989,28 @@ This decision is recorded now, ahead of writing the migration — the
 `unique=True` change touches `Payment`'s field definition, which
 `CLAUDE.md` requires be raised and approved before the model change (or
 the migration containing the resulting `AlterField`) is written.
+
+### Known issue: `test_create_guest_appointment_raw_token_round_trips_through_validate_guest_token` is a time bomb
+
+Noted 18.09.2026, during the tenants Salon-info endpoint work above — found
+failing in a full-suite run unrelated to that change.
+
+- `tests/test_booking_create_guest_appointment.py` hardcodes a fixed past
+  `SAFE_NOW` (2026-08-16) as the `now` passed into token issuance. The
+  issued token's `expires_at` is frozen relative to that fixed clock
+  (`GUEST_TOKEN_VALIDITY` = 30 days, so ~2026-09-15), but
+  `validate_guest_token` (`booking/guest_tokens.py`) checks expiry against
+  the real wall-clock `timezone.now()`, not the test's injected `now` — the
+  two clocks were never the same one to begin with.
+- **Currently failing**: today's real date has passed the token's fixed
+  expiry, so the "round trips" assertion now fails with
+  `InvalidOrExpiredTokenError`. Confirmed via `git status` that this is
+  unrelated to any change made in this session (only `tenants/` and
+  `config/urls.py` were touched) and reproduces identically when run in
+  isolation.
+- **A genuine test design flaw ("time bomb"), not a regression** — the
+  test was always going to fail once enough real time passed since
+  `SAFE_NOW` was chosen, regardless of any code change. Needs its own fix
+  (freeze both issuance and validation against the same test clock, e.g.
+  `freezegun` or an injectable clock in `validate_guest_token`) as
+  separate future work — not fixed here.
