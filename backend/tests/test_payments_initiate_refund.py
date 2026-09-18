@@ -16,8 +16,8 @@ Signature under test:
 (`payments.providers.mock.MockPaymentProvider`) is used here, same
 discipline as 8.C: `_FakeProvider`/`_RaisingProvider` below are minimal
 `PaymentProvider`-shaped doubles defined purely for this file, exercising
-only `refund(*, provider_reference_id, reference, amount)` — `start_payment`
-is not exercised by these tests and raises if called.
+only `refund(*, provider_reference_id, reference, amount, currency)` —
+`start_payment` is not exercised by these tests and raises if called.
 
 Real-DB integration tests throughout (the service does select_for_update()
 plus a write) — no monkeypatching. Every backing `Appointment` is
@@ -69,12 +69,13 @@ class _FakeProvider:
     def start_payment(self, *, amount, currency, reference):
         raise NotImplementedError("not exercised by initiate_refund tests")
 
-    def refund(self, *, provider_reference_id, reference, amount):
+    def refund(self, *, provider_reference_id, reference, amount, currency):
         self.calls.append(
             {
                 "provider_reference_id": provider_reference_id,
                 "reference": reference,
                 "amount": amount,
+                "currency": currency,
             }
         )
         return _FakeRefundIntent(provider_reference_id=f"fake_refund_{len(self.calls)}")
@@ -90,7 +91,7 @@ class _RaisingProvider:
     def start_payment(self, *, amount, currency, reference):
         raise NotImplementedError("not exercised by initiate_refund tests")
 
-    def refund(self, *, provider_reference_id, reference, amount):
+    def refund(self, *, provider_reference_id, reference, amount, currency):
         self.calls += 1
         raise self._exc
 
@@ -173,6 +174,7 @@ def test_initiate_refund_calls_provider_with_reference_id_and_appointment_refere
             "provider_reference_id": "existing_ref",
             "reference": str(appt.id),
             "amount": Decimal("100.00"),
+            "currency": salon.currency,
         }
     ]
 
@@ -188,10 +190,13 @@ def test_initiate_refund_writes_refund_pending_before_calling_provider(
     seen: dict = {}
 
     class _AssertingProvider(_FakeProvider):
-        def refund(self, *, provider_reference_id, reference, amount):
+        def refund(self, *, provider_reference_id, reference, amount, currency):
             seen["status_at_call_time"] = Payment.objects.get(pk=existing.pk).status
             return super().refund(
-                provider_reference_id=provider_reference_id, reference=reference, amount=amount
+                provider_reference_id=provider_reference_id,
+                reference=reference,
+                amount=amount,
+                currency=currency,
             )
 
     provider = _AssertingProvider()

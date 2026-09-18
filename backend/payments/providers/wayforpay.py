@@ -2,9 +2,11 @@
 WayForPayProvider — first real payment adapter alongside
 MockPaymentProvider (docs/DECISIONS.md § "Stage 14 payment step:
 WayForPayProvider architecture" and § "WayForPayProvider: first-time
-technical conventions"). This step implements start_payment() only.
-refund() stays a NotImplementedError stub (separate future step, not in
-scope here). verify_signature() covers WayForPay's payment-status webhook
+technical conventions"). start_payment() implements WayForPay's Create
+Invoice API; refund() implements WayForPay's separate Refund API — its own
+signature formula, distinct from both Create Invoice's and the webhook
+callback's (see refund()'s own docstring/comments). verify_signature() covers
+WayForPay's payment-status webhook
 callback (transactionStatus/reasonCode notification, confirmed field order
 per WayForPay support: merchantAccount;orderReference;amount;currency;
 authCode;cardPan;transactionStatus;reasonCode, HMAC_MD5) — a different
@@ -38,6 +40,7 @@ from uuid import uuid4
 import requests
 from django.conf import settings
 
+from core.exceptions import PaymentProviderError
 from payments.providers.base import PaymentIntent, PaymentProvider, RefundIntent
 
 logger = logging.getLogger(__name__)
@@ -217,9 +220,72 @@ class WayForPayProvider(PaymentProvider):
         return PaymentIntent(provider_reference_id=order_reference, provider_data=invoice_url)
 
     def refund(
-        self, *, provider_reference_id: str, reference: str, amount: Decimal
+        self, *, provider_reference_id: str, reference: str, amount: Decimal, currency: str
     ) -> RefundIntent:
-        raise NotImplementedError("WayForPayProvider.refund is a separate future step")
+        amount_str = _format_amount(amount)
+
+        # WayForPay's Refund signature spec is its own, separate formula —
+        # NOT the 8-field formula start_payment/verify_signature use above.
+        # Confirmed with WayForPay support: HMAC_MD5 over exactly
+        # merchantAccount;orderReference;amount;currency. Easy to mix up
+        # with the other two signature schemes in this file — don't "fix"
+        # this to match either of them.
+        signature_fields = [
+            settings.WAYFORPAY_MERCHANT_ACCOUNT,
+            provider_reference_id,
+            amount_str,
+            currency,
+        ]
+        merchant_signature = hmac.new(
+            settings.WAYFORPAY_SECRET_KEY.encode("utf-8"),
+            ";".join(signature_fields).encode("utf-8"),
+            hashlib.md5,
+        ).hexdigest()
+
+        body = {
+            "transactionType": "REFUND",
+            "merchantAccount": settings.WAYFORPAY_MERCHANT_ACCOUNT,
+            "orderReference": provider_reference_id,
+            "amount": amount_str,
+            "currency": currency,
+            "comment": f"Refund for appointment {reference}",
+            "merchantSignature": merchant_signature,
+            "apiVersion": 1,
+        }
+
+        try:
+            response = requests.post(
+                _CREATE_INVOICE_URL, json=body, timeout=_REQUEST_TIMEOUT_SECONDS
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.error(
+                "WayForPay Refund request failed (network-level): %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            raise PaymentProviderError() from exc
+
+        data = response.json()
+
+        # reasonCode == 1100 is WayForPay's universal "Ok" code — don't rely
+        # on transactionStatus casing here: WayForPay's own Refund docs
+        # example shows a lowercase "refunded" status, unlike the
+        # "Approved"/"Declined" casing used by the payment-status webhook
+        # elsewhere in this file.
+        if data.get("reasonCode") != 1100:
+            logger.error(
+                "WayForPay Refund reported failure. status=%s body=%s",
+                response.status_code,
+                response.text,
+            )
+            raise PaymentProviderError()
+
+        # WayForPay's Refund API confirms the refund against the *same*
+        # orderReference rather than minting a separate refund-transaction
+        # id (unlike Stripe's Refund object, which RefundIntent's docstring
+        # otherwise describes) — nothing in the response gives a distinct
+        # id to return instead.
+        return RefundIntent(provider_reference_id=provider_reference_id)
 
     def verify_signature(self, *, payload: bytes, signature: str) -> bool:
         # payload is the raw webhook body — parsed here, not by the

@@ -57,7 +57,7 @@ class PaymentProvider(ABC):
 
     @abstractmethod
     def refund(
-        self, *, provider_reference_id: str, reference: str, amount: Decimal
+        self, *, provider_reference_id: str, reference: str, amount: Decimal, currency: str
     ) -> RefundIntent:
         """
         Reverses the specific existing transaction identified by
@@ -68,6 +68,11 @@ class PaymentProvider(ABC):
         refund) — Stage 8's underlying business rule, always the full
         deposit or nothing, is unchanged; callers always pass the original
         payment's own amount, never a partial or separately computed value.
+
+        `currency` was added for the same reason and mirrors start_payment's
+        own `currency` param — a real provider's refund API requires it
+        explicitly, same pattern as `amount` above. See docs/DECISIONS.md §
+        "Stage 8 refund decision, revisited" (currency).
         """
 
     def verify_signature(self, *, payload: bytes, signature: str) -> bool:

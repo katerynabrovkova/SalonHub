@@ -15,8 +15,8 @@ Signatures under test:
 
     PaymentProvider.start_payment(*, amount: Decimal, currency: str,
                                    reference: str) -> PaymentIntent
-    PaymentProvider.refund(*, provider_reference_id: str,
-                            reference: str, amount: Decimal) -> RefundIntent
+    PaymentProvider.refund(*, provider_reference_id: str, reference: str,
+                            amount: Decimal, currency: str) -> RefundIntent
 
 PaymentIntent carries (provider_reference_id: str, provider_data: str | None);
 RefundIntent carries (provider_reference_id: str) only — a new provider-side
@@ -54,8 +54,8 @@ def test_start_payment_signature_is_keyword_only():
 
 def test_refund_signature_is_keyword_only_and_includes_amount():
     params = inspect.signature(PaymentProvider.refund).parameters
-    assert set(params) - {"self"} == {"provider_reference_id", "reference", "amount"}
-    for name in ("provider_reference_id", "reference", "amount"):
+    assert set(params) - {"self"} == {"provider_reference_id", "reference", "amount", "currency"}
+    for name in ("provider_reference_id", "reference", "amount", "currency"):
         assert params[name].kind == inspect.Parameter.KEYWORD_ONLY
 
 
@@ -74,7 +74,7 @@ def test_mock_start_payment_returns_payment_intent():
 def test_mock_refund_returns_refund_intent():
     provider = MockPaymentProvider()
     result = provider.refund(
-        provider_reference_id="mock_abc", reference="123", amount=Decimal("83.00")
+        provider_reference_id="mock_abc", reference="123", amount=Decimal("83.00"), currency="UAH"
     )
     assert isinstance(result, RefundIntent)
     assert isinstance(result.provider_reference_id, str) and result.provider_reference_id
@@ -91,8 +91,12 @@ def test_mock_start_payment_reference_ids_are_unique_per_call():
 
 def test_mock_refund_reference_ids_are_unique_per_call():
     provider = MockPaymentProvider()
-    first = provider.refund(provider_reference_id="mock_x", reference="1", amount=Decimal("1"))
-    second = provider.refund(provider_reference_id="mock_x", reference="1", amount=Decimal("1"))
+    first = provider.refund(
+        provider_reference_id="mock_x", reference="1", amount=Decimal("1"), currency="UAH"
+    )
+    second = provider.refund(
+        provider_reference_id="mock_x", reference="1", amount=Decimal("1"), currency="UAH"
+    )
     assert first.provider_reference_id != second.provider_reference_id
 
 
@@ -118,7 +122,9 @@ def test_mock_refund_makes_no_network_call(monkeypatch):
     monkeypatch.setattr(socket, "create_connection", _fail)
 
     provider = MockPaymentProvider()
-    provider.refund(provider_reference_id="mock_x", reference="1", amount=Decimal("1"))
+    provider.refund(
+        provider_reference_id="mock_x", reference="1", amount=Decimal("1"), currency="UAH"
+    )
 
 
 def test_mock_provider_has_no_status_or_completion_state():

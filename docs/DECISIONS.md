@@ -2824,6 +2824,41 @@ docstring, reads:
   are easy to conflate because they touch the same method signature; they
   are independent.
 
+### Stage 8 refund decision, revisited again: `PaymentProvider.refund()` gains a `currency` parameter
+
+Agreed 17.09.2026, in a separate session from the `amount` widening directly
+above (agreed 16.09.2026) — a follow-up decision, not a backdated or merged
+part of that earlier one. Same decision pattern, though: WayForPay's Refund
+API requires an explicit `currency` field, mirroring how `amount` was found
+to be required. Agreed before the change was written, per the stage-by-stage
+workflow.
+
+- `refund()` gains an explicit `currency: str` parameter, mirroring
+  `start_payment`'s own `currency` param, for the same reason `amount` was
+  added above. `initiate_refund` (`payments/services.py`) passes
+  `payment.currency`, the value already on the row it fetched.
+- Implemented in the same change as this entry: `WayForPayProvider.refund()`
+  now calls WayForPay's real Refund API
+  (`POST https://api.wayforpay.com/api`, `transactionType: "REFUND"`).
+  Its signature is its own, shorter formula —
+  `merchantAccount;orderReference;amount;currency`, HMAC_MD5 — distinct
+  from both Create Invoice's 9-field signature and the payment-status
+  webhook's 8-field signature already in this file; do not conflate the
+  three. Success is decided by `reasonCode == 1100` (WayForPay's universal
+  "Ok" code), not `transactionStatus`, since WayForPay's own Refund docs
+  example shows a lowercase `"refunded"` status unlike the
+  `"Approved"`/`"Declined"` casing the payment-status webhook uses. On any
+  other `reasonCode`, or a network-level failure, it raises
+  `PaymentProviderError` directly (this file's other methods raise
+  `RuntimeError`/let `requests` exceptions propagate instead, leaving the
+  wrap-into-`PaymentProviderError` step to `payments/services.py`; `refund()`
+  raises it directly per this decision instead, since there is no
+  provider-neutral "reason" string here worth preserving before the wrap).
+  WayForPay's Refund response doesn't mint a separate refund-transaction id
+  the way `RefundIntent`'s docstring describes Stripe's Refund object doing
+  — `refund()` returns the same `provider_reference_id` it was given, the
+  only id WayForPay's response actually carries.
+
 ### WayForPayProvider: first-time technical conventions (HTTP, mocking, Decimal-to-string, errors, credentials)
 
 Decided 16.09.2026 — agreed before any code, per the stage-by-stage

@@ -25,7 +25,7 @@ class MockPaymentProvider(PaymentProvider):
         )
 
     def refund(
-        self, *, provider_reference_id: str, reference: str, amount: Decimal
+        self, *, provider_reference_id: str, reference: str, amount: Decimal, currency: str
     ) -> RefundIntent:
         return RefundIntent(provider_reference_id=f"mock_refund_{uuid4().hex}")
 

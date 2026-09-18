@@ -106,7 +106,7 @@ class _FakeProvider:
     def start_payment(self, *, amount, currency, reference):
         raise NotImplementedError("not exercised by webhook tests")
 
-    def refund(self, *, provider_reference_id, reference, amount):
+    def refund(self, *, provider_reference_id, reference, amount, currency):
         type(self).calls.append(
             {"provider_reference_id": provider_reference_id, "reference": reference}
         )
@@ -127,7 +127,7 @@ class _RejectingProvider:
     def start_payment(self, *, amount, currency, reference):
         raise AssertionError("must not be called past an invalid signature")
 
-    def refund(self, *, provider_reference_id, reference):
+    def refund(self, *, provider_reference_id, reference, amount, currency):
         raise AssertionError("must not be called past an invalid signature")
 
 

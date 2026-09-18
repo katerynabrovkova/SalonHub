@@ -1,8 +1,12 @@
 """
-WayForPayProvider.start_payment() and verify_signature() (docs/ARCHITECTURE.md
-§ 8; docs/DECISIONS.md § "Stage 14 payment step: WayForPayProvider
-architecture" and § "WayForPayProvider: first-time technical conventions").
-refund() is a separate future step, not covered here.
+WayForPayProvider.start_payment(), refund(), and verify_signature()
+(docs/ARCHITECTURE.md § 8; docs/DECISIONS.md § "Stage 14 payment step:
+WayForPayProvider architecture", § "WayForPayProvider: first-time technical
+conventions", and § "Stage 8 refund decision, revisited"). refund() uses
+WayForPay's separate Refund API and its own, shorter signature formula
+(merchantAccount;orderReference;amount;currency) — distinct from both
+Create Invoice's 9-field signature and the payment-status webhook's 8-field
+signature, covered by the other test sections in this file.
 
 Pure unit tests using `responses` to mock the real outbound HTTP call
 (docs/DECISIONS.md's chosen library, over patching the call site directly)
@@ -30,7 +34,8 @@ import requests
 import responses
 from rest_framework.test import APIClient
 
-from payments.providers.base import PaymentIntent
+from core.exceptions import PaymentProviderError
+from payments.providers.base import PaymentIntent, RefundIntent
 from payments.providers.wayforpay import _CREATE_INVOICE_URL, WayForPayProvider
 from payments.views import PaymentWebhookView
 
@@ -212,6 +217,127 @@ def test_start_payment_treats_numeric_reason_code_1100_with_reason_ok_as_success
         provider_reference_id=body["orderReference"],
         provider_data="https://secure.wayforpay.com/invoice/abc123",
     )
+
+
+# --- refund: WayForPay Refund API ------------------------------------------
+#
+# WayForPay's Refund signature is its own, separate formula from both
+# start_payment's Create Invoice signature and the webhook callback's
+# signature above: HMAC_MD5 over exactly
+# merchantAccount;orderReference;amount;currency.
+
+
+def _expected_refund_signature(*, order_reference: str, amount: str, currency: str) -> str:
+    fields = [MERCHANT_ACCOUNT, order_reference, amount, currency]
+    return hmac.new(
+        SECRET_KEY.encode("utf-8"), ";".join(fields).encode("utf-8"), hashlib.md5
+    ).hexdigest()
+
+
+def _mock_refund_success(*, reason_code=1100):
+    responses.add(
+        responses.POST,
+        _CREATE_INVOICE_URL,
+        json={"reasonCode": reason_code, "transactionStatus": "refunded"},
+        status=200,
+    )
+
+
+@responses.activate
+def test_refund_sends_correct_request_shape():
+    _mock_refund_success()
+    provider = WayForPayProvider()
+
+    provider.refund(
+        provider_reference_id="123-abcd1234",
+        reference="123",
+        amount=Decimal("83.00"),
+        currency="UAH",
+    )
+
+    assert len(responses.calls) == 1
+    call = responses.calls[0]
+    assert call.request.url == _CREATE_INVOICE_URL
+    assert call.request.method == "POST"
+    body = json.loads(call.request.body)
+
+    assert body["transactionType"] == "REFUND"
+    assert body["merchantAccount"] == MERCHANT_ACCOUNT
+    assert body["orderReference"] == "123-abcd1234"
+    assert body["amount"] == "83.00"
+    assert body["currency"] == "UAH"
+    assert body["comment"] == "Refund for appointment 123"
+    assert body["apiVersion"] == 1
+    assert "merchantSignature" in body
+
+
+@responses.activate
+def test_refund_computes_correct_signature():
+    _mock_refund_success()
+    provider = WayForPayProvider()
+
+    provider.refund(
+        provider_reference_id="123-abcd1234",
+        reference="123",
+        amount=Decimal("83.00"),
+        currency="UAH",
+    )
+
+    body = json.loads(responses.calls[0].request.body)
+    expected = _expected_refund_signature(
+        order_reference="123-abcd1234", amount="83.00", currency="UAH"
+    )
+    assert body["merchantSignature"] == expected
+
+
+@responses.activate
+def test_refund_returns_refund_intent_on_success():
+    _mock_refund_success()
+    provider = WayForPayProvider()
+
+    result = provider.refund(
+        provider_reference_id="123-abcd1234",
+        reference="123",
+        amount=Decimal("83.00"),
+        currency="UAH",
+    )
+
+    assert result == RefundIntent(provider_reference_id="123-abcd1234")
+
+
+@responses.activate
+def test_refund_raises_payment_provider_error_on_wayforpay_reported_failure():
+    """A reasonCode other than 1100 is WayForPay reporting the refund
+    itself failed (e.g. already refunded, insufficient funds) — not a
+    network/HTTP-level failure, but still not success."""
+    _mock_refund_success(reason_code=1102)
+    provider = WayForPayProvider()
+
+    with pytest.raises(PaymentProviderError):
+        provider.refund(
+            provider_reference_id="123-abcd1234",
+            reference="123",
+            amount=Decimal("83.00"),
+            currency="UAH",
+        )
+
+
+@responses.activate
+def test_refund_raises_payment_provider_error_on_network_failure():
+    responses.add(
+        responses.POST,
+        _CREATE_INVOICE_URL,
+        body=requests.exceptions.ConnectionError("connection refused"),
+    )
+    provider = WayForPayProvider()
+
+    with pytest.raises(PaymentProviderError):
+        provider.refund(
+            provider_reference_id="123-abcd1234",
+            reference="123",
+            amount=Decimal("83.00"),
+            currency="UAH",
+        )
 
 
 # --- verify_signature: webhook callback signature -------------------------
