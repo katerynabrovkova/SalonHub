@@ -2450,20 +2450,43 @@ see "Out of scope" below.
   provider call, never at booking time) and `Service` carries no `currency`
   field of its own — this endpoint is the only source of a currency to pair
   with the `Service.price` strings already rendered on those pages.
-- **(C) `/services` and booking step 2 (both `entry=service` and
-  `entry=specialist` paths) fetch endpoint (B) and render price +
-  currency together** — the three sites recon confirmed actually render a
-  price; not `/specialists` and not booking steps 3–4, which render no
-  price at all. Closes recon items 2–3 from the deferred entry above: a
-  shared formatting utility (e.g. `formatPrice(price, currency)`,
-  wrapping `Intl.NumberFormat` with the fetched ISO 4217 code, not a
-  hardcoded `₴`/`$` suffix — per the original deferred entry's "not a
+- **(C) `/services` and booking step 2's `entry=specialist` path fetch
+  endpoint (B) and render price + currency together** — recon found
+  exactly **two** real JSX call sites for `ServiceSelectionGrid`, not
+  three: `services/page.tsx`, and `booking/page.tsx`'s step-2
+  `entry=specialist` branch. Step 2 of the `entry=service` path renders
+  `SpecialistSelectionGrid` instead — a different component (choosing a
+  specialist *after* the service was already picked on `/services`),
+  which shows no price and needs no currency prop. Not `/specialists`
+  and not booking steps 3–4 either, which render no price at all. Closes
+  recon items 2–3 from the deferred entry above: a shared formatting
+  utility (e.g. `formatPrice(price, currency)`, wrapping
+  `Intl.NumberFormat` with the fetched ISO 4217 code, not a hardcoded
+  `₴`/`$` suffix — per the original deferred entry's "not a
   hardcoded-symbol fix" note) replaces the current bare `{service.price}`
   rendering in `ServiceSelectionGrid.tsx` and `ServiceInfoPopover.tsx`
-  (both booking-step-2 paths render through these same two components).
-  **(C) is required to actually close the original gap** — (B) alone
-  adds a backend endpoint nothing yet calls, so on its own it changes
-  nothing visible to users.
+  (`ServiceInfoPopover` is only ever rendered from inside
+  `ServiceSelectionGrid`, never directly by any page). **(C) is required
+  to actually close the original gap** — (B) alone adds a backend
+  endpoint nothing yet calls, so on its own it changes nothing visible to
+  users.
+  - **Prop threading**: `currency` is passed as a new sibling prop
+    (`currency: string`) on `ServiceSelectionGridProps` and
+    `ServiceInfoPopoverProps`, **not** embedded into the `Service`
+    type/objects those components already take. `currency` is a
+    salon-level constant — one per response, not one per service — and
+    the backend `Service` model has no `currency` field of its own to
+    begin with (docs/DECISIONS.md § Currency: it lives only on `Salon`
+    and gets frozen onto `Payment` at creation, never onto `Service`);
+    embedding it per-item would be redundant and would imply a per-item
+    variability that doesn't exist.
+  - **`formatPrice` utility**: `frontend/src/lib/formatPrice.ts` — a pure
+    function `(price: string, currencyCode: string) => string`, following
+    this codebase's existing pure-function-extraction-for-testability
+    pattern (`lib/scheduling/groupAvailabilityByDay.ts`,
+    `lib/routing/resolveSlugFromHost.ts`): no React, no fetch, trivially
+    unit-testable on its own, called from both `ServiceSelectionGrid.tsx`
+    and `ServiceInfoPopover.tsx`.
   - **Data-fetching approach, confirmed by recon**: there is no shared
     layout to fetch currency once and pass it down — the frontend's
     routing is subdomain-based (`docs/DECISIONS.md` § "Frontend routing:
@@ -2476,10 +2499,10 @@ see "Out of scope" below.
     header (`middleware.ts`'s `SALON_SLUG_HEADER`) and calls its own
     `lib/*` fetch helper — there is no existing shared-fetch mechanism to
     extend.
-  - Each of the three real call sites (`/services` `page.tsx`; booking
-    step 2 entry=service; booking step 2 entry=specialist — the only
-    sites that actually render a price, per recon) independently calls a
-    new `getSalonInfoPage(slug)` helper
+  - Each of the two real call sites (`/services` `page.tsx`; booking
+    step 2's `entry=specialist` branch — the only sites that actually
+    render a price, per recon) independently calls a new
+    `getSalonInfoPage(slug)` helper
     (`frontend/src/lib/tenants/getSalonInfoPage.ts`), mirroring
     `getServicesPage.ts`'s conventions exactly (plain async function
     taking `slug`, `fetch` against `${INTERNAL_API_URL}/api/v1/salons/
