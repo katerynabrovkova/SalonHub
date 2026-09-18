@@ -2416,6 +2416,64 @@ session.
      `Intl.NumberFormat` with the fetched ISO 4217 code), not a
      hardcoded `₴`/`$` suffix — no such utility exists yet.
 
+### Resolution: frontend price display shows no currency unit
+
+Decided 18.09.2026, resolving the 14.09.2026 deferred gap directly above.
+Three parts, agreed before any code, per the stage-by-stage workflow. Scoped
+deliberately narrower than the three-piece fix originally sketched above —
+see "Out of scope" below.
+
+- **(A) `/booking/pay`: render the payment amount already returned by the
+  API.** `PaymentStatus.tsx`'s `PayResponse` type is extended to include
+  `payment: { amount: string; currency: string }` alongside the existing
+  `provider_data`, and the component renders it. This data is not new —
+  `GuestAppointmentPayView` (`booking/views.py`) already returns it via
+  `PaymentGuestSerializer` (`payments/serializers.py`), which has exposed
+  `amount`/`currency` on `Payment` since Stage 8; it was simply never typed
+  or rendered on the frontend. **No backend change** — pure frontend fix.
+- **(B) A new read-only Salon-info endpoint**, closing recon item 1 from the
+  deferred entry above: `GET /api/v1/salons/<slug>/` returns
+  `{"currency": "<ISO 4217>"}`, `AllowAny` (a public read, same read-access
+  posture as `catalog`'s list/detail endpoints per docs/DECISIONS.md § Stage
+  4 decisions "Catalog read semantics"). New `tenants/serializers.py`,
+  `tenants/views.py`, `tenants/urls.py`, following the existing per-salon
+  read-only pattern (`catalog` app: `ReadSerializer` +
+  DRF generic view + relative sub-path `urls.py` registered via
+  `include()` in `config/urls.py` under the shared
+  `api/v1/salons/<slug:slug>/` prefix). Registered alongside
+  `catalog.urls`/`booking.urls`/etc.; the bare
+  `api/v1/salons/<slug:slug>/` path is currently unclaimed by any existing
+  app (confirmed by recon — no other app's `urls.py` defines an empty `""`
+  route), so `tenants.urls` claims it with no conflict. Feeds `/services`,
+  `/specialists`, and booking steps 2–4, where no `Payment` row exists yet
+  (a `Payment` is only created inside `initiate_payment` after a successful
+  provider call, never at booking time) and `Service` carries no `currency`
+  field of its own — this endpoint is the only source of a currency to pair
+  with the `Service.price` strings already rendered on those pages.
+- **(C) `/services`, `/specialists`, and booking steps 2–4 fetch endpoint
+  (B) and render price + currency together**, closing recon items 2–3 from
+  the deferred entry above: a shared formatting utility (e.g.
+  `formatPrice(price, currency)`, wrapping `Intl.NumberFormat` with the
+  fetched ISO 4217 code, not a hardcoded `₴`/`$` suffix — per the original
+  deferred entry's "not a hardcoded-symbol fix" note) replaces the current
+  bare `{service.price}` rendering in `ServiceSelectionGrid.tsx`,
+  `ServiceInfoPopover.tsx`, and wherever `services_detail` is rendered in
+  the booking flow. **(C) is required to actually close the original
+  gap** — (B) alone adds a backend endpoint nothing yet calls, so on its
+  own it changes nothing visible to users.
+
+**Out of scope:**
+
+- **Showing a payment amount to the guest *before* they click
+  "Оплатити".** Unrelated to (A)/(B)/(C) above: those close the
+  *no-currency-unit* gap on already-rendered prices; this is a *no-amount-
+  shown-at-all* gap on a screen that today renders no price. No backing
+  `Payment` row exists pre-pay — a `Payment` is only created inside
+  `initiate_payment` after a successful provider call, never at booking
+  time — so this would need either new fields on `AppointmentGuestSerializer`
+  or a duplicated deposit-computation on the frontend. A separate future UX
+  decision, deliberately not investigated or folded into this fix.
+
 ### Fix: TenantContextMissingError on admin save for TenantScopedModel
 
 Decided and implemented 11.09.2026.
