@@ -2450,17 +2450,50 @@ see "Out of scope" below.
   provider call, never at booking time) and `Service` carries no `currency`
   field of its own — this endpoint is the only source of a currency to pair
   with the `Service.price` strings already rendered on those pages.
-- **(C) `/services`, `/specialists`, and booking steps 2–4 fetch endpoint
-  (B) and render price + currency together**, closing recon items 2–3 from
-  the deferred entry above: a shared formatting utility (e.g.
-  `formatPrice(price, currency)`, wrapping `Intl.NumberFormat` with the
-  fetched ISO 4217 code, not a hardcoded `₴`/`$` suffix — per the original
-  deferred entry's "not a hardcoded-symbol fix" note) replaces the current
-  bare `{service.price}` rendering in `ServiceSelectionGrid.tsx`,
-  `ServiceInfoPopover.tsx`, and wherever `services_detail` is rendered in
-  the booking flow. **(C) is required to actually close the original
-  gap** — (B) alone adds a backend endpoint nothing yet calls, so on its
-  own it changes nothing visible to users.
+- **(C) `/services` and booking step 2 (both `entry=service` and
+  `entry=specialist` paths) fetch endpoint (B) and render price +
+  currency together** — the three sites recon confirmed actually render a
+  price; not `/specialists` and not booking steps 3–4, which render no
+  price at all. Closes recon items 2–3 from the deferred entry above: a
+  shared formatting utility (e.g. `formatPrice(price, currency)`,
+  wrapping `Intl.NumberFormat` with the fetched ISO 4217 code, not a
+  hardcoded `₴`/`$` suffix — per the original deferred entry's "not a
+  hardcoded-symbol fix" note) replaces the current bare `{service.price}`
+  rendering in `ServiceSelectionGrid.tsx` and `ServiceInfoPopover.tsx`
+  (both booking-step-2 paths render through these same two components).
+  **(C) is required to actually close the original gap** — (B) alone
+  adds a backend endpoint nothing yet calls, so on its own it changes
+  nothing visible to users.
+  - **Data-fetching approach, confirmed by recon**: there is no shared
+    layout to fetch currency once and pass it down — the frontend's
+    routing is subdomain-based (`docs/DECISIONS.md` § "Frontend routing:
+    subdomain-based"), with no `[slug]` route tier at all; the only two
+    `layout.tsx` files in `frontend/src/app` are the root layout (fonts/
+    metadata only) and `booking/layout.tsx` (a client-side context
+    provider wrapper, explicitly not touching `page.tsx`'s own
+    server-side data fetching). Every salon-scoped page today
+    independently reads the resolved slug off the `x-salon-slug` request
+    header (`middleware.ts`'s `SALON_SLUG_HEADER`) and calls its own
+    `lib/*` fetch helper — there is no existing shared-fetch mechanism to
+    extend.
+  - Each of the three real call sites (`/services` `page.tsx`; booking
+    step 2 entry=service; booking step 2 entry=specialist — the only
+    sites that actually render a price, per recon) independently calls a
+    new `getSalonInfoPage(slug)` helper
+    (`frontend/src/lib/tenants/getSalonInfoPage.ts`), mirroring
+    `getServicesPage.ts`'s conventions exactly (plain async function
+    taking `slug`, `fetch` against `${INTERNAL_API_URL}/api/v1/salons/
+    ${slug}/`, throw a generic `Error` on a non-ok response).
+  - **Run in parallel via `Promise.all`** alongside each call site's
+    existing services/specialist-detail fetch, not sequentially — avoids
+    adding a second round-trip on top of the existing one.
+  - **Deliberately not** middleware header injection (wrong layer — would
+    add a network fetch to *every* request matched by `middleware.ts`,
+    including every request that never renders a price) **and
+    deliberately not** a request-scoped cache/dedup layer for the
+    now-duplicated per-call-site fetch (premature — one salon exists in
+    the DB today, this is a single-row lookup; revisit if this becomes a
+    real, measured cost).
 
 **Out of scope:**
 
