@@ -3125,7 +3125,12 @@ Scope, in build order:
    recon: no such endpoint exists today —
    `backend/booking/urls.py` currently exposes only the guest-token-based
    `bookings/` and `guest/appointments/<id>/...` routes, all scoped by
-   `appointment_id` + token, none by `Account`.
+   `appointment_id` + token, none by `Account`. **Implemented
+   18.09.2026:** `GET appointments/mine/` (`AccountAppointmentListView`,
+   `backend/booking/views.py`), filtered through `Appointment.objects`
+   (`TenantScopedManager`). Cross-tenant isolation with a same-email
+   Account in another salon is explicitly test-covered
+   (`tests/test_booking_account_appointment_list.py`).
 2. **Frontend: a shared `AuthContext`/`useAuth` hook**, replacing the ad
    hoc local `useState` currently in `app/login/page.tsx`. Confirmed by
    recon: no `AuthContext` or `useAuth` exists anywhere in
