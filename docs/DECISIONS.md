@@ -155,6 +155,16 @@ on them.
   under `CELERY_TASK_ALWAYS_EAGER` without depending on Celery internals.
   Real countdown/redelivery needs a running broker — Stage 22 integration
   suite.
+- **Account email-change — not yet scheduled to a specific stage.** No
+  endpoint or UI lets an `Account` change its login email today. When
+  built, it must (a) require verification of the new email address
+  before it becomes active, mirroring the existing
+  registration-verification flow (`accounts/tokens.py`,
+  `VerifyEmailView`), and (b) keep the old email valid for login until
+  the new one is verified — an in-flight, unverified email change must
+  never be able to lock the account holder out. Flagged here rather than
+  left to fall out of a stage's scope discovery, since no stage in the
+  roadmap above currently commits to building it.
 
 ## Overall style
 
@@ -3101,3 +3111,47 @@ the currency/tenants session's frontend work above.
 - **Not fixed here, deliberately out of scope** — a trivial cleanup pass
   (`ruff check --fix` / `ruff format`) whenever convenient, not tied to
   any current change.
+
+### Stage 15 planning: account appointments, auth context, registration, client dashboard
+
+Decided 18.09.2026 — contract agreed before any code, per the
+stage-by-stage workflow.
+
+Scope, in build order:
+
+1. **Backend: a `GET` endpoint listing appointments for the currently
+   authenticated `Account`**, scoped through `TenantScopedManager` to
+   that Account's linked `Customer` in the current salon. Confirmed by
+   recon: no such endpoint exists today —
+   `backend/booking/urls.py` currently exposes only the guest-token-based
+   `bookings/` and `guest/appointments/<id>/...` routes, all scoped by
+   `appointment_id` + token, none by `Account`.
+2. **Frontend: a shared `AuthContext`/`useAuth` hook**, replacing the ad
+   hoc local `useState` currently in `app/login/page.tsx`. Confirmed by
+   recon: no `AuthContext` or `useAuth` exists anywhere in
+   `frontend/src` today.
+3. **Frontend: a registration page**, calling the existing
+   `POST auth/register/` backend endpoint (`RegisterView`,
+   `backend/accounts/views.py`). The backend side is already built and
+   unchanged by this stage; only the frontend page is missing —
+   confirmed by recon: no `app/register` route exists today.
+4. **Frontend: a real `/client/page.tsx` dashboard**, replacing the
+   current placeholder (`"Client dashboard placeholder"`), showing "my
+   bookings" via the endpoint from item 1.
+5. **Account-aware booking path**: when a session exists, skip the
+   contact-info step in the booking flow — the frontend already has the
+   Account's identity via `auth/me/`, so re-collecting name/email/phone
+   from a logged-in user is redundant. Builds on the guest-only Stage 14
+   flow per the split already recorded in § "Stage 14 (frontend booking
+   flow + payment + confirmation) — scope" above.
+
+Explicitly out of scope for Stage 15:
+
+- **Any "claim a specific guest booking via its guest token while logged
+  in" mechanic.** Not needed: the existing email-verification merge
+  (Stage 3-R, `accounts/views.py`'s `_verify_and_link`) already links a
+  guest `Customer` to an `Account` by matching email at verification
+  time, covering the guest→Account linking need without a separate claim
+  flow.
+- **Account email-change functionality.** Deferred to a standalone
+  backlog item, not a numbered stage — see § "Open questions" above.
