@@ -2480,13 +2480,23 @@ see "Out of scope" below.
     and gets frozen onto `Payment` at creation, never onto `Service`);
     embedding it per-item would be redundant and would imply a per-item
     variability that doesn't exist.
-  - **`formatPrice` utility**: `frontend/src/lib/formatPrice.ts` — a pure
-    function `(price: string, currencyCode: string) => string`, following
-    this codebase's existing pure-function-extraction-for-testability
-    pattern (`lib/scheduling/groupAvailabilityByDay.ts`,
+  - **`formatPrice` utility**: `frontend/src/lib/pricing/formatPrice.ts`
+    — matching the established per-domain-subfolder convention recon
+    confirmed (`lib/routing/`, `lib/scheduling/`, `lib/catalog/`); a flat
+    `lib/formatPrice.ts` would have been an oversight, not a deliberate
+    deviation. A pure function `(price: string, currencyCode: string) =>
+    string`, following this codebase's existing
+    pure-function-extraction-for-testability pattern
+    (`lib/scheduling/groupAvailabilityByDay.ts`,
     `lib/routing/resolveSlugFromHost.ts`): no React, no fetch, trivially
     unit-testable on its own, called from both `ServiceSelectionGrid.tsx`
     and `ServiceInfoPopover.tsx`.
+  - **Locale**: `formatPrice` hardcodes the `'uk-UA'` locale for
+    `Intl.NumberFormat`, not the visitor's browser locale — matches the
+    current all-Ukrainian UI chrome (every other user-facing string in
+    this frontend today, e.g. `PaymentStatus.tsx`'s messages, is
+    Ukrainian, not locale-negotiated). Revisit only alongside the Stage
+    18–21 UI-i18n work, not before.
   - **Data-fetching approach, confirmed by recon**: there is no shared
     layout to fetch currency once and pass it down — the frontend's
     routing is subdomain-based (`docs/DECISIONS.md` § "Frontend routing:
