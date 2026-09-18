@@ -40,10 +40,11 @@ interface AppointmentDetail {
 type Phase =
   | { kind: "loading" }
   | { kind: "invalid" }
-  | { kind: "paid"; providerData: string | null }
+  | { kind: "paid"; providerData: string | null; amount: string; currency: string }
   | { kind: "status"; appointmentId: number; token: string; status: string };
 
 interface PayResponse {
+  payment: { amount: string; currency: string };
   provider_data: string | null;
 }
 
@@ -129,7 +130,12 @@ export default function PaymentStatus({ slug }: PaymentStatusProps) {
         token,
         { method: "POST" },
       );
-      setPhase({ kind: "paid", providerData: response.provider_data });
+      setPhase({
+        kind: "paid",
+        providerData: response.provider_data,
+        amount: response.payment.amount,
+        currency: response.payment.currency,
+      });
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -149,11 +155,15 @@ export default function PaymentStatus({ slug }: PaymentStatusProps) {
     if (phase.providerData !== null && phase.providerData !== "") {
       return (
         <a href={phase.providerData}>
-          Перейти до оплати
+          Перейти до оплати ({phase.amount} {phase.currency})
         </a>
       );
     }
-    return <p>Очікуємо підтвердження оплати.</p>;
+    return (
+      <p>
+        Очікуємо підтвердження оплати. Сума до сплати: {phase.amount} {phase.currency}.
+      </p>
+    );
   }
 
   if (phase.status === "pending_payment") {

@@ -108,7 +108,11 @@ describe("PaymentStatus", () => {
 
     await user.click(await screen.findByRole("button", { name: "Оплатити" }));
 
-    expect(await screen.findByText("Очікуємо підтвердження оплати.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Очікуємо підтвердження оплати. Сума до сплати: 100.00 UAH."),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/100\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/UAH/)).toBeInTheDocument();
     expect(guestApiRequestMock).toHaveBeenLastCalledWith(
       "bella-demo",
       "/guest/appointments/42/pay/",
@@ -130,9 +134,11 @@ describe("PaymentStatus", () => {
 
     await user.click(await screen.findByRole("button", { name: "Оплатити" }));
 
-    const link = await screen.findByRole("link", { name: "Перейти до оплати" });
+    const link = await screen.findByRole("link", { name: "Перейти до оплати (100.00 UAH)" });
     expect(link).toHaveAttribute("href", "https://secure.wayforpay.com/invoice/abc123");
     expect(screen.queryByText("Очікуємо підтвердження оплати.")).not.toBeInTheDocument();
+    expect(screen.getByText(/100\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/UAH/)).toBeInTheDocument();
   });
 
   it("test_failed_detail_fetch_renders_invalid_link_message", async () => {
@@ -162,6 +168,9 @@ describe("PaymentStatus", () => {
       expect(screen.getByRole("button", { name: "Оплатити" })).toBeDisabled();
     });
 
-    resolvePay({ payment: { id: 1, status: "pending" }, provider_data: null });
+    resolvePay({
+      payment: { id: 1, status: "pending", amount: "100.00", currency: "UAH" },
+      provider_data: null,
+    });
   });
 });
