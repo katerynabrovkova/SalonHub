@@ -3080,3 +3080,24 @@ failing in a full-suite run unrelated to that change.
   (freeze both issuance and validation against the same test clock, e.g.
   `freezegun` or an injectable clock in `validate_guest_token`) as
   separate future work — not fixed here.
+
+### Known issue: pre-existing `ruff` findings
+
+Noted 18.09.2026, while running `ruff check`/`ruff format --check` after
+the currency/tenants session's frontend work above.
+
+- `ruff check` flags `catalog/serializers.py` (two lines over 100 chars,
+  `E501`) and `catalog/migrations/0004_remove_service_service_salon_name_en_uniq_and_more.py`
+  (an unsorted import block, `I001`). `ruff format --check` additionally
+  flags `catalog/migrations/0005_service_description_servicecategory_photo.py`
+  (quote style / line-wrapping that Django's migration autogeneration
+  doesn't run through `ruff format`).
+- **Confirmed via `git log` to predate this session entirely** — all
+  three files were last touched by `d1cd709` ("feat: add
+  Service.description and ServiceCategory.photo fields") and `bbe09c9`
+  ("fix: add output_field to NullIf in catalog unique constraints"),
+  Stage 11.5 work, unrelated to the currency/tenants Salon-info endpoint
+  or frontend price-display work.
+- **Not fixed here, deliberately out of scope** — a trivial cleanup pass
+  (`ruff check --fix` / `ruff format`) whenever convenient, not tied to
+  any current change.
