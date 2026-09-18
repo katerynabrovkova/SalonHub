@@ -3134,7 +3134,12 @@ Scope, in build order:
 2. **Frontend: a shared `AuthContext`/`useAuth` hook**, replacing the ad
    hoc local `useState` currently in `app/login/page.tsx`. Confirmed by
    recon: no `AuthContext` or `useAuth` exists anywhere in
-   `frontend/src` today.
+   `frontend/src` today. `MeView` (`backend/accounts/views.py`) has no
+   `throttle_scope` (confirmed by recon) — acceptable since putting
+   `AuthContext` in the root layout means `auth/me/` is called on every
+   page load, and an unthrottled, cheap, cookie-checked GET is the right
+   posture for that; flag this for a `throttle_scope` if/when
+   infra-level rate limiting is added later.
 3. **Frontend: a registration page**, calling the existing
    `POST auth/register/` backend endpoint (`RegisterView`,
    `backend/accounts/views.py`). The backend side is already built and
