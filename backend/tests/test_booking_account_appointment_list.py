@@ -1,7 +1,8 @@
 """
 Stage 15 planning, item 1 — GET appointments/mine/ (docs/DECISIONS.md § Stage
 15 planning): appointments belonging to the authenticated Account's linked
-Customer in the current salon.
+Customer in the current salon. Also covers item 4 Part A's price/deposit
+snapshot fields on AppointmentAccountSerializer.
 
     GET /api/v1/salons/<slug>/appointments/mine/
 
@@ -11,6 +12,7 @@ and conftest.py's ``salon``/``other_salon`` pair for the cross-tenant case.
 """
 
 import datetime as dt
+from decimal import Decimal
 
 import pytest
 from rest_framework.test import APIClient
@@ -103,6 +105,35 @@ def test_account_with_no_linked_customer_sees_an_empty_list(client, salon):
 
     assert response.status_code == 200
     assert response.data["results"] == []
+
+
+def test_price_and_deposit_fields_appear_with_correct_values(
+    client, salon, customer, specialist, service, customer_account
+):
+    """Stage 15 planning, item 4, Part A: the price/deposit snapshot fields
+    the dashboard needs to show an amount per appointment."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    assert response.status_code == 200
+    (row,) = response.data["results"]
+    assert row["id"] == appt.id
+    # service.price/salon.deposit_percentage are in-memory values (str/int as
+    # the fixtures assigned them), not the Decimal a DB read returns -- the
+    # same coercion trap test_booking_cancel_appointment.py documents.
+    assert Decimal(str(row["service_price_at_booking"])) == Decimal(str(service.price))
+    assert Decimal(str(row["deposit_percentage_at_booking"])) == Decimal(
+        str(salon.deposit_percentage)
+    )
 
 
 def test_results_are_ordered_newest_appointment_first(

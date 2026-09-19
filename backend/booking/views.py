@@ -18,16 +18,17 @@ GuestBookingCreateView (§ Stage 7.D decisions) is the one write path with no
 object to guard yet — it creates the Appointment — so it's a plain APIView,
 not a generic.
 
-AccountAppointmentListView (§ Stage 15 planning, item 1) is Account-JWT
-authenticated, not guest-token authenticated — a separate, additive list
-endpoint alongside the guest-token views above, not a replacement for any
-of them.
+AccountAppointmentListView (§ Stage 15 planning, item 1) and
+AccountAppointmentCancelView (§ Stage 15 planning, item 4) are Account-JWT
+authenticated, not guest-token authenticated — separate, additive endpoints
+alongside the guest-token views above, not a replacement for any of them.
 """
 
 from django.db.models import QuerySet
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -213,6 +214,68 @@ class AccountAppointmentListView(generics.ListAPIView):
         return Appointment.objects.filter(customer_id=customer_id).order_by(
             "-start_datetime", "-id"
         )
+
+
+class AccountAppointmentCancelView(generics.GenericAPIView):
+    """
+    ``POST appointments/<id>/cancel/`` — the authenticated Account cancels
+    its own Customer's appointment (docs/DECISIONS.md § Stage 15 planning,
+    item 4). Additive, alongside ``appointments/mine/`` above; no explicit
+    `authentication_classes`/`permission_classes` override, same posture as
+    `AccountAppointmentListView`/`accounts.views.MeView` — an
+    unauthenticated request is already rejected with 401.
+
+    Ownership is resolved the same "fetch by tenant-scoped pk, compare the
+    owning Customer to the caller's identity, mismatch -> 404" shape as
+    `reviews.views.ReviewCreateView._resolve_owned_appointment` — written
+    out here rather than reused, since that helper also branches on
+    guest-token identity, which doesn't apply on this Account-only path. An
+    appointment belonging to another Customer, or an Account with no linked
+    Customer at all, is indistinguishable from a nonexistent id: 404, never
+    403, the same anti-enumeration posture.
+
+    `cancelled_by=CancelledBy.CUSTOMER`, not `GUEST` — this is the client
+    cancelling through their own account, a distinct enum member from the
+    guest-token path even though `booking.services._CUSTOMER_INITIATED_CANCELLATIONS`
+    already treats both the same for the 24h refund-eligibility cutoff. No
+    other try/except: `InvalidStateTransitionError` (409) propagates to the
+    existing `core.exceptions.exception_handler`, same as
+    `GuestAppointmentCancelView`.
+
+    `provider_class` is a class attribute, not a module-level instance, for
+    the same test-substitution reason as `GuestAppointmentCancelView` and
+    `GuestAppointmentPayView`.
+    """
+
+    serializer_class = AppointmentAccountSerializer
+    provider_class: type[PaymentProvider] = MockPaymentProvider
+
+    def get_queryset(self) -> QuerySet[Appointment]:
+        return Appointment.objects.all()
+
+    def _resolve_owned_appointment(self) -> Appointment:
+        appointment = get_object_or_404(self.get_queryset(), pk=self.kwargs["appointment_id"])
+        customer_id = self.request.user.customer_id  # type: ignore[union-attr]
+        if customer_id is None or appointment.customer_id != customer_id:
+            raise NotFound()
+        return appointment
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        appointment = self._resolve_owned_appointment()
+
+        # The single now = timezone.now() call site for this request (§
+        # Stage 6.F/6.I decisions), passed explicitly into the service.
+        now = timezone.now()
+
+        appointment = cancel_appointment(
+            appointment_id=appointment.id,
+            salon=appointment.salon,
+            cancelled_by=CancelledBy.CUSTOMER,
+            now=now,
+            provider=self.provider_class(),
+        )
+
+        return Response(self.get_serializer(appointment).data)
 
 
 class GuestBookingCreateView(APIView):

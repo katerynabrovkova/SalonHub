@@ -27,10 +27,22 @@ class AppointmentGuestSerializer(serializers.ModelSerializer):
 
 class AppointmentAccountSerializer(serializers.ModelSerializer):
     """
-    Read-only representation for AccountAppointmentListView (docs/DECISIONS.md
-    § Stage 15 planning, item 1). Same field set as AppointmentGuestSerializer
-    — kept as a separate class rather than reused, since the two endpoints
-    have different identities/permissions and are free to diverge later.
+    Read-only representation for AccountAppointmentListView and
+    AccountAppointmentCancelView (docs/DECISIONS.md § Stage 15 planning,
+    items 1 and 4). Kept as a separate class from AppointmentGuestSerializer,
+    not reused, since the two endpoints have different identities/permissions
+    and are free to diverge later.
+
+    Carries the raw price/deposit snapshot fields (`service_price_at_booking`,
+    `deposit_percentage_at_booking`), not a computed deposit amount: the
+    rounding logic for that computation
+    (payments/services.py's `_compute_deposit_amount`) is module-private
+    there, deliberately not meant to be imported by another app — its
+    leading underscore is the same "do not reuse this elsewhere" signal as
+    booking/services.py's own private helpers. The two snapshot fields are
+    enough for a dashboard to show "price" and "deposit %" per appointment
+    without duplicating that rounding rule; the actual charged amount, once
+    a payment exists, is already on Payment.amount via a separate endpoint.
     """
 
     class Meta:
@@ -45,6 +57,8 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
             "cancelled_at",
             "cancelled_by",
             "cancellation_reason",
+            "service_price_at_booking",
+            "deposit_percentage_at_booking",
         ]
         read_only_fields = fields
 
