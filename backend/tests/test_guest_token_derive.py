@@ -27,6 +27,7 @@ import datetime as dt
 import hashlib
 
 import pytest
+from django.utils import timezone
 
 from booking.guest_tokens import derive_guest_token, issue_guest_token, validate_guest_token
 from booking.models import GuestAccessToken
@@ -53,7 +54,23 @@ def test_derive_guest_token_is_deterministic(salon, appointment):
     assert first == second
 
 
-def test_derived_token_matches_the_issued_token_and_its_stored_hash(salon, appointment):
+def test_derived_token_matches_the_issued_token_and_its_stored_hash(
+    monkeypatch, salon, appointment
+):
+    """validate_guest_token has no injectable `now` — it calls the real
+    django.utils.timezone.now() directly (booking/guest_tokens.py) to check
+    GuestAccessToken.expires_at, which issue_guest_token stamps as
+    appointment.end_datetime + GUEST_TOKEN_VALIDITY (30 days) from the
+    fixed START literal the `appointment` fixture above uses. Left
+    unpatched, that expiry lands in the past the moment the real wall
+    clock passes START + a bit + 30 days — the same one-time-bomb pattern
+    just fixed in test_booking_create_guest_appointment.py. Freezing
+    timezone.now() to START — before the appointment even starts, so also
+    before expires_at — for the validate_guest_token call only makes this
+    test's pass/fail outcome independent of the real date forever, without
+    touching guest_tokens.py's production expiry check itself.
+    """
+    monkeypatch.setattr(timezone, "now", lambda: START)
     with tenant_context(salon.id):
         issued_raw, row = issue_guest_token(appointment)
 

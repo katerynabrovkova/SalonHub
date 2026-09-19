@@ -45,6 +45,7 @@ import datetime as dt
 import hashlib
 
 import pytest
+from django.utils import timezone
 
 from accounts.models import Customer
 from accounts.services import get_or_create_guest_customer
@@ -199,8 +200,23 @@ def test_create_guest_appointment_creates_guest_access_token_row(salon, speciali
 
 
 def test_create_guest_appointment_raw_token_round_trips_through_validate_guest_token(
-    salon, specialist, service
+    monkeypatch, salon, specialist, service
 ):
+    """validate_guest_token has no injectable `now` — it calls the real
+    django.utils.timezone.now() directly (booking/guest_tokens.py) to check
+    GuestAccessToken.expires_at, which this test's issuance side stamps as
+    appt.end_datetime + GUEST_TOKEN_VALIDITY (30 days) from the fixed
+    FIRST_CANDIDATE/SAFE_NOW literals above. Left unpatched, that expiry
+    landed in the past the moment the real wall clock ever passed
+    2026-08-17 + 30 days — a one-time-bomb that already fired once
+    (docs/DECISIONS.md has no entry for this; it was just a bare pytest
+    failure). Freezing timezone.now() to SAFE_NOW — itself already earlier
+    than FIRST_CANDIDATE, so also earlier than expires_at — for the
+    validate_guest_token call only makes this test's pass/fail outcome
+    independent of the real date forever, without touching
+    guest_tokens.py's production expiry check itself.
+    """
+    monkeypatch.setattr(timezone, "now", lambda: SAFE_NOW)
     _working_hours(salon, specialist)
     with tenant_context(salon.id):
         appt, raw_token = create_guest_appointment(
