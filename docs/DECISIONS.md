@@ -3295,6 +3295,110 @@ Scope, in build order:
    Builds on the guest-only Stage 14 flow per the split already recorded
    in § "Stage 14 (frontend booking flow + payment + confirmation) —
    scope" above.
+
+   Refined 19.09.2026 — decided before implementation, per the
+   stage-by-stage workflow:
+
+   - Account-aware booking applies only to Accounts with
+     `email_verified_at` set (`backend/accounts/models.py`). An
+     unverified Account keeps using the existing guest flow unchanged —
+     no new error, no blocking. Reason: `appointments/mine/` filters by
+     `customer_id` (item 1), so linking an unproven email to an existing
+     Customer would expose that Customer's booking history; creating a
+     new Customer is also impossible whenever a guest Customer with the
+     same `(salon, email)` already exists (`customer_salon_email_uniq`),
+     and any distinct error surfaced for that case would itself reveal
+     whether that email belongs to an existing Customer in the salon.
+   - The backend enforces this, not just the frontend: the account
+     booking endpoint rejects an unverified Account regardless of
+     whether a Customer exists for its email. The frontend separately
+     chooses which flow to render (skip vs. show contact form) based on
+     `email_verified_at`.
+   - The Customer's `email` is always taken from `request.user.email`
+     (the authenticated Account's own, verified email), never from the
+     request payload — the contact form, when shown, supplies
+     name/phone only.
+   - Customer resolution runs inside one `transaction.atomic()`, with
+     `select_for_update()` on the `Account` row: if `account.customer_id`
+     is already set, use that Customer; otherwise `get_or_create` a
+     Customer by `(salon, account.email)`, link it to the Account, and
+     apply the name/phone supplied on the request (the contact form is
+     shown only in this second case, per the two sub-cases above).
+   - `create_appointment`/`create_appointment_for_any_specialist` are
+     reused unchanged (`backend/booking/services.py`) — only the
+     customer-resolution step differs from `create_guest_appointment`'s.
+   - No `guest_token` is issued for an account booking. On success the
+     frontend redirects to `/client` instead of `/booking/pay`. Payment
+     for an account booking is Stage 15 item 14's scope
+     (`AccountAppointmentPayView`) and must be built immediately after
+     this item.
+   - Known issue, not fixed by this item: `get_or_create_guest_customer`
+     (`backend/accounts/services.py`) unconditionally overwrites an
+     existing Customer's `name`/`phone` from every new guest booking
+     ("Option A", same file's docstring). Now that a Customer can be
+     linked to an Account, a guest booking made under a registered
+     user's email silently overwrites that user's own profile
+     name/phone. Left as a known issue, not addressed here.
+
+   Recon checks done before writing this refinement:
+   - `MeSerializer` does not expose `email_verified_at`
+     (`backend/accounts/serializers.py:69-96`; its own docstring, line
+     74, says so explicitly — deferred until a "verify your email" UI
+     exists).
+   - The `BOOKING_CREATED` notification link is built as
+     `build_salon_frontend_url(salon.slug, "/booking/pay") +
+     f"#appointment_id={appointment.id}&token={token}"`, where `token =
+     derive_guest_token(appointment.id)` (`backend/notifications/services.py:222-226`)
+     — it depends on a guest token. Open question, not resolved here:
+     what should an account booking's confirmation email link to
+     instead?
+
+   Extended 19.09.2026 — further decisions on the two open points above:
+
+   - `MeSerializer` gains a new read-only boolean field `email_verified`
+     (`backend/accounts/serializers.py`), derived as
+     `account.email_verified_at is not None` — the timestamp itself is
+     not exposed. Reason: the frontend only needs yes/no to choose
+     between the guest flow and the account-aware flow (this item), and
+     the same field serves item 13's verification-reminder banner. The
+     `MeSerializer` docstring's "no `email_verified_at` (deferred...)"
+     note must be updated when this lands. This is a contract change to
+     `GET auth/me/` and needs its own test.
+   - Resolves the open question above: the `BOOKING_CREATED` email for
+     an account booking links to the salon's `/client` page, with no
+     guest token. The choice between the guest link
+     (`/booking/pay#appointment_id=...&token=...`) and the `/client`
+     link is made by an explicit parameter passed down from the
+     booking-creation call site (guest path vs. account path) — never
+     by inspecting whether the appointment's Customer happens to have a
+     linked Account. Reason: the guest path must stay exactly as built
+     in Stage 14 regardless of whether the guest's email happens to
+     match a registered Account, and a guest booking made under a
+     registered user's email has no session at send time, so a
+     `/client` link would be dead for that recipient.
+
+   Recon check done before writing this extension: of the notification
+   triggers built in `backend/notifications/services.py`, only three
+   build a link at all, and all three currently derive it from a guest
+   token (`derive_guest_token`) — `APPOINTMENT_REMINDER` (lines
+   141-169, links to `/appointments/<id>/manage/<token>/`),
+   `BOOKING_CONFIRMED` (lines 171-199, same manage-link shape), and
+   `BOOKING_CREATED` (lines 201-231, links to
+   `/booking/pay#appointment_id=...&token=...`). `BOOKING_CANCELLED`,
+   `BOOKING_EXPIRED`, `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, and
+   `REVIEW_REQUEST` are static text with no link at all
+   (`_MESSAGES`, lines 65-98). `EMAIL_VERIFICATION` is not handled by
+   this builder/trigger system at all — it's sent from
+   `accounts/tasks.py` with its own signed verification token
+   (`/verify-email#token=...`), unrelated to guest tokens.
+   `APPOINTMENT_REMINDER` and `BOOKING_CONFIRMED` are outside this
+   item's scope but will hit the same guest-token-vs-account question
+   `BOOKING_CREATED` just resolved, once an account booking can reach
+   REMINDER/CONFIRMED — flagged here, not resolved.
+
+   Line-reference check: the `BOOKING_CREATED` link citation above
+   (`backend/notifications/services.py:222-226`) was verified against
+   the file and is correct as written.
 6. **Frontend: a `/verify-email` page.** Recon-confirmed gap: the
    verification email links to a frontend URL
    (`/verify-email#token=<token>`, built by `build_salon_frontend_url`
