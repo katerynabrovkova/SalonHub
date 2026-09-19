@@ -1,9 +1,23 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
-from booking.models import Appointment
+from booking.models import Appointment, AppointmentStatus
 from catalog.models import Service
+from payments.models import Payment, PaymentStatus
 from scheduling.serializers import _OffsetRequiredDateTimeField
 from specialists.models import Specialist
+
+# amount_due_at_visit is only meaningful once a deposit has actually been
+# collected against a still-honored booking (docs/DECISIONS.md § Stage 15
+# planning, item 4). COMPLETED is included alongside CONFIRMED for
+# consistency (a completed visit's balance is exactly as well-defined as a
+# confirmed one's) even though the dashboard only renders it for CONFIRMED
+# today -- the frontend's display choice, not a reason to make the backend
+# value inconsistent between the two.
+_AMOUNT_DUE_ELIGIBLE_STATUSES = frozenset(
+    {AppointmentStatus.CONFIRMED, AppointmentStatus.COMPLETED}
+)
 
 
 class AppointmentGuestSerializer(serializers.ModelSerializer):
@@ -43,7 +57,33 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     enough for a dashboard to show "price" and "deposit %" per appointment
     without duplicating that rounding rule; the actual charged amount, once
     a payment exists, is already on Payment.amount via a separate endpoint.
+
+    `payment_status`/`payment_amount`/`amount_due_at_visit` read the
+    OneToOneField reverse accessor `appointment.payment`
+    (payments/models.py's `Payment.appointment`), which raises
+    `Payment.DoesNotExist` when no Payment row exists rather than returning
+    `None` -- `_payment()` below guards every read with
+    `getattr(appointment, "payment", None)`. Both value fields serialize to
+    `null` (never a placeholder like `0`/`"none"`) when no Payment exists,
+    matching this codebase's established null-means-absence convention
+    (`Payment.refund_initiated_at`, `Specialist.photo`).
+
+    `amount_due_at_visit` is computed here, in Python, rather than left for
+    the frontend: it's a plain subtraction of two values the backend
+    already rounded and stored (`service_price_at_booking`, `Payment.amount`),
+    so there's no rounding-drift risk either way, but computing it
+    server-side keeps the "what does this client still owe" rule in one
+    place -- the same reasoning that already kept
+    `_compute_deposit_amount`'s rounding logic out of the frontend
+    (payments/services.py), just for a trivial case of it. The queryset this
+    serializer runs against (`AccountAppointmentListView.get_queryset`) adds
+    `select_related("payment")`, so these three fields cost no extra query
+    per row across a list.
     """
+
+    payment_status = serializers.SerializerMethodField()
+    payment_amount = serializers.SerializerMethodField()
+    amount_due_at_visit = serializers.SerializerMethodField()
 
     class Meta:
         model = Appointment
@@ -59,8 +99,32 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
             "cancellation_reason",
             "service_price_at_booking",
             "deposit_percentage_at_booking",
+            "payment_status",
+            "payment_amount",
+            "amount_due_at_visit",
         ]
         read_only_fields = fields
+
+    def _payment(self, appointment: Appointment) -> Payment | None:
+        return getattr(appointment, "payment", None)
+
+    def get_payment_status(self, appointment: Appointment) -> str | None:
+        payment = self._payment(appointment)
+        return payment.status if payment is not None else None
+
+    def get_payment_amount(self, appointment: Appointment) -> Decimal | None:
+        payment = self._payment(appointment)
+        return payment.amount if payment is not None else None
+
+    def get_amount_due_at_visit(self, appointment: Appointment) -> Decimal | None:
+        payment = self._payment(appointment)
+        if (
+            appointment.status not in _AMOUNT_DUE_ELIGIBLE_STATUSES
+            or payment is None
+            or payment.status != PaymentStatus.SUCCEEDED
+        ):
+            return None
+        return appointment.service_price_at_booking - payment.amount
 
 
 class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):

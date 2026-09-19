@@ -203,6 +203,15 @@ class AccountAppointmentListView(generics.ListAPIView):
     Ordered newest-appointment-first (`-start_datetime`, tie-broken by
     `-id`), the same newest-first convention `reviews.views.ReviewListView`
     already uses for a per-recipient list.
+
+    `select_related("payment")` below joins the OneToOneField reverse
+    relation `AppointmentAccountSerializer`'s `payment_status`/
+    `payment_amount`/`amount_due_at_visit` fields read
+    (docs/DECISIONS.md § Stage 15 planning, item 4) -- without it, each row's
+    `appointment.payment` access would be a separate query, N+1 across a
+    list. A OneToOneField's reverse side is select_related-able (unlike a
+    plain reverse FK), same reasoning `reviews.views.ReviewListView` applies
+    to `select_related("specialist", "appointment__service")`.
     """
 
     serializer_class = AppointmentAccountSerializer
@@ -211,8 +220,10 @@ class AccountAppointmentListView(generics.ListAPIView):
         customer_id = self.request.user.customer_id  # type: ignore[union-attr]
         if customer_id is None:
             return Appointment.objects.none()
-        return Appointment.objects.filter(customer_id=customer_id).order_by(
-            "-start_datetime", "-id"
+        return (
+            Appointment.objects.filter(customer_id=customer_id)
+            .select_related("payment")
+            .order_by("-start_datetime", "-id")
         )
 
 
@@ -245,6 +256,14 @@ class AccountAppointmentCancelView(generics.GenericAPIView):
     `provider_class` is a class attribute, not a module-level instance, for
     the same test-substitution reason as `GuestAppointmentCancelView` and
     `GuestAppointmentPayView`.
+
+    No `select_related("payment")` here (checked, docs/DECISIONS.md § Stage
+    15 planning, item 4): this view handles exactly one appointment per
+    request, so there's no N+1 to fix, and the object actually serialized
+    below is `cancel_appointment`'s own return value -- a separate
+    `select_for_update()` fetch inside the service, not
+    `_resolve_owned_appointment`'s pre-cancel lookup -- so adding it to this
+    view's `get_queryset()` wouldn't even reach the row that gets serialized.
     """
 
     serializer_class = AppointmentAccountSerializer

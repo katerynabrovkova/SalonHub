@@ -15,12 +15,15 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from accounts.models import Account, AccountRole, Customer
 from booking.models import AppointmentStatus
 from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
+from payments.models import Payment, PaymentStatus
 from specialists.models import Specialist
 from tests.conftest import make_appointment
 
@@ -270,6 +273,206 @@ def test_unauthenticated_request_is_rejected(client, salon):
     response = client.get(_mine_url(salon))
 
     assert response.status_code == 401
+
+
+# --- 3a. payment_status/payment_amount/amount_due_at_visit -----------------
+# (docs/DECISIONS.md § Stage 15 planning, item 4, Part 2 -- the 15 reachable
+# (appointment_status, payment_status) combinations mapped in this session's
+# earlier recon)
+
+
+def _make_payment(salon, appt, *, status, amount="100.00", provider_reference_id="ref") -> Payment:
+    with tenant_context(salon.id):
+        return Payment.objects.create(
+            salon=salon,
+            appointment=appt,
+            amount=Decimal(amount),
+            currency=salon.currency,
+            status=status,
+            provider_reference_id=provider_reference_id,
+        )
+
+
+def test_payment_fields_are_null_when_no_payment_row_exists(
+    client, salon, customer, specialist, service, customer_account
+):
+    make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.PENDING_PAYMENT,
+    )
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert row["payment_status"] is None
+    assert row["payment_amount"] is None
+    assert row["amount_due_at_visit"] is None
+
+
+@pytest.mark.parametrize(
+    "payment_status",
+    [
+        PaymentStatus.PENDING,
+        PaymentStatus.FAILED,
+        PaymentStatus.SUCCEEDED,
+        PaymentStatus.REFUND_PENDING,
+        PaymentStatus.REFUNDED,
+    ],
+)
+def test_payment_status_and_amount_reflect_the_real_payment(
+    client, salon, customer, specialist, service, customer_account, payment_status
+):
+    """Covers every reachable Payment status from this session's earlier
+    recon (PROCESSING/EXPIRED/CANCELLED are never assigned by any
+    production code path, so are not exercised here)."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CANCELLED,
+    )
+    payment = _make_payment(salon, appt, status=payment_status, amount="123.45")
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert row["payment_status"] == payment_status
+    assert Decimal(str(row["payment_amount"])) == payment.amount
+
+
+def test_amount_due_at_visit_is_computed_for_confirmed_with_succeeded_payment(
+    client, salon, customer, specialist, service, customer_account
+):
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    _make_payment(salon, appt, status=PaymentStatus.SUCCEEDED, amount="100.00")
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    expected = Decimal(str(service.price)) - Decimal("100.00")
+    assert Decimal(str(row["amount_due_at_visit"])) == expected
+
+
+def test_amount_due_at_visit_is_null_for_pending_payment_with_no_payment_row(
+    client, salon, customer, specialist, service, customer_account
+):
+    make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.PENDING_PAYMENT,
+    )
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert row["amount_due_at_visit"] is None
+
+
+def test_amount_due_at_visit_is_null_for_cancelled_with_succeeded_payment(
+    client, salon, customer, specialist, service, customer_account
+):
+    """CANCELLED+SUCCEEDED is reachable (refund-ineligible cancellation,
+    <24h before start) -- amount_due_at_visit must still be null, since the
+    booking is no longer honored."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CANCELLED,
+    )
+    _make_payment(salon, appt, status=PaymentStatus.SUCCEEDED, amount="100.00")
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert row["amount_due_at_visit"] is None
+
+
+def test_amount_due_at_visit_is_null_for_cancelled_with_refunded_payment(
+    client, salon, customer, specialist, service, customer_account
+):
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CANCELLED,
+    )
+    _make_payment(salon, appt, status=PaymentStatus.REFUNDED, amount="100.00")
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert row["amount_due_at_visit"] is None
+
+
+# --- 3b. select_related("payment") avoids N+1 -------------------------------
+
+
+def test_payment_fields_add_no_n_plus_one_query_across_a_list(
+    client, salon, customer, specialist, service, customer_account
+):
+    one_appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    _make_payment(salon, one_appt, status=PaymentStatus.SUCCEEDED, provider_reference_id="ref-0")
+
+    client.force_authenticate(user=customer_account)
+    with CaptureQueriesContext(connection) as one_row_ctx:
+        response = client.get(_mine_url(salon))
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    one_row_query_count = len(one_row_ctx.captured_queries)
+
+    for i in range(1, 6):
+        appt = make_appointment(
+            salon=salon,
+            customer=customer,
+            specialist=specialist,
+            service=service,
+            start=START + dt.timedelta(days=i),
+            status=AppointmentStatus.CONFIRMED,
+        )
+        _make_payment(salon, appt, status=PaymentStatus.SUCCEEDED, provider_reference_id=f"ref-{i}")
+
+    with CaptureQueriesContext(connection) as six_rows_ctx:
+        response = client.get(_mine_url(salon))
+    assert response.status_code == 200
+    assert response.data["count"] == 6
+
+    # Fixed query count regardless of row volume -- select_related("payment")
+    # joins the Payment row into the same SELECT, not one query per row.
+    assert len(six_rows_ctx.captured_queries) == one_row_query_count
 
 
 # --- 4. Session for one salon, hitting another salon's URL --------------
