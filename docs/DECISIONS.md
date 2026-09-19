@@ -3202,6 +3202,9 @@ Scope, in build order:
      needs extracting first — do not duplicate that logic. Depends on
      the refund-eligibility fix, § "Refund-eligibility gap (found
      19.09.2026, closing Stage 8)" — do not duplicate its logic.
+   - Split into two waves: list + sections + cancel action first (backend
+     ready); the "Оплатити" button is deferred to item 14 (new endpoint
+     needed).
 5. **Account-aware booking path.** Two distinct sub-cases, both real:
    - If the Account already has a linked Customer (e.g. via the existing
      guest-booking→verification email-match merge), skip the
@@ -3300,6 +3303,18 @@ Scope, in build order:
     screen, unreachable once that tab is closed. Add a persistent banner
     on the dashboard/profile for an unverified logged-in Account, with a
     resend action calling the existing `ResendVerificationView`.
+14. **Backend + frontend: "Оплатити" (pay) action from the account
+    dashboard.** Recon-confirmed gap: `/booking/pay` and
+    `GuestAppointmentPayView` are guest-token-only; an authenticated
+    Account's own booking may have no guest token at all, so neither can
+    be reused. Needs a new `AccountAppointmentPayView`
+    (`POST appointments/<id>/pay/`), mirroring
+    `AccountAppointmentCancelView`'s ownership check (own linked
+    Customer's appointment, 404 on mismatch) and calling the existing
+    `payments.services.initiate_payment`. Split from the rest of item 4
+    (list/sections/cancel, which are already backend-ready) — the
+    dashboard ships first without a working pay button; this lands as a
+    follow-up.
 
 Explicitly out of scope for Stage 15:
 
