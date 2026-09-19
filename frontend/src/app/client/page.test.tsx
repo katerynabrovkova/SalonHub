@@ -14,11 +14,32 @@ vi.mock("@/lib/api/client", () => ({
   apiRequest: vi.fn(),
 }));
 
-// Imported after the mock above so the mocked module is what the page sees.
+// ClientAvatarMenu (item 7) calls useRouter() for its logout redirect --
+// same mock shape as login/page.test.tsx, just replace instead of push.
+const replaceMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: replaceMock }),
+}));
+
+// Imported after the mocks above so the mocked modules are what the page sees.
 import { apiRequest } from "@/lib/api/client";
+import { AuthProvider } from "@/app/AuthContext";
 import ClientDashboardPage from "./page";
 
 const mockedApiRequest = vi.mocked(apiRequest);
+
+// ClientAvatarMenu (item 7) reads useAuth(), so this page now needs a real
+// AuthProvider wrapping it, not just the bare component -- same reasoning
+// login/page.test.tsx/register's tests already wrap their pages.
+const ME = { email: "alice@example.com", role: "client" as const, name: "Alice", phone: "+10000000000" };
+
+function renderDashboard() {
+  return render(
+    <AuthProvider>
+      <ClientDashboardPage />
+    </AuthProvider>,
+  );
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FUTURE = new Date(Date.now() + 3 * DAY_MS).toISOString();
@@ -69,6 +90,9 @@ function mockApiRoutes({
 } = {}) {
   mockedApiRequest.mockImplementation((...args) => {
     const [, path, options] = args as [string, string, RequestInit | undefined];
+    if (path === "/auth/me/") {
+      return Promise.resolve(ME);
+    }
     if (path === "/appointments/mine/") {
       return Promise.resolve(list ? list() : emptyPage());
     }
@@ -86,6 +110,7 @@ function mockApiRoutes({
 beforeEach(() => {
   nextId = 1;
   mockedApiRequest.mockReset();
+  replaceMock.mockReset();
 });
 
 describe("ClientDashboardPage", () => {
@@ -108,7 +133,7 @@ describe("ClientDashboardPage", () => {
         pageOf([upcomingConfirmed, upcomingPending, completedPast, cancelledFutureDated]),
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() => expect(screen.getByText("Найближчі")).toBeInTheDocument());
 
@@ -139,7 +164,7 @@ describe("ClientDashboardPage", () => {
       list: () => pageOf([buildAppointment({ status, start_datetime: PAST })]),
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() => expect(screen.getByText(badgeText)).toBeInTheDocument());
   });
@@ -160,7 +185,7 @@ describe("ClientDashboardPage", () => {
         ]),
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() =>
       expect(screen.getByText("Оплата при візиті: 400.00 ₴")).toBeInTheDocument(),
@@ -181,7 +206,7 @@ describe("ClientDashboardPage", () => {
         ]),
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() => expect(screen.getByText("Завершено")).toBeInTheDocument());
     expect(screen.queryByText(/Оплата при візиті/)).not.toBeInTheDocument();
@@ -201,7 +226,7 @@ describe("ClientDashboardPage", () => {
         ]),
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() =>
       expect(screen.getByText("Депозит утримано: 100.00 ₴")).toBeInTheDocument(),
@@ -221,7 +246,7 @@ describe("ClientDashboardPage", () => {
         ]),
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() =>
       expect(screen.getByText("Повернення обробляється")).toBeInTheDocument(),
@@ -241,7 +266,7 @@ describe("ClientDashboardPage", () => {
         ]),
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() => expect(screen.getByText("Повернено: 100.00 ₴")).toBeInTheDocument());
   });
@@ -261,7 +286,7 @@ describe("ClientDashboardPage", () => {
       },
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() => expect(screen.getByText("Підтверджено")).toBeInTheDocument());
 
@@ -285,7 +310,7 @@ describe("ClientDashboardPage", () => {
       },
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
     await waitFor(() => expect(screen.getByText("Підтверджено")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "Скасувати" }));
@@ -307,7 +332,7 @@ describe("ClientDashboardPage", () => {
       },
     });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
     await waitFor(() => expect(screen.getByText("Підтверджено")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "Скасувати" }));
@@ -323,7 +348,7 @@ describe("ClientDashboardPage", () => {
   it("test_empty_state_renders_when_there_are_no_appointments", async () => {
     mockApiRoutes({ list: emptyPage });
 
-    render(<ClientDashboardPage />);
+    renderDashboard();
 
     await waitFor(() =>
       expect(screen.getByText("У вас поки немає жодного запису.")).toBeInTheDocument(),

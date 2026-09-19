@@ -22,15 +22,22 @@
  * cancelled item in place -- recon-confirmed there is no existing
  * "patch one item in an array" precedent in this codebase, so a full
  * refetch is the simplest safe approach for this first wave.
+ *
+ * Avatar + dropdown menu (item 7): kept in the header shared across every
+ * render branch below (loading, error, empty, and the populated state), not
+ * just the populated one -- profile access shouldn't be gated behind the
+ * appointments list finishing its own fetch.
  */
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { apiRequest } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
 import { getMyAppointments, type MyAppointment } from "@/lib/booking/getMyAppointments";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
+
+import ClientAvatarMenu from "./ClientAvatarMenu";
 
 // Mirrors AuthContext.tsx/login/page.tsx's PLATFORM_DOMAIN resolution.
 const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "salonhub.com";
@@ -224,52 +231,55 @@ export default function ClientDashboardPage() {
     }
   }
 
+  let body: ReactNode;
+
   if (loaded === null) {
-    return (
-      <main className="p-8">
-        {loadError !== null ? <p role="alert">{loadError}</p> : <p>Завантаження...</p>}
-      </main>
-    );
-  }
-
-  const { appointments, asOfMs } = loaded;
-
-  if (appointments.length === 0) {
-    return (
-      <main className="flex flex-col items-center gap-4 p-8 text-center">
-        <h1 className="text-xl font-semibold">Мої записи</h1>
+    body = loadError !== null ? <p role="alert">{loadError}</p> : <p>Завантаження...</p>;
+  } else if (loaded.appointments.length === 0) {
+    body = (
+      <div className="flex flex-col items-center gap-4 text-center">
         <p>У вас поки немає жодного запису.</p>
         <Link href="/services" className="text-blue-600 underline">
           Забронювати візит
         </Link>
-      </main>
+      </div>
+    );
+  } else {
+    const { appointments, asOfMs } = loaded;
+    const upcoming = appointments.filter((appointment) => isUpcoming(appointment, asOfMs));
+    const past = appointments.filter((appointment) => !isUpcoming(appointment, asOfMs));
+
+    body = (
+      <>
+        {actionError !== null ? <p role="alert">{actionError}</p> : null}
+
+        <AppointmentSection
+          title="Найближчі"
+          appointments={upcoming}
+          emptyMessage="Немає майбутніх записів."
+          onCancel={handleCancel}
+          cancellingId={cancellingId}
+        />
+
+        <AppointmentSection
+          title="Минулі"
+          appointments={past}
+          emptyMessage="Немає минулих записів."
+          onCancel={handleCancel}
+          cancellingId={cancellingId}
+        />
+      </>
     );
   }
 
-  const upcoming = appointments.filter((appointment) => isUpcoming(appointment, asOfMs));
-  const past = appointments.filter((appointment) => !isUpcoming(appointment, asOfMs));
-
   return (
     <main className="flex flex-col gap-8 p-8">
-      <h1 className="text-xl font-semibold">Мої записи</h1>
+      <header className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Мої записи</h1>
+        <ClientAvatarMenu />
+      </header>
 
-      {actionError !== null ? <p role="alert">{actionError}</p> : null}
-
-      <AppointmentSection
-        title="Найближчі"
-        appointments={upcoming}
-        emptyMessage="Немає майбутніх записів."
-        onCancel={handleCancel}
-        cancellingId={cancellingId}
-      />
-
-      <AppointmentSection
-        title="Минулі"
-        appointments={past}
-        emptyMessage="Немає минулих записів."
-        onCancel={handleCancel}
-        cancellingId={cancellingId}
-      />
+      {body}
     </main>
   );
 }
