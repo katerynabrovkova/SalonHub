@@ -1,6 +1,7 @@
 /**
  * Browser-only API client for the SalonHub backend (docs/DECISIONS.md
- * § Stage 12 "API client wrapper").
+ * § Stage 12 "API client wrapper"; base-URL construction revised per
+ * § "Dev environment: API hostname breaks the same-site assumption").
  *
  * - Explicit `slug` per call; no module-level salon/session state.
  * - Every request is credentialed (`credentials: 'include'`) so the httpOnly
@@ -9,11 +10,28 @@
  * - Failed responses become `ApiError` from the backend error envelope.
  *   A `fetch` that throws before a response (network failure) is not wrapped.
  *
- * Reads `document.cookie`, so this cannot run in Server Components.
+ * The base URL is built from `window.location.hostname` (the page's OWN
+ * host) at call time, not a fixed `NEXT_PUBLIC_API_URL` origin -- a fixed
+ * value (whether bare `localhost` or a separate `api.localhost`) can never
+ * be the same registrable domain as every per-tenant `<slug>.localhost`
+ * frontend, so `SameSite=Lax` cookies (csrftoken/access_token/refresh_token)
+ * get silently dropped by the browser on this module's `fetch()` calls.
+ * Using the literal current hostname, just swapping the port, guarantees an
+ * identical registrable domain (genuinely same-site, not merely same-site
+ * by wildcard coincidence) regardless of which salon subdomain is active.
+ * Only the port is still configurable, via `NEXT_PUBLIC_API_PORT` -- there
+ * is no full-origin var for this file to read anymore.
+ *
+ * Reads `document.cookie` and `window.location`, so this cannot run in
+ * Server Components.
  */
 import { ApiError } from "./errors";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+const API_PORT = process.env.NEXT_PUBLIC_API_PORT;
+
+function apiBaseUrl(): string {
+  return `${window.location.protocol}//${window.location.hostname}:${API_PORT}`;
+}
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -60,7 +78,7 @@ export async function apiRequest<T>(
   }
 
   const response = await fetch(
-    `${API_BASE}/api/v1/salons/${slug}${path}`,
+    `${apiBaseUrl()}/api/v1/salons/${slug}${path}`,
     { ...options, method, headers, credentials: "include" },
   );
 

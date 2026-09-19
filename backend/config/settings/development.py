@@ -2,7 +2,20 @@ from .base import *  # noqa: F401,F403
 from .base import env
 
 DEBUG = env.bool("DJANGO_DEBUG", default=True)
-ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
+# ".localhost" is Django's leading-dot subdomain-wildcard syntax: matches
+# any "<label>.localhost" host, not just one fixed name (docs/DECISIONS.md
+# § "Dev environment: API hostname breaks the same-site assumption") --
+# apiRequest (frontend/src/lib/api/client.ts) now reaches the backend via
+# whatever salon subdomain the visitor is actually on
+# ("<slug>.localhost:<port>"), so a single fixed extra host is never enough.
+# This default is only a fallback -- the repo's own .env sets
+# DJANGO_ALLOWED_HOSTS explicitly, so THAT list (not this default) is what's
+# actually effective in the normal docker compose setup. Kept in sync with
+# .env/.env.example so a from-scratch dev setup that skips copying .env
+# still works.
+ALLOWED_HOSTS = env.list(
+    "DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1", ".localhost"]
+)
 
 # TEMPORARY — lets a local ngrok tunnel through Django's ALLOWED_HOSTS check
 # so WayForPay's real sandbox webhook can reach the local backend. Empty

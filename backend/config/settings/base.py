@@ -285,8 +285,15 @@ CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
 # Django's CSRF origin check must accept unsafe requests coming from any salon
 # subdomain — docs/DECISIONS.md § "Frontend routing: subdomain-based". Django
-# supports a leading-wildcard host here.
-CSRF_TRUSTED_ORIGINS = [f"https://*.{PLATFORM_DOMAIN}"]
+# supports a leading-wildcard host here. Same dev + prod pair as
+# CORS_ALLOWED_ORIGIN_REGEXES above: without the dev entry, Django's Origin
+# check 403s every local POST/PUT/PATCH/DELETE from the dev frontend
+# (`http://<slug>.localhost:3000`) even with a perfectly matching CSRF
+# cookie/header — the prod-only `https://*.<PLATFORM_DOMAIN>` entry was
+# missing this (found + reproduced 19.09.2026: "CSRF Failed: Origin checking
+# failed - http://bella-demo.localhost:3000 does not match any trusted
+# origins.").
+CSRF_TRUSTED_ORIGINS = ["http://*.localhost:3000", f"https://*.{PLATFORM_DOMAIN}"]
 
 # --- Logging -----------------------------------------------------------------
 #
