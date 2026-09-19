@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -101,6 +102,13 @@ export default function LoginPage() {
           Log in
         </button>
       </form>
+
+      <p className="mt-4 text-center text-sm">
+        Немає акаунту?{" "}
+        <Link href="/register" className="text-blue-600 underline">
+          Зареєструватися
+        </Link>
+      </p>
     </main>
   );
 }

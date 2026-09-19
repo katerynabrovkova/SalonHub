@@ -206,4 +206,13 @@ describe("LoginPage", () => {
     // Clean up the dangling promise so it doesn't leak into other tests.
     resolveLogin(undefined);
   });
+
+  test("test_renders_register_link", async () => {
+    mockApiRoutes();
+
+    renderLoginPage();
+
+    const registerLink = screen.getByRole("link", { name: /зареєструватися/i });
+    expect(registerLink).toHaveAttribute("href", "/register");
+  });
 });

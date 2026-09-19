@@ -222,6 +222,12 @@ recorded so they aren't rediscovered stage by stage:
 - **Never assume the host port.** `HOST_BACKEND_PORT` is per-developer and is not
   `8000` on every machine — read it from `.env`, or reach the backend from inside the
   Docker network at `backend:8000`, where the port never varies.
+- **Frontend tests and any npm/node commands run inside the Docker container**
+  (`docker compose exec frontend npm test`), same pattern as backend pytest. Do not
+  attempt to run them on the host, and do not treat an empty or absent host-side
+  `frontend/node_modules` as an error — a named Docker volume
+  (`frontend_node_modules`) intentionally shadows it, so dependencies live inside the
+  container, not on the host. Host-side `npm install` has no effect.
 
 ## Running tests and linters
 
@@ -230,4 +236,5 @@ docker compose exec backend pytest
 docker compose exec backend ruff check .
 docker compose exec backend ruff format --check .
 docker compose exec backend mypy .
+docker compose exec frontend npm test
 ```
