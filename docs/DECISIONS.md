@@ -1815,9 +1815,46 @@ observed behavior alone — confirmed the earlier curl-based CSRF
 reproduction could not have caught this (curl has no `SameSite` cookie
 policy at all).
 
-Fix: give the dev API its own `*.localhost` subdomain (e.g.
-`api.localhost:8001`) matching production's same-site topology, rather
-than bare `localhost`.
+**First fix attempted (19.09.2026), superseded the same day:** give the dev
+API its own `*.localhost` subdomain (`api.localhost:8001`), on the
+reasoning that it would share `localhost` as an effective TLD with
+`<slug>.localhost` the same way production's subdomains share one
+registrable domain. **This does not actually solve the problem**:
+`api.localhost` and `<slug>.localhost` are still two *different* labels
+under that effective TLD, so their registrable domains
+(`api.localhost` vs `<slug>.localhost`) are still two different strings —
+still genuinely cross-site, just with a different pair of mismatched
+hostnames than before. A fixed API hostname can never be same-site with
+every possible `<slug>.localhost` frontend, no matter what that fixed
+hostname is.
+
+**Actual fix:** `apiRequest` (`frontend/src/lib/api/client.ts`) no longer
+reads a fixed `NEXT_PUBLIC_API_URL` origin at all. It builds its base URL
+from `window.location.hostname` — the page's own, literal, current
+hostname — at call time, keeping only the port configurable
+(`NEXT_PUBLIC_API_PORT`). Since the registrable domain is then always
+identical to the page's own (not just nominally "same effective TLD"),
+this is unconditionally same-site regardless of which salon subdomain is
+active, with no fixed API hostname to keep in sync with every future
+tenant subdomain. `ALLOWED_HOSTS` correspondingly needed a genuine
+wildcard, not one more fixed name: `DJANGO_ALLOWED_HOSTS` (repo-root
+`.env`) and `development.py`'s fallback default both now include
+`.localhost` (Django's leading-dot subdomain-wildcard syntax), replacing
+the reverted `api.localhost` entry.
+
+`guestClient.ts`/`createGuestBooking.ts` still read the original, unchanged
+`NEXT_PUBLIC_API_URL` (a fixed origin) — they send no cookies
+(`credentials` is never `"include"` in either), so they carry no ambient
+credential and are not subject to `SameSite` at all; only `apiRequest`,
+which does send credentialed requests, needed this fix.
+
+**Open question this raises for production**, not resolved here: this
+approach implicitly assumes the production API is reachable on the exact
+same hostname as each tenant frontend (`<slug>.PLATFORM_DOMAIN`), just a
+different port — not a separate host like `api.PLATFORM_DOMAIN`, which was
+never ruled out before this change and is not documented anywhere as
+decided. Flagged for a real decision before production deployment, not
+assumed here.
 
 ### Design system (Stage 12) — explicitly deferred
 
