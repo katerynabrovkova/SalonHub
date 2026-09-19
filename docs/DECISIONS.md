@@ -1791,6 +1791,34 @@ Decided 2026-09-11.
   panel. There is no third "specialist" role; specialists never
   authenticate (see Stage 3-R, "No specialist logins in this build").
 
+### Dev environment: API hostname breaks the same-site assumption (found 19.09.2026)
+
+The cookie/CSRF design (§ "Cookie mechanism resolved") reasons from a
+same-site-but-cross-origin production topology: every `<slug>.PLATFORM_DOMAIN`
+frontend and the API origin share one registrable domain, so `SameSite=Lax`
+cookies flow and the CSRF token is documented defense-in-depth "for
+same-site subdomains."
+
+Local dev violates this: the frontend is `<slug>.localhost:3000`
+(registrable domain `<slug>.localhost`, since `localhost` has no
+public-suffix entry and each label becomes its own effective TLD), while
+`NEXT_PUBLIC_API_URL` points at bare `localhost:8001` (registrable domain
+`localhost`) — a genuinely different site, not just a different origin.
+`SameSite=Lax` cookies (`csrftoken`, `access_token`, `refresh_token`) are
+correctly refused by the browser on cross-site `fetch()`/XHR subrequests,
+which blocked every real browser login attempt even after the separate
+`CSRF_TRUSTED_ORIGINS` dev-origin fix (both bugs were stacked; fixing the
+first only surfaced the second).
+
+Diagnosed via direct reasoning about the site-boundary algorithm, not
+observed behavior alone — confirmed the earlier curl-based CSRF
+reproduction could not have caught this (curl has no `SameSite` cookie
+policy at all).
+
+Fix: give the dev API its own `*.localhost` subdomain (e.g.
+`api.localhost:8001`) matching production's same-site topology, rather
+than bare `localhost`.
+
 ### Design system (Stage 12) — explicitly deferred
 
 Decided 11.09.2026.
