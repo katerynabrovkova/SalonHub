@@ -139,6 +139,31 @@ def test_price_and_deposit_fields_appear_with_correct_values(
     )
 
 
+def test_specialist_and_service_are_nested_id_and_name_objects(
+    client, salon, customer, specialist, service, customer_account
+):
+    """specialist/service used to be bare FK ids on this serializer; the
+    dashboard needs a display name per card, so both are now nested
+    {id, name} (docs/DECISIONS.md § Stage 15 planning, item 4) -- name
+    resolved the same way reviews.serializers.ReviewSpecialistSerializer/
+    ReviewServiceSerializer do."""
+    make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert row["specialist"] == {"id": specialist.id, "name": "Jane"}
+    assert row["service"] == {"id": service.id, "name": "Manicure"}
+
+
 def test_results_are_ordered_newest_appointment_first(
     client, salon, customer, specialist, service, customer_account
 ):
@@ -436,12 +461,17 @@ def test_amount_due_at_visit_is_null_for_cancelled_with_refunded_payment(
     assert row["amount_due_at_visit"] is None
 
 
-# --- 3b. select_related("payment") avoids N+1 -------------------------------
+# --- 3b. select_related("payment", "specialist", "service") avoids N+1 -----
 
 
-def test_payment_fields_add_no_n_plus_one_query_across_a_list(
+def test_payment_specialist_and_service_fields_add_no_n_plus_one_query_across_a_list(
     client, salon, customer, specialist, service, customer_account
 ):
+    """Covers all three select_related() additions at once (payment,
+    specialist, service): every row here reads `.payment.status`,
+    `.specialist.name`, and `.service.name`, so a missing select_related on
+    any of the three would show up as extra queries per row below, not just
+    a fixed offset."""
     one_appt = make_appointment(
         salon=salon,
         customer=customer,

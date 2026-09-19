@@ -204,14 +204,16 @@ class AccountAppointmentListView(generics.ListAPIView):
     `-id`), the same newest-first convention `reviews.views.ReviewListView`
     already uses for a per-recipient list.
 
-    `select_related("payment")` below joins the OneToOneField reverse
-    relation `AppointmentAccountSerializer`'s `payment_status`/
-    `payment_amount`/`amount_due_at_visit` fields read
-    (docs/DECISIONS.md § Stage 15 planning, item 4) -- without it, each row's
-    `appointment.payment` access would be a separate query, N+1 across a
-    list. A OneToOneField's reverse side is select_related-able (unlike a
-    plain reverse FK), same reasoning `reviews.views.ReviewListView` applies
-    to `select_related("specialist", "appointment__service")`.
+    `select_related("payment", "specialist", "service")` below joins the
+    OneToOneField reverse relation `AppointmentAccountSerializer`'s
+    `payment_status`/`payment_amount`/`amount_due_at_visit` fields read,
+    plus the two plain FKs its nested `specialist`/`service` name fields
+    read (docs/DECISIONS.md § Stage 15 planning, item 4) -- without it, each
+    row's `appointment.payment`/`.specialist`/`.service` access would be a
+    separate query, N+1 across a list. A OneToOneField's reverse side is
+    select_related-able (unlike a plain reverse FK), same reasoning
+    `reviews.views.ReviewListView` applies to
+    `select_related("specialist", "appointment__service")`.
     """
 
     serializer_class = AppointmentAccountSerializer
@@ -222,7 +224,7 @@ class AccountAppointmentListView(generics.ListAPIView):
             return Appointment.objects.none()
         return (
             Appointment.objects.filter(customer_id=customer_id)
-            .select_related("payment")
+            .select_related("payment", "specialist", "service")
             .order_by("-start_datetime", "-id")
         )
 

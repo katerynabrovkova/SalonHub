@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from booking.models import Appointment, AppointmentStatus
 from catalog.models import Service
+from core.i18n import resolve_translation
 from payments.models import Payment, PaymentStatus
 from scheduling.serializers import _OffsetRequiredDateTimeField
 from specialists.models import Specialist
@@ -35,6 +36,48 @@ class AppointmentGuestSerializer(serializers.ModelSerializer):
             "cancellation_reason",
         ]
         read_only_fields = fields
+
+
+class AppointmentSpecialistSerializer(serializers.ModelSerializer):
+    """
+    The `specialist` block on AppointmentAccountSerializer, below --
+    `{id, name}` with `name` resolved for the request's `?lang=`. Mirrors
+    `reviews.serializers.ReviewSpecialistSerializer`'s identical shape/
+    resolution, not reused directly: booking does not depend on reviews (the
+    reverse dependency already exists -- reviews imports `booking.models`),
+    and this app's own established convention is a separate serializer per
+    read surface even with overlapping shape (AppointmentAccountSerializer's
+    own docstring, "kept as a separate class... free to diverge later").
+    """
+
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Specialist
+        fields = ["id", "name"]
+        read_only_fields = fields
+
+    def get_name(self, obj: Specialist) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
+
+
+class AppointmentServiceSerializer(serializers.ModelSerializer):
+    """The `service` block on AppointmentAccountSerializer -- see
+    AppointmentSpecialistSerializer's docstring, same reasoning/shape."""
+
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Service
+        fields = ["id", "name"]
+        read_only_fields = fields
+
+    def get_name(self, obj: Service) -> str:
+        request = self.context.get("request")
+        requested_lang = request.query_params.get("lang") if request is not None else None
+        return resolve_translation(obj.name, requested_lang)
 
 
 class AppointmentAccountSerializer(serializers.ModelSerializer):
@@ -87,8 +130,19 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     serializer runs against (`AccountAppointmentListView.get_queryset`) adds
     `select_related("payment")`, so these three fields cost no extra query
     per row across a list.
+
+    `specialist`/`service` are nested `AppointmentSpecialistSerializer`/
+    `AppointmentServiceSerializer` (`{id, name}`), not the default
+    `ModelSerializer` FK behavior (a bare pk) -- the client dashboard needs
+    a display name per card, not just an id (docs/DECISIONS.md § Stage 15
+    planning, item 4). Reading `.name` on each traverses the FK, so
+    `AccountAppointmentListView.get_queryset()` also adds
+    `select_related("specialist", "service")` alongside `"payment"`, for the
+    same N+1 reason.
     """
 
+    specialist = AppointmentSpecialistSerializer()
+    service = AppointmentServiceSerializer()
     payment_status = serializers.SerializerMethodField()
     payment_amount = serializers.SerializerMethodField()
     amount_due_at_visit = serializers.SerializerMethodField()
