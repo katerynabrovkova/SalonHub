@@ -345,7 +345,11 @@ def test_payment_status_and_amount_reflect_the_real_payment(
 
     (row,) = response.data["results"]
     assert row["payment_status"] == payment_status
-    assert Decimal(str(row["payment_amount"])) == payment.amount
+    # str, not a bare JSON number -- same representation as
+    # service_price_at_booking/deposit_percentage_at_booking's real
+    # DecimalFields (docs/DECISIONS.md § Stage 15 planning, item 4).
+    assert isinstance(row["payment_amount"], str)
+    assert row["payment_amount"] == str(payment.amount)
 
 
 def test_amount_due_at_visit_is_computed_for_confirmed_with_succeeded_payment(
@@ -366,7 +370,8 @@ def test_amount_due_at_visit_is_computed_for_confirmed_with_succeeded_payment(
 
     (row,) = response.data["results"]
     expected = Decimal(str(service.price)) - Decimal("100.00")
-    assert Decimal(str(row["amount_due_at_visit"])) == expected
+    assert isinstance(row["amount_due_at_visit"], str)
+    assert row["amount_due_at_visit"] == str(expected)
 
 
 def test_amount_due_at_visit_is_null_for_pending_payment_with_no_payment_row(

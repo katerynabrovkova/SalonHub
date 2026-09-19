@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from rest_framework import serializers
 
 from booking.models import Appointment, AppointmentStatus
@@ -68,6 +66,16 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     matching this codebase's established null-means-absence convention
     (`Payment.refund_initiated_at`, `Specialist.photo`).
 
+    `payment_amount`/`amount_due_at_visit` return `str(...)` of their
+    `Decimal`, not a bare `Decimal`: a `SerializerMethodField` has no
+    `to_representation` coercion of its own, so an un-stringified `Decimal`
+    renders as a bare JSON number (verified:
+    `JSONRenderer().render({"x": Decimal("12.34")})` -> `b'{"x":12.34}'`) --
+    inconsistent with `service_price_at_booking`/`deposit_percentage_at_booking`
+    above, real `DecimalField`s whose own `to_representation` always
+    produces a string (`"12.34"`). `str()` here makes every money field on
+    this serializer serialize the same way.
+
     `amount_due_at_visit` is computed here, in Python, rather than left for
     the frontend: it's a plain subtraction of two values the backend
     already rounded and stored (`service_price_at_booking`, `Payment.amount`),
@@ -112,11 +120,11 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
         payment = self._payment(appointment)
         return payment.status if payment is not None else None
 
-    def get_payment_amount(self, appointment: Appointment) -> Decimal | None:
+    def get_payment_amount(self, appointment: Appointment) -> str | None:
         payment = self._payment(appointment)
-        return payment.amount if payment is not None else None
+        return str(payment.amount) if payment is not None else None
 
-    def get_amount_due_at_visit(self, appointment: Appointment) -> Decimal | None:
+    def get_amount_due_at_visit(self, appointment: Appointment) -> str | None:
         payment = self._payment(appointment)
         if (
             appointment.status not in _AMOUNT_DUE_ELIGIBLE_STATUSES
@@ -124,7 +132,7 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
             or payment.status != PaymentStatus.SUCCEEDED
         ):
             return None
-        return appointment.service_price_at_booking - payment.amount
+        return str(appointment.service_price_at_booking - payment.amount)
 
 
 class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):
