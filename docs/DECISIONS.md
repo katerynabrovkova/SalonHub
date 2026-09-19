@@ -2982,6 +2982,33 @@ workflow.
   — `refund()` returns the same `provider_reference_id` it was given, the
   only id WayForPay's response actually carries.
 
+### Refund-eligibility gap (found 19.09.2026, closing Stage 8)
+
+Recon confirmed the ≥24h-full-refund / <24h-deposit-forfeited business rule
+(§ Business rules) is documented but never implemented — cancel_appointment
+(booking/services.py) never calls initiate_refund; GuestAppointmentCancelView's
+own "Stage 8 work" comment near the refund hook-in point is stale (Payment now
+exists, was never wired in).
+
+Correction to an earlier same-session note: this is NOT a partial-refund
+feature. initiate_refund and the provider layer already pass the full
+payment.amount only — Stage 8's own decision ("always the full deposit or
+nothing") is unchanged. The fix is a binary eligibility check, not a new
+amount/status field.
+
+Fix: add an eligibility check — salon-initiated cancellations always qualify;
+customer-initiated cancellations qualify only if now is ≥24h before
+start_datetime. On eligible, call the existing initiate_refund with the
+appointment's Payment (if one exists and is SUCCEEDED); on ineligible, do
+nothing (Payment stays SUCCEEDED, deposit kept). Recommended home: inside
+cancel_appointment itself (role-agnostic, already receives
+cancelled_by/now/appointment) rather than duplicated per caller — so both the
+existing guest-cancel path and Stage 15 item 4's future account-cancel path
+get correct behavior from one place.
+
+This is a prerequisite for Stage 15 item 4's cancel action, not new Stage 15
+scope — cross-referenced from item 4 above.
+
 ### WayForPayProvider: first-time technical conventions (HTTP, mocking, Decimal-to-string, errors, credentials)
 
 Decided 16.09.2026 — agreed before any code, per the stage-by-stage
@@ -3164,7 +3191,9 @@ Scope, in build order:
      existing cancellation/refund business logic (≥24h full refund,
      <24h deposit forfeited) already lives in a shared service function
      reusable from `GuestAppointmentCancelView`, or is inline there and
-     needs extracting first — do not duplicate that logic.
+     needs extracting first — do not duplicate that logic. Depends on
+     the refund-eligibility fix, § "Refund-eligibility gap (found
+     19.09.2026, closing Stage 8)" — do not duplicate its logic.
 5. **Account-aware booking path**: when a session exists, skip the
    contact-info step in the booking flow — the frontend already has the
    Account's identity via `auth/me/`, so re-collecting name/email/phone
