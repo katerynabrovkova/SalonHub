@@ -3009,6 +3009,14 @@ get correct behavior from one place.
 This is a prerequisite for Stage 15 item 4's cancel action, not new Stage 15
 scope — cross-referenced from item 4 above.
 
+Known parallel case, deliberately unaddressed for now: `payments/views.py`'s
+`PaymentWebhookView` also calls `initiate_refund` uncaught, but at lower
+severity than `cancel_appointment`'s original gap — a resulting 502 only
+triggers the payment provider's own webhook retry, which the idempotency
+ledger (`ProcessedWebhookEvent`) already makes a safe no-op, not a
+human-facing error the way an uncaught failure in `cancel_appointment` would
+have been. Not urgent; not fixed here.
+
 ### WayForPayProvider: first-time technical conventions (HTTP, mocking, Decimal-to-string, errors, credentials)
 
 Decided 16.09.2026 — agreed before any code, per the stage-by-stage

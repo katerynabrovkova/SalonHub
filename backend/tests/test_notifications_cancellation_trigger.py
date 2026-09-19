@@ -32,6 +32,7 @@ from notifications.models import (
     NotificationStatus,
     NotificationTrigger,
 )
+from payments.providers.mock import MockPaymentProvider
 from tests.conftest import make_appointment
 
 pytestmark = pytest.mark.django_db
@@ -64,6 +65,7 @@ def test_cancel_appointment_records_and_delivers_booking_cancelled_notification(
                 salon=salon,
                 cancelled_by=CancelledBy.CUSTOMER,
                 now=NOW,
+                provider=MockPaymentProvider(),
             )
 
     assert len(callbacks) == 1
@@ -100,6 +102,7 @@ def test_cancel_appointment_notification_dispatch_is_deferred_until_after_commit
                 salon=salon,
                 cancelled_by=CancelledBy.CUSTOMER,
                 now=NOW,
+                provider=MockPaymentProvider(),
             )
         # Rows are written, but nothing has been sent yet — the send is
         # queued behind commit, not run inline.
@@ -139,6 +142,7 @@ def test_cancel_appointment_rejected_transition_records_no_notification(
                 salon=salon,
                 cancelled_by=CancelledBy.CUSTOMER,
                 now=NOW,
+                provider=MockPaymentProvider(),
             )
 
     assert callbacks == []

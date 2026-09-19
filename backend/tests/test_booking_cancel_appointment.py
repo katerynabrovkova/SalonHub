@@ -9,8 +9,21 @@ itself.
 
 Signature under test:
 
-    cancel_appointment(*, appointment_id, salon, cancelled_by, now,
+    cancel_appointment(*, appointment_id, salon, cancelled_by, now, provider,
                         reason="") -> Appointment
+
+`provider` (docs/DECISIONS.md § "Refund-eligibility gap (found 19.09.2026,
+closing Stage 8)") is required on every call below, even in tests that have
+nothing to do with refunds — a `MockPaymentProvider()` instance, same
+injection discipline as `payments.services.initiate_payment`/
+`initiate_refund`. It's only actually exercised by the dedicated
+refund-eligibility tests near the bottom of this file, which create a
+SUCCEEDED `Payment` and assert on `provider.calls`; every other test here
+has no `Payment` row at all, so `_is_refund_eligible`'s outcome is moot and
+`provider.refund()` is never reached regardless of what it returns. One of
+those tests uses a provider whose `refund()` raises, to pin that
+cancel_appointment swallows `PaymentProviderError` rather than letting it
+mask an already-committed cancellation.
 
 Real-DB integration tests throughout (the service does select_for_update()
 plus a write) — no monkeypatching. All `now` values are tz-aware UTC
@@ -20,6 +33,8 @@ Every appointment/customer/token created here passes `salon=` explicitly
 """
 
 import datetime as dt
+from dataclasses import dataclass
+from decimal import Decimal
 
 import pytest
 
@@ -27,6 +42,8 @@ from booking.models import Appointment, AppointmentStatus, CancelledBy
 from booking.services import cancel_appointment
 from core.exceptions import InvalidStateTransitionError
 from core.tenancy import tenant_context
+from payments.models import Payment, PaymentStatus
+from payments.providers.mock import MockPaymentProvider
 from tests.conftest import make_appointment
 
 pytestmark = pytest.mark.django_db
@@ -82,6 +99,7 @@ def test_cancel_appointment_happy_path_cancels_a_pending_payment_appointment(
             salon=salon,
             cancelled_by=CancelledBy.CUSTOMER,
             now=NOW,
+            provider=MockPaymentProvider(),
             reason="change of plans",
         )
 
@@ -124,6 +142,7 @@ def test_cancel_appointment_also_cancels_a_confirmed_appointment(
             salon=salon,
             cancelled_by=CancelledBy.CUSTOMER,
             now=NOW,
+            provider=MockPaymentProvider(),
             reason="change of plans",
         )
 
@@ -162,6 +181,7 @@ def test_cancel_appointment_rejects_an_already_cancelled_appointment(
             salon=salon,
             cancelled_by=CancelledBy.CUSTOMER,
             now=NOW,
+            provider=MockPaymentProvider(),
         )
 
     assert exc_info.value.details == {"current_status": AppointmentStatus.CANCELLED}
@@ -191,6 +211,7 @@ def test_cancel_appointment_rejects_an_expired_appointment(salon, specialist, se
             salon=salon,
             cancelled_by=CancelledBy.CUSTOMER,
             now=NOW,
+            provider=MockPaymentProvider(),
         )
 
     assert exc_info.value.details == {"current_status": AppointmentStatus.EXPIRED}
@@ -216,7 +237,11 @@ def test_cancel_appointment_stores_cancelled_by_guest(salon, specialist, service
     )
     with tenant_context(salon.id):
         result = cancel_appointment(
-            appointment_id=appt.id, salon=salon, cancelled_by=CancelledBy.GUEST, now=NOW
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.GUEST,
+            now=NOW,
+            provider=MockPaymentProvider(),
         )
     assert result.cancelled_by == CancelledBy.GUEST
 
@@ -232,7 +257,11 @@ def test_cancel_appointment_stores_cancelled_by_customer(salon, specialist, serv
     )
     with tenant_context(salon.id):
         result = cancel_appointment(
-            appointment_id=appt.id, salon=salon, cancelled_by=CancelledBy.CUSTOMER, now=NOW
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.CUSTOMER,
+            now=NOW,
+            provider=MockPaymentProvider(),
         )
     assert result.cancelled_by == CancelledBy.CUSTOMER
 
@@ -248,7 +277,11 @@ def test_cancel_appointment_stores_cancelled_by_staff(salon, specialist, service
     )
     with tenant_context(salon.id):
         result = cancel_appointment(
-            appointment_id=appt.id, salon=salon, cancelled_by=CancelledBy.STAFF, now=NOW
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.STAFF,
+            now=NOW,
+            provider=MockPaymentProvider(),
         )
     assert result.cancelled_by == CancelledBy.STAFF
 
@@ -267,7 +300,11 @@ def test_cancel_appointment_defaults_reason_to_empty_string(salon, specialist, s
     )
     with tenant_context(salon.id):
         result = cancel_appointment(
-            appointment_id=appt.id, salon=salon, cancelled_by=CancelledBy.CUSTOMER, now=NOW
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.CUSTOMER,
+            now=NOW,
+            provider=MockPaymentProvider(),
         )
     assert result.cancellation_reason == ""
 
@@ -287,6 +324,7 @@ def test_cancel_appointment_stores_a_non_empty_reason(salon, specialist, service
             salon=salon,
             cancelled_by=CancelledBy.CUSTOMER,
             now=NOW,
+            provider=MockPaymentProvider(),
             reason="specialist unavailable",
         )
     assert result.cancellation_reason == "specialist unavailable"
@@ -304,6 +342,7 @@ def test_cancel_appointment_nonexistent_id_raises_bare_does_not_exist(salon):
             salon=salon,
             cancelled_by=CancelledBy.CUSTOMER,
             now=NOW,
+            provider=MockPaymentProvider(),
         )
 
 
@@ -333,4 +372,326 @@ def test_cancel_appointment_does_not_find_another_salons_appointment(
             salon=other_salon,
             cancelled_by=CancelledBy.CUSTOMER,
             now=NOW,
+            provider=MockPaymentProvider(),
         )
+
+
+# --- 8. Refund-eligibility gap fix (docs/DECISIONS.md § "Refund-eligibility
+# gap (found 19.09.2026, closing Stage 8)") ----------------------------------
+
+
+@dataclass(frozen=True)
+class _FakeRefundIntent:
+    provider_reference_id: str
+
+
+class _FakeRefundProvider:
+    """Records every refund() call for call-count/argument assertions — same
+    shape as test_payments_initiate_refund.py's _FakeProvider (a separate,
+    self-contained double rather than an import across test files).
+    start_payment is not exercised by cancel_appointment and raises if
+    somehow called."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def start_payment(self, *, amount, currency, reference):
+        raise NotImplementedError("not exercised by cancel_appointment tests")
+
+    def refund(self, *, provider_reference_id, reference, amount, currency):
+        self.calls.append(
+            {
+                "provider_reference_id": provider_reference_id,
+                "reference": reference,
+                "amount": amount,
+                "currency": currency,
+            }
+        )
+        return _FakeRefundIntent(provider_reference_id=f"fake_refund_{len(self.calls)}")
+
+
+def _make_succeeded_payment(salon, appt, *, provider_reference_id="existing_ref"):
+    with tenant_context(salon.id):
+        return Payment.objects.create(
+            salon=salon,
+            appointment=appt,
+            amount=Decimal("100.00"),
+            currency=salon.currency,
+            status=PaymentStatus.SUCCEEDED,
+            provider_reference_id=provider_reference_id,
+        )
+
+
+def _payment_status(salon, payment_id) -> str:
+    with tenant_context(salon.id):
+        return Payment.objects.get(pk=payment_id).status
+
+
+def test_cancel_appointment_salon_initiated_at_least_24h_before_start_triggers_refund(
+    salon, specialist, service, customer
+):
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    payment = _make_succeeded_payment(salon, appt)
+    provider = _FakeRefundProvider()
+
+    with tenant_context(salon.id):
+        cancel_appointment(
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.STAFF,
+            now=START - dt.timedelta(hours=48),
+            provider=provider,
+        )
+
+    assert len(provider.calls) == 1
+    assert provider.calls[0]["amount"] == payment.amount
+    assert _payment_status(salon, payment.id) == PaymentStatus.REFUND_PENDING
+
+
+def test_cancel_appointment_salon_initiated_less_than_24h_before_start_still_triggers_refund(
+    salon, specialist, service, customer
+):
+    """Salon-initiated cancellations always refund, regardless of timing —
+    the ≥24h cutoff applies only to customer-initiated cancellations."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    payment = _make_succeeded_payment(salon, appt)
+    provider = _FakeRefundProvider()
+
+    with tenant_context(salon.id):
+        cancel_appointment(
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.STAFF,
+            now=START - dt.timedelta(hours=1),
+            provider=provider,
+        )
+
+    assert len(provider.calls) == 1
+    assert _payment_status(salon, payment.id) == PaymentStatus.REFUND_PENDING
+
+
+def test_cancel_appointment_customer_initiated_at_least_24h_before_start_triggers_refund(
+    salon, specialist, service, customer
+):
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    payment = _make_succeeded_payment(salon, appt)
+    provider = _FakeRefundProvider()
+
+    with tenant_context(salon.id):
+        cancel_appointment(
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.CUSTOMER,
+            now=START - dt.timedelta(hours=24),  # exactly the cutoff -> eligible ("≥24h")
+            provider=provider,
+        )
+
+    assert len(provider.calls) == 1
+    assert _payment_status(salon, payment.id) == PaymentStatus.REFUND_PENDING
+
+
+def test_cancel_appointment_guest_initiated_at_least_24h_before_start_triggers_refund(
+    salon, specialist, service, customer
+):
+    """GUEST is the other customer-initiated value — the one
+    GuestAppointmentCancelView actually passes in production — proving it's
+    covered by the same eligibility rule as CUSTOMER, not just CUSTOMER
+    itself."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    payment = _make_succeeded_payment(salon, appt)
+    provider = _FakeRefundProvider()
+
+    with tenant_context(salon.id):
+        cancel_appointment(
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.GUEST,
+            now=START - dt.timedelta(hours=48),
+            provider=provider,
+        )
+
+    assert len(provider.calls) == 1
+    assert _payment_status(salon, payment.id) == PaymentStatus.REFUND_PENDING
+
+
+def test_cancel_appointment_customer_initiated_less_than_24h_before_start_triggers_no_refund(
+    salon, specialist, service, customer
+):
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    payment = _make_succeeded_payment(salon, appt)
+    provider = _FakeRefundProvider()
+
+    with tenant_context(salon.id):
+        cancel_appointment(
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.CUSTOMER,
+            now=START - dt.timedelta(hours=23, minutes=59),  # just under -> ineligible
+            provider=provider,
+        )
+
+    assert provider.calls == []
+    assert _payment_status(salon, payment.id) == PaymentStatus.SUCCEEDED
+
+
+def test_cancel_appointment_with_no_payment_succeeds_without_refund_attempt(
+    salon, specialist, service, customer
+):
+    """No Payment row at all (never paid) — cancellation must still succeed,
+    and there's nothing to look up a status on, let alone refund. `now` is
+    deliberately ≥24h-eligible timing, to prove it's the absence of a
+    Payment — not ineligibility — that skips the refund attempt."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.PENDING_PAYMENT,
+    )
+    provider = _FakeRefundProvider()
+
+    with tenant_context(salon.id):
+        result = cancel_appointment(
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.CUSTOMER,
+            now=START - dt.timedelta(hours=48),
+            provider=provider,
+        )
+
+    assert result.status == AppointmentStatus.CANCELLED
+    assert provider.calls == []
+    with tenant_context(salon.id):
+        assert not Payment.objects.filter(appointment=appt).exists()
+
+
+def test_cancel_appointment_with_a_non_succeeded_payment_triggers_no_refund(
+    salon, specialist, service, customer
+):
+    """A Payment that exists but never reached SUCCEEDED (e.g. still
+    PENDING) has no money collected to refund — cancel_appointment must not
+    call initiate_refund against it even when otherwise eligible."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.PENDING_PAYMENT,
+    )
+    with tenant_context(salon.id):
+        payment = Payment.objects.create(
+            salon=salon,
+            appointment=appt,
+            amount=Decimal("100.00"),
+            currency=salon.currency,
+            status=PaymentStatus.PENDING,
+            provider_reference_id="existing_ref",
+        )
+    provider = _FakeRefundProvider()
+
+    with tenant_context(salon.id):
+        cancel_appointment(
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.STAFF,
+            now=START - dt.timedelta(hours=48),
+            provider=provider,
+        )
+
+    assert provider.calls == []
+    assert _payment_status(salon, payment.id) == PaymentStatus.PENDING
+
+
+class _RaisingRefundProvider:
+    """refund() always raises — same shape as
+    test_payments_initiate_refund.py's _RaisingProvider. Used to prove
+    cancel_appointment does not let a provider failure undo or mask an
+    already-committed cancellation (docs/DECISIONS.md § "Refund-eligibility
+    gap (found 19.09.2026, closing Stage 8)")."""
+
+    def __init__(self, exc: Exception) -> None:
+        self.calls = 0
+        self._exc = exc
+
+    def start_payment(self, *, amount, currency, reference):
+        raise NotImplementedError("not exercised by cancel_appointment tests")
+
+    def refund(self, *, provider_reference_id, reference, amount, currency):
+        self.calls += 1
+        raise self._exc
+
+
+def test_cancel_appointment_still_cancels_even_when_the_refund_provider_call_fails(
+    salon, specialist, service, customer
+):
+    """A failing provider.refund() must not undo or mask the cancellation,
+    which already committed in its own, earlier transaction: the
+    appointment stays CANCELLED, and cancel_appointment does not raise —
+    initiate_refund already left Payment REFUND_PENDING (committed before
+    its own provider call) for the Stage 8.G sweep to recover, so there's
+    nothing further to signal synchronously to this function's caller."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    payment = _make_succeeded_payment(salon, appt)
+    provider = _RaisingRefundProvider(RuntimeError("network down"))
+
+    with tenant_context(salon.id):
+        result = cancel_appointment(
+            appointment_id=appt.id,
+            salon=salon,
+            cancelled_by=CancelledBy.STAFF,
+            now=START - dt.timedelta(hours=48),
+            provider=provider,
+        )
+
+    assert provider.calls == 1
+    assert result.status == AppointmentStatus.CANCELLED
+    assert result.cancelled_at == START - dt.timedelta(hours=48)
+
+    with tenant_context(salon.id):
+        row = Appointment.objects.get(pk=appt.id)
+    assert row.status == AppointmentStatus.CANCELLED
+    assert _payment_status(salon, payment.id) == PaymentStatus.REFUND_PENDING

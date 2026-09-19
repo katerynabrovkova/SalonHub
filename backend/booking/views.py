@@ -8,10 +8,11 @@ authenticated only by the X-Guest-Token header, never JWT. Both are DRF
 generics, not plain APIView, specifically so check_object_permissions() is
 guaranteed to run (DRF generics call it automatically inside get_object())
 — see CLAUDE.md's "DRF object-level permissions" rule and
-core/permissions.py's HasValidGuestToken docstring. The full
-concurrency-safe cancellation service layer (notifications, refund
-triggering) is Stage 8 work — this only flips status on an already-existing
-Appointment.
+core/permissions.py's HasValidGuestToken docstring. Refund triggering on
+cancellation (eligibility + calling payments.services.initiate_refund)
+lives inside booking.services.cancel_appointment itself (docs/DECISIONS.md
+§ "Refund-eligibility gap (found 19.09.2026, closing Stage 8)") — this view
+only supplies the provider and the guest-token-specific side effect below.
 
 GuestBookingCreateView (§ Stage 7.D decisions) is the one write path with no
 object to guard yet — it creates the Appointment — so it's a plain APIView,
@@ -89,11 +90,21 @@ class GuestAppointmentDetailView(_GuestTokenAppointmentMixin, generics.RetrieveA
 
 
 class GuestAppointmentCancelView(_GuestTokenAppointmentMixin, generics.GenericAPIView):
+    """
+    provider_class is a class attribute, not a module-level instance, so a
+    test can substitute a fake/failing provider via
+    monkeypatch.setattr(GuestAppointmentCancelView, "provider_class", ...) —
+    same injection pattern as GuestAppointmentPayView. Only exercised when
+    cancel_appointment actually finds a SUCCEEDED Payment to refund; most
+    cancellations (no payment yet, or a still-PENDING one) never call it.
+    """
+
     permission_classes = [HasValidGuestToken]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "guest_token"
     guest_token_action = "cancel"
     serializer_class = AppointmentGuestSerializer
+    provider_class: type[PaymentProvider] = MockPaymentProvider
 
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
         appointment = self.get_object()
@@ -112,11 +123,9 @@ class GuestAppointmentCancelView(_GuestTokenAppointmentMixin, generics.GenericAP
             salon=appointment.salon,
             cancelled_by=CancelledBy.GUEST,
             now=now,
+            provider=self.provider_class(),
         )
 
-        # Refund eligibility (deposit refunded/forfeited depending on
-        # cancelled_by/timing, docs/DECISIONS.md § Business rules) is Stage 8
-        # work — hook it in here once Payment exists.
         token_row = request.guest_access_token  # type: ignore[attr-defined]
         token_row.cancelled_via_token_at = now
         token_row.save(update_fields=["cancelled_via_token_at"])

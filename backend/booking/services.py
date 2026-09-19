@@ -32,11 +32,19 @@ from accounts.models import Customer
 from accounts.services import get_or_create_guest_customer
 from booking.constants import SLOT_HOLD_DURATION
 from booking.guest_tokens import issue_guest_token
-from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus
+from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus, CancelledBy
 from catalog.models import Service
-from core.exceptions import InvalidStateTransitionError, SlotNotOfferedError, SlotUnavailableError
+from core.exceptions import (
+    InvalidStateTransitionError,
+    PaymentProviderError,
+    SlotNotOfferedError,
+    SlotUnavailableError,
+)
 from notifications.models import NotificationTrigger
 from notifications.services import record_and_dispatch_notification
+from payments.models import Payment, PaymentStatus
+from payments.providers.base import PaymentProvider
+from payments.services import initiate_refund
 from scheduling.services import compute_candidate_start_times, compute_multi_specialist_availability
 from specialists.models import Specialist
 from tenants.models import Salon
@@ -295,12 +303,34 @@ def create_guest_appointment(
         return appointment, raw_token
 
 
+# Customer-initiated cancellations (the client themselves — GUEST via a
+# guest-token link, CUSTOMER via a future Account-authenticated cancel
+# path, § Stage 15 planning item 4) are the only ones the ≥24h cutoff
+# applies to. STAFF/SYSTEM are not the client, so they fall through to the
+# "always eligible" branch below — the same "salon-initiated" case
+# docs/DECISIONS.md § Business rules describes (specialist illness,
+# TimeOff, working-hours changes), even though the enum has no literal
+# "salon" member (docs/DECISIONS.md § "Refund-eligibility gap (found
+# 19.09.2026, closing Stage 8)").
+_CUSTOMER_INITIATED_CANCELLATIONS = frozenset({CancelledBy.CUSTOMER, CancelledBy.GUEST})
+REFUND_ELIGIBILITY_CUTOFF = dt.timedelta(hours=24)
+
+
+def _is_refund_eligible(
+    *, cancelled_by: str, now: dt.datetime, start_datetime: dt.datetime
+) -> bool:
+    if cancelled_by not in _CUSTOMER_INITIATED_CANCELLATIONS:
+        return True
+    return start_datetime - now >= REFUND_ELIGIBILITY_CUTOFF
+
+
 def cancel_appointment(
     *,
     appointment_id: int,
     salon: Salon,
     cancelled_by: str,
     now: dt.datetime,
+    provider: PaymentProvider,
     reason: str = "",
 ) -> Appointment:
     """
@@ -313,6 +343,29 @@ def cancel_appointment(
     the row is locked before its status is read — closing the lost-update
     window a future concurrent sweep (Stage 7.F) could otherwise race
     through between an unlocked read and the write.
+
+    Refund eligibility (docs/DECISIONS.md § "Refund-eligibility gap (found
+    19.09.2026, closing Stage 8)") is decided here, after the cancellation
+    transaction above has committed — not inside it. `initiate_refund`
+    (payments/services.py) manages its own atomic()/select_for_update()
+    plus an out-of-transaction provider network call; nesting that inside
+    this function's own atomic() block would hold this row's lock for the
+    duration of that network call, the same mistake
+    payments/views.py's PaymentWebhookView avoids for the same reason. A
+    Payment that doesn't exist, or exists but never reached SUCCEEDED (no
+    money collected), is left untouched — cancellation always succeeds
+    regardless of Payment/refund outcome, since it's a separate concern.
+
+    A `PaymentProviderError` from `initiate_refund` (the provider's
+    `refund()` call itself failing) is caught here and swallowed, not
+    re-raised: by the time it can be raised, `initiate_refund` has already
+    committed `Payment.status = REFUND_PENDING` in its own transaction, so
+    the failure is already recorded as an async-recoverable state for the
+    Stage 8.G stuck-refund sweep to flag — a synchronous error back to the
+    caller would only contradict that design (the cancellation itself, a
+    separate already-committed transaction, isn't and shouldn't be made to
+    look like it failed) without adding any information the sweep doesn't
+    already have.
     """
     with transaction.atomic():
         appointment = Appointment.objects.select_for_update().get(salon=salon, pk=appointment_id)
@@ -335,7 +388,32 @@ def cancel_appointment(
                 f"{appointment.cancelled_at.isoformat()}"
             ),
         )
-        return appointment
+
+    is_eligible = _is_refund_eligible(
+        cancelled_by=cancelled_by, now=now, start_datetime=appointment.start_datetime
+    )
+    if is_eligible:
+        payment = Payment.objects.filter(
+            appointment=appointment, status=PaymentStatus.SUCCEEDED
+        ).first()
+        if payment is not None:
+            try:
+                initiate_refund(payment_id=payment.id, salon=salon, provider=provider, now=now)
+            except PaymentProviderError:
+                # initiate_refund already committed Payment.status =
+                # REFUND_PENDING before calling provider.refund() (its own
+                # docstring, "Writing first makes the failure mode
+                # reversible") — a failed provider call is already an
+                # async-recoverable state, with the Stage 8.G stuck-refund
+                # sweep as its recovery path (docs/DECISIONS.md § Stage
+                # 8.G decisions). Re-raising here would only turn an
+                # already-committed, successful cancellation into a
+                # caller-visible error for no gain: nothing further needs
+                # doing synchronously, and the sweep doesn't need this
+                # exception to do its job.
+                pass
+
+    return appointment
 
 
 def expire_overdue_appointments(*, salon: Salon, now: dt.datetime) -> int:
