@@ -12,10 +12,6 @@
  * normal, expected outcome here — every response failure collapses to
  * `me: null` rather than a thrown error, so an anonymous visitor never sees
  * a crash from the root layout itself.
- *
- * No `logout()` yet — no page needs it today (YAGNI, matching `/me/`'s own
- * deferred-verification precedent, docs/DECISIONS.md § "`/me/` endpoint
- * (Stage 12)").
  */
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
@@ -34,6 +30,7 @@ interface AuthContextValue {
   me: Me | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<Me>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -93,7 +90,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result;
   }
 
-  return <AuthContext.Provider value={{ me, loading, login }}>{children}</AuthContext.Provider>;
+  async function logout(): Promise<void> {
+    // LogoutView clears both auth cookies on both success (205) and on a
+    // blacklist failure (400 via InvalidOrExpiredTokenError) -- the server
+    // has already signed the client out either way, so local state must
+    // follow regardless of whether this call resolves or rejects (e.g. an
+    // already-expired refresh token cookie).
+    try {
+      await apiRequest(slug, "/auth/logout/", { method: "POST" });
+    } catch {
+      // Ignored -- see comment above.
+    }
+    setMe(null);
+  }
+
+  return (
+    <AuthContext.Provider value={{ me, loading, login, logout }}>{children}</AuthContext.Provider>
+  );
 }
 
 /** Throws outside an AuthProvider — the root layout wraps every route, so

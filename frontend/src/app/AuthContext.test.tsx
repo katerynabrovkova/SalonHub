@@ -31,6 +31,11 @@ function AuthReadout() {
   );
 }
 
+function LogoutButton() {
+  const { logout } = useAuth();
+  return <button onClick={() => void logout()}>log out</button>;
+}
+
 beforeEach(() => {
   mockedApiRequest.mockReset();
 });
@@ -139,6 +144,73 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("email")).toHaveTextContent("person@example.com");
     },
   );
+
+  it("test_logout_posts_to_the_logout_endpoint", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest
+      .mockResolvedValueOnce({ email: "alice@example.com", role: "admin" }) // mount GET /auth/me/
+      .mockResolvedValueOnce(undefined); // POST /auth/logout/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <LogoutButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+
+    await user.click(screen.getByRole("button", { name: "log out" }));
+
+    await waitFor(() => expect(findCall("/auth/logout/")).toBeDefined());
+    expect(findCall("/auth/logout/")?.[2]).toMatchObject({ method: "POST" });
+  });
+
+  it("test_logout_clears_me_on_success_visible_without_a_remount", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest
+      .mockResolvedValueOnce({ email: "alice@example.com", role: "admin" }) // mount GET /auth/me/
+      .mockResolvedValueOnce(undefined); // POST /auth/logout/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <LogoutButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+    expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com");
+
+    await user.click(screen.getByRole("button", { name: "log out" }));
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
+    expect(screen.getByTestId("role")).toHaveTextContent("");
+  });
+
+  it("test_logout_clears_me_even_when_the_logout_call_rejects", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest
+      .mockResolvedValueOnce({ email: "alice@example.com", role: "admin" }) // mount GET /auth/me/
+      .mockRejectedValueOnce(
+        new ApiError(400, "invalid_token", "Invalid or already-used refresh token."),
+      ); // POST /auth/logout/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <LogoutButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+    expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com");
+
+    await user.click(screen.getByRole("button", { name: "log out" }));
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
+    expect(screen.getByTestId("role")).toHaveTextContent("");
+  });
 });
 
 describe("useAuth", () => {
