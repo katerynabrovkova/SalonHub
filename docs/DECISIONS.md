@@ -155,17 +155,6 @@ on them.
   under `CELERY_TASK_ALWAYS_EAGER` without depending on Celery internals.
   Real countdown/redelivery needs a running broker — Stage 22 integration
   suite.
-- **Account email-change — not yet scheduled to a specific stage.** No
-  endpoint or UI lets an `Account` change its login email today. When
-  built, it must (a) require verification of the new email address
-  before it becomes active, mirroring the existing
-  registration-verification flow (`accounts/tokens.py`,
-  `VerifyEmailView`), and (b) keep the old email valid for login until
-  the new one is verified — an in-flight, unverified email change must
-  never be able to lock the account holder out. Flagged here rather than
-  left to fall out of a stage's scope discovery, since no stage in the
-  roadmap above currently commits to building it.
-
 ## Overall style
 
 - **Modular monolith**, not microservices. One Django project,
@@ -3139,7 +3128,10 @@ Scope, in build order:
    `AuthContext` in the root layout means `auth/me/` is called on every
    page load, and an unthrottled, cheap, cookie-checked GET is the right
    posture for that; flag this for a `throttle_scope` if/when
-   infra-level rate limiting is added later.
+   infra-level rate limiting is added later. `logout()` is now in scope
+   (decided 19.09.2026) — POST to the existing `auth/logout/` endpoint
+   (`LogoutView`, recon-confirmed already built and cookie-clearing),
+   then reset `AuthContext`'s `me` state to `null`.
 3. **Frontend: a registration page**, calling the existing
    `POST auth/register/` backend endpoint (`RegisterView`,
    `backend/accounts/views.py`). The backend side is already built and
@@ -3153,7 +3145,26 @@ Scope, in build order:
    акаунт? Увійти").
 4. **Frontend: a real `/client/page.tsx` dashboard**, replacing the
    current placeholder (`"Client dashboard placeholder"`), showing "my
-   bookings" via the endpoint from item 1.
+   bookings" via the endpoint from item 1. Refinements agreed
+   19.09.2026:
+   - Shows price/deposit amount per appointment. `AppointmentAccountSerializer`
+     (item 1) does not currently include these fields — widen it to add
+     them (they already exist on the `Appointment` model as the
+     price/deposit snapshot fields, `service_price_at_booking` /
+     `deposit_percentage_at_booking`, noted elsewhere in this doc).
+   - Appointments split into two sections: "Найближчі" (upcoming) and
+     "Минулі" (past). A cancelled appointment always shows under
+     "Минулі" regardless of its `start_datetime`, even if the date is
+     still in the future — cancelled appointments require no further
+     action from the client.
+   - Adds a cancel action from the dashboard. This needs a new
+     Account-scoped cancel endpoint, symmetric to item 1's list endpoint
+     (authorization: only the requesting Account's own linked
+     Customer's appointment). Before implementing, recon whether the
+     existing cancellation/refund business logic (≥24h full refund,
+     <24h deposit forfeited) already lives in a shared service function
+     reusable from `GuestAppointmentCancelView`, or is inline there and
+     needs extracting first — do not duplicate that logic.
 5. **Account-aware booking path**: when a session exists, skip the
    contact-info step in the booking flow — the frontend already has the
    Account's identity via `auth/me/`, so re-collecting name/email/phone
@@ -3182,6 +3193,27 @@ Scope, in build order:
    identical link-fragment pattern but has its own separate, currently
    unbuilt frontend page — explicitly out of scope here, flagged only
    for awareness.
+7. **Backend + frontend: Account/Customer name and phone in the profile
+   panel.** Currently nothing exposes this — `MeSerializer` is
+   deliberately `email`+`role` only (recon-confirmed), and no other
+   authenticated-Account endpoint includes it either. Must handle the
+   case where the Account has no linked `Customer` yet (verification
+   does not gate login — an Account can be logged in before its
+   guest→Customer merge happens, per the `/me/` endpoint's own decision
+   note): in that case, name/phone fields are simply absent/hidden in
+   the profile panel, not shown as empty or defaulted.
+8. **Backend + frontend: change email.** Must (a) require verification
+   of the new email address before it becomes active — reuse the
+   existing token-signing pattern (`accounts/tokens.py`) rather than
+   inventing a new one, if it fits (recon first to confirm); and (b)
+   keep the old email valid for login until the new one is verified —
+   an in-flight, unverified email change must never lock the account
+   holder out. Surfaced in the profile panel (item 7).
+9. **Backend + frontend: change password (authenticated).** Requires
+   the current password — distinct from the existing unauthenticated
+   `PasswordResetConfirmView` flow (which stays as-is for "forgot
+   password"). Uses the same `validate_password` rules as registration
+   (item 3). Surfaced in the profile panel (item 7).
 
 Explicitly out of scope for Stage 15:
 
@@ -3191,5 +3223,3 @@ Explicitly out of scope for Stage 15:
   guest `Customer` to an `Account` by matching email at verification
   time, covering the guest→Account linking need without a separate claim
   flow.
-- **Account email-change functionality.** Deferred to a standalone
-  backlog item, not a numbered stage — see § "Open questions" above.
