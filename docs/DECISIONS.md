@@ -3202,12 +3202,31 @@ Scope, in build order:
      needs extracting first — do not duplicate that logic. Depends on
      the refund-eligibility fix, § "Refund-eligibility gap (found
      19.09.2026, closing Stage 8)" — do not duplicate its logic.
-5. **Account-aware booking path**: when a session exists, skip the
-   contact-info step in the booking flow — the frontend already has the
-   Account's identity via `auth/me/`, so re-collecting name/email/phone
-   from a logged-in user is redundant. Builds on the guest-only Stage 14
-   flow per the split already recorded in § "Stage 14 (frontend booking
-   flow + payment + confirmation) — scope" above.
+5. **Account-aware booking path.** Two distinct sub-cases, both real:
+   - If the Account already has a linked Customer (e.g. via the existing
+     guest-booking→verification email-match merge), skip the
+     contact-info step in the booking flow — the frontend already has
+     the Customer's name/email/phone via item 7's expanded profile data.
+   - If the Account has NO linked Customer yet (recon-confirmed:
+     `_verify_and_link` only links an EXISTING guest Customer matching
+     by email — it does not create one; an Account that registered
+     without ever booking as a guest first has no path to a Customer
+     until this exact moment), the contact-info step still shows
+     normally, but the resulting booking must create a new Customer AND
+     link it to the Account at creation time — not leave it as an
+     unlinked, guest-style Customer. This is likely the primary way most
+     users ever get a linked Customer, not just a fallback: most people
+     register when they're already about to book, not guest-book then
+     register later with the same email.
+
+   Before implementing, recon whether a shared `create_appointment`
+   function can be reused with an added Account-linking step, or whether
+   a new function/branch is needed — do not duplicate booking-creation
+   logic between the guest and account-aware paths.
+
+   Builds on the guest-only Stage 14 flow per the split already recorded
+   in § "Stage 14 (frontend booking flow + payment + confirmation) —
+   scope" above.
 6. **Frontend: a `/verify-email` page.** Recon-confirmed gap: the
    verification email links to a frontend URL
    (`/verify-email#token=<token>`, built by `build_salon_frontend_url`
@@ -3251,6 +3270,36 @@ Scope, in build order:
    `PasswordResetConfirmView` flow (which stays as-is for "forgot
    password"). Uses the same `validate_password` rules as registration
    (item 3). Surfaced in the profile panel (item 7).
+10. **Backend + frontend: edit Customer name/phone from the profile
+    panel.** Item 7 only exposes these fields for reading; editing them
+    requires a new endpoint (updating the Account's linked Customer).
+    Same null-Customer edge case as item 7 applies — if no Customer is
+    linked yet, these fields (and their edit entry points) are simply
+    absent, not editable-but-empty.
+11. **Frontend: "forgot password" flow.** Two pages: a request page
+    (enter email, calls the existing `PasswordResetRequestView`) and a
+    confirm page (reads uid+token from the URL fragment per the
+    `#uid=...&token=...` pattern noted when item 6 was scoped, calls the
+    existing `PasswordResetConfirmView`). Surfaced as a link from the
+    change-password screen (item 9) for users who don't remember their
+    current password. Both backend views already exist and are
+    unauthenticated by design; only the frontend is missing.
+12. **Frontend: route protection for `/client` and its subtree.**
+    Nothing today stops an unauthenticated visitor from navigating
+    directly to `/client`, `/client/profile`, or any of its sub-pages.
+    Add `app/client/layout.tsx` (mirroring the existing
+    `app/booking/layout.tsx` precedent — a client-component layout
+    wrapping a route subtree) that checks `useAuth()` and redirects to
+    `/login` when resolved to logged-out.
+13. **Frontend: "verify your email" reminder banner.** An Account can be
+    logged in without being verified (verification does not gate login,
+    per the `/me/` endpoint's own decision note) — and per item 5's
+    finding, this can be a real, possibly extended state for a user who
+    registered but hasn't booked/verified yet. Currently the only way to
+    trigger a fresh verification email is the registration-confirmation
+    screen, unreachable once that tab is closed. Add a persistent banner
+    on the dashboard/profile for an unverified logged-in Account, with a
+    resend action calling the existing `ResendVerificationView`.
 
 Explicitly out of scope for Stage 15:
 
