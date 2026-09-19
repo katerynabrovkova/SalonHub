@@ -89,6 +89,26 @@ describe("RegisterPage", () => {
     expect(screen.queryByText(/перевірте пошту/i)).not.toBeInTheDocument();
   });
 
+  test("test_429_throttled_shows_the_throttle_message_not_the_raw_backend_detail", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest.mockRejectedValueOnce(
+      new ApiError(429, "throttled", "Request was throttled. Expected available in 3600 seconds."),
+    );
+
+    render(<RegisterPage />);
+    await fillForm(user);
+    await user.click(screen.getByRole("button", { name: /зареєструватися/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/забагато спроб/i)).toBeInTheDocument();
+    });
+
+    // Without the 429 branch this fell through to the raw, untranslated
+    // DRF throttle detail (err.message) -- must not leak that instead.
+    expect(screen.queryByText(/request was throttled/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/щось пішло не так/i)).not.toBeInTheDocument();
+  });
+
   test("test_resend_shows_the_same_neutral_outcome_on_success", async () => {
     const user = userEvent.setup();
     mockedApiRequest.mockResolvedValueOnce(undefined); // register

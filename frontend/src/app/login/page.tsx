@@ -52,7 +52,7 @@ export default function LoginPage() {
           // one response — do not re-introduce that distinction here.
           setError("Email or password is incorrect.");
         } else if (err.status === 429) {
-          setError("Too many attempts. Please try again later.");
+          setError("Забагато спроб. Спробуйте пізніше.");
         } else {
           setError("Something went wrong. Please try again.");
         }

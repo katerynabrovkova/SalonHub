@@ -90,7 +90,17 @@ export default function RegisterPage() {
       setResendMessage(null);
       setView("check-email");
     } catch (err) {
-      setError(err instanceof ApiError ? registerErrorMessage(err) : "Щось пішло не так. Спробуйте ще раз.");
+      if (err instanceof ApiError && err.status === 429) {
+        // Without this branch, a 429 fell through to registerErrorMessage(),
+        // which returns err.message for anything with no field-level
+        // details -- the raw, untranslated DRF throttle string, not this
+        // generic fallback. Mirrors login/page.tsx's own 429 branch/wording.
+        setError("Забагато спроб. Спробуйте пізніше.");
+      } else if (err instanceof ApiError) {
+        setError(registerErrorMessage(err));
+      } else {
+        setError("Щось пішло не так. Спробуйте ще раз.");
+      }
     } finally {
       setPending(false);
     }

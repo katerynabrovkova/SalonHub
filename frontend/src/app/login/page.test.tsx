@@ -176,7 +176,7 @@ describe("LoginPage", () => {
     await fillAndSubmit(user);
 
     await waitFor(() => {
-      expect(screen.getByText(/too many attempts|try again later/i)).toBeInTheDocument();
+      expect(screen.getByText(/забагато спроб|спробуйте пізніше/i)).toBeInTheDocument();
     });
 
     // Must be a distinct message from the 401 case, not the same generic text.
