@@ -3144,7 +3144,13 @@ Scope, in build order:
    `POST auth/register/` backend endpoint (`RegisterView`,
    `backend/accounts/views.py`). The backend side is already built and
    unchanged by this stage; only the frontend page is missing —
-   confirmed by recon: no `app/register` route exists today.
+   confirmed by recon: no `app/register` route exists today. The
+   registration page must be reachable from `app/login/page.tsx` via a
+   "Немає акаунту? Зареєструватися" link, added to the login page —
+   recon-confirmed gap: the login page currently has no such link, so a
+   first-time visitor at `/login` has no way to reach `/register`. The
+   registration page itself already links back to `/login` ("Вже маєте
+   акаунт? Увійти").
 4. **Frontend: a real `/client/page.tsx` dashboard**, replacing the
    current placeholder (`"Client dashboard placeholder"`), showing "my
    bookings" via the endpoint from item 1.
@@ -3154,6 +3160,28 @@ Scope, in build order:
    from a logged-in user is redundant. Builds on the guest-only Stage 14
    flow per the split already recorded in § "Stage 14 (frontend booking
    flow + payment + confirmation) — scope" above.
+6. **Frontend: a `/verify-email` page.** Recon-confirmed gap: the
+   verification email links to a frontend URL
+   (`/verify-email#token=<token>`, built by `build_salon_frontend_url`
+   in `accounts/tasks.py`) but no such frontend route exists today —
+   without this page, the registration flow (item 3) is a dead end; a
+   registered user has no way to actually verify their email.
+   `VerifyEmailView` (`backend/accounts/views.py`) is POST-only, reads
+   the token from the request body (not URL/query — the frontend must
+   read it out of the URL fragment client-side and POST it), returns
+   204 on success / 400 (neutral, no-enumeration) on failure, and does
+   NOT set auth cookies — verification does not log the user in,
+   matching `LoginView` being the sole cookie-setting view (Stage 12).
+   On success, show a confirmation state with a link to `/login` (the
+   user logs in separately with their password — no auto-login).
+   Follows the same fragment-reading client-component-inside-a-Server-
+   Component pattern as `/booking/pay`'s `PaymentStatus.tsx`
+   (Stage 14).
+
+   Note: password-reset (`/reset-password#uid=...&token=...`) uses the
+   identical link-fragment pattern but has its own separate, currently
+   unbuilt frontend page — explicitly out of scope here, flagged only
+   for awareness.
 
 Explicitly out of scope for Stage 15:
 
