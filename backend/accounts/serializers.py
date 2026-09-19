@@ -69,19 +69,40 @@ class ResendVerificationSerializer(serializers.Serializer):
 class MeSerializer(serializers.ModelSerializer):
     """
     Read representation for ``GET auth/me/`` (docs/DECISIONS.md § "`/me/`
-    endpoint (Stage 12)"). Deliberately just `email` + `role` — no `salon`
-    (the frontend already has the slug from the subdomain before login
-    happens) and no `email_verified_at` (deferred until an actual
+    endpoint (Stage 12)", widened in § Stage 15 planning, item 7). No
+    `salon` (the frontend already has the slug from the subdomain before
+    login happens) and no `email_verified_at` (deferred until an actual
     "verify your email" UI exists).
+
+    `name`/`phone` are sourced from the Account's linked `Customer`
+    (`Account.customer`, a nullable forward `OneToOneField` -- unlike
+    `Payment.appointment`'s *reverse* OneToOne, reading a null forward FK
+    never raises; it simply returns `None`, so no `getattr(..., None)`
+    guard is needed here the way booking's `AppointmentAccountSerializer`
+    needs one for its reverse `appointment.payment` access). Both fields
+    are `null`, never `""` or omitted, when the Account has no linked
+    Customer yet -- a real, not-rare state (item 5's recon: an Account can
+    be logged in before its guest-Customer merge ever happens). Same
+    null-means-absence convention as `Payment.refund_initiated_at`/
+    `Specialist.photo`/`AppointmentAccountSerializer`'s `payment_status`.
     """
+
+    name = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
 
     class Meta:
         model = Account
-        fields = ["email", "role"]
+        fields = ["email", "role", "name", "phone"]
         read_only_fields = fields
 
     def validate_email(self, value: str) -> str:
         return value.strip().lower()
+
+    def get_name(self, obj: Account) -> str | None:
+        return obj.customer.name if obj.customer is not None else None
+
+    def get_phone(self, obj: Account) -> str | None:
+        return obj.customer.phone if obj.customer is not None else None
 
 
 class LogoutSerializer(serializers.Serializer):

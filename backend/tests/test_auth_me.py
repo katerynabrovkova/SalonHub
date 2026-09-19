@@ -39,7 +39,7 @@ The contract under test (docs/DECISIONS.md § "`/me/` endpoint (Stage 12)"):
 import pytest
 from rest_framework.test import APIClient
 
-from accounts.models import Account, AccountRole
+from accounts.models import Account, AccountRole, Customer
 from core.tenancy import tenant_context
 
 pytestmark = pytest.mark.django_db
@@ -80,7 +80,63 @@ def test_me_authenticated_returns_email_and_role(client, salon) -> None:
     response = client.get(_me_url(salon.slug))
 
     assert response.status_code == 200
-    assert response.data == {"email": account.email, "role": account.role}
+    # _make_account links no Customer, so name/phone are null (docs/DECISIONS.md
+    # § Stage 15 planning, item 7) -- see test_me_with_no_linked_customer_...
+    # below for the same case asserted as its own dedicated test.
+    assert response.data == {
+        "email": account.email,
+        "role": account.role,
+        "name": None,
+        "phone": None,
+    }
+
+
+def test_me_with_a_linked_customer_returns_its_name_and_phone(client, salon) -> None:
+    with tenant_context(salon.id):
+        customer = Customer.objects.create(
+            salon=salon, name="Alice", email="alice@example.com", phone="+10000000000"
+        )
+        account = Account.objects.create_account(
+            salon=salon,
+            email="linked@example.com",
+            password=STRONG_PASSWORD,
+            role=AccountRole.CLIENT,
+            customer=customer,
+        )
+    client.post(
+        _login_url(salon.slug),
+        {"email": account.email, "password": STRONG_PASSWORD},
+        format="json",
+    )
+
+    response = client.get(_me_url(salon.slug))
+
+    assert response.status_code == 200
+    assert response.data == {
+        "email": account.email,
+        "role": account.role,
+        "name": "Alice",
+        "phone": "+10000000000",
+    }
+
+
+def test_me_with_no_linked_customer_returns_null_name_and_phone(client, salon) -> None:
+    """An Account with no linked Customer yet is a real, not-rare state
+    (item 5's recon: an Account can be logged in before its guest-Customer
+    merge ever happens) -- /me/ must keep returning 200 with null name/phone,
+    not raise or 404."""
+    account = _make_account(salon, email="unlinked@example.com")
+    client.post(
+        _login_url(salon.slug),
+        {"email": account.email, "password": STRONG_PASSWORD},
+        format="json",
+    )
+
+    response = client.get(_me_url(salon.slug))
+
+    assert response.status_code == 200
+    assert response.data["name"] is None
+    assert response.data["phone"] is None
 
 
 def test_me_unauthenticated_returns_401(client, salon) -> None:

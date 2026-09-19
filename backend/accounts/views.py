@@ -355,13 +355,23 @@ class RefreshView(TokenRefreshView):
 
 class MeView(APIView):
     """
-    ``GET auth/me/`` — the current Account's `email` + `role`
-    (docs/DECISIONS.md § "`/me/` endpoint (Stage 12)"). No explicit
+    ``GET auth/me/`` — the current Account's `email` + `role` + linked
+    `Customer`'s `name`/`phone` (docs/DECISIONS.md § "`/me/` endpoint
+    (Stage 12)", widened in § Stage 15 planning, item 7). No explicit
     `authentication_classes`/`permission_classes` override: relies on the
     project-wide defaults (`AccountJWTCookieAuthentication` +
     `IsAuthenticated`), same posture as `LogoutView` — the cookie-carried
     access token is all that's needed, and DEFAULT_PERMISSION_CLASSES
     already rejects an unauthenticated request with 401.
+
+    `MeSerializer.get_name`/`get_phone` read `request.user.customer`, a
+    forward FK access that costs one extra query when accessed (not
+    prefetched here with `select_related`) -- deliberately not optimized:
+    this is a single-object endpoint (one Account per request, never a
+    list), so there's no N+1 to guard against, unlike
+    `AccountAppointmentListView`'s `select_related("payment", "specialist",
+    "service")`, which exists specifically because that view serializes
+    many rows per request.
     """
 
     def get(self, request: Request, *args: object, **kwargs: object) -> Response:
