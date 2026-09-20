@@ -19,6 +19,10 @@ vi.mock("next/navigation", () => ({
 
 // Mock the data-fetch module boundaries, not raw fetch — same convention as
 // specialists/[id]/page.test.tsx and specialists/page.test.tsx.
+vi.mock("@/lib/catalog/getServiceDetailPage", () => ({
+  getServiceDetailPage: vi.fn(),
+}));
+
 vi.mock("@/lib/specialists/getSpecialistDetailPage", () => ({
   getSpecialistDetailPage: vi.fn(),
 }));
@@ -39,7 +43,15 @@ vi.mock("next/headers", () => ({
   headers: vi.fn(),
 }));
 
+// BookingStep4 (rendered by step 4) calls useAuth() itself — same mock
+// convention as client/layout.test.tsx.
+const mockedUseAuth = vi.fn();
+vi.mock("@/app/AuthContext", () => ({
+  useAuth: () => mockedUseAuth(),
+}));
+
 // Imported after the mocks above so the mocked modules are what page.tsx sees.
+import { getServiceDetailPage } from "@/lib/catalog/getServiceDetailPage";
 import { formatPrice } from "@/lib/pricing/formatPrice";
 import { getAvailability } from "@/lib/scheduling/getAvailability";
 import {
@@ -55,6 +67,7 @@ import { BookingContactInfoProvider } from "./BookingContactInfoContext";
 import BookingPage from "./page";
 
 const mockedHeaders = vi.mocked(headers);
+const mockedGetServiceDetailPage = vi.mocked(getServiceDetailPage);
 const mockedGetSpecialistDetailPage = vi.mocked(getSpecialistDetailPage);
 const mockedGetSpecialistsPage = vi.mocked(getSpecialistsPage);
 const mockedGetAvailability = vi.mocked(getAvailability);
@@ -101,6 +114,12 @@ function mockSlug(slug: string | null) {
 }
 
 describe("BookingPage routing skeleton", () => {
+  beforeEach(() => {
+    mockedGetServiceDetailPage.mockReset();
+    mockedUseAuth.mockReset();
+    mockedUseAuth.mockReturnValue({ me: null, loading: false, login: vi.fn(), logout: vi.fn() });
+  });
+
   it("test_explicit_step_1_calls_not_found", async () => {
     await expect(
       BookingPage({
@@ -283,6 +302,11 @@ describe("BookingPage routing skeleton", () => {
 
   it("test_step4_renders_contact_info_form_with_decoded_slot", async () => {
     mockSlug("bella-demo");
+    mockedGetServiceDetailPage.mockResolvedValueOnce({
+      id: 5,
+      name: "Manicure",
+      duration_minutes: 60,
+    });
 
     const element = await BookingPage({
       searchParams: searchParamsOf({
@@ -295,9 +319,127 @@ describe("BookingPage routing skeleton", () => {
     });
     render(<BookingContactInfoProvider>{element}</BookingContactInfoProvider>);
 
+    expect(mockedGetServiceDetailPage).toHaveBeenCalledWith("bella-demo", 5);
+    expect(mockedGetSpecialistDetailPage).not.toHaveBeenCalled();
+    expect(screen.getByText("Manicure")).toBeInTheDocument();
+    expect(screen.getByText("Будь-який спеціаліст")).toBeInTheDocument();
     expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByLabelText("Телефон")).toBeInTheDocument();
+  });
+
+  it("test_step4_fetches_specialist_when_not_any_and_renders_its_name", async () => {
+    mockSlug("bella-demo");
+    mockedGetServiceDetailPage.mockResolvedValueOnce({
+      id: 5,
+      name: "Manicure",
+      duration_minutes: 60,
+    });
+    mockedGetSpecialistDetailPage.mockResolvedValueOnce({
+      id: 9,
+      salon: 1,
+      name: "Olena",
+      bio: "",
+      photo: null,
+      is_active: true,
+      services: [],
+      services_detail: [],
+      average_rating: null,
+      review_count: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "9",
+        step: "4",
+        slot: encodeURIComponent("2026-08-17T09:00:00+03:00"),
+      }),
+    });
+    render(<BookingContactInfoProvider>{element}</BookingContactInfoProvider>);
+
+    expect(mockedGetSpecialistDetailPage).toHaveBeenCalledWith("bella-demo", 9);
+    expect(screen.getByText("Olena")).toBeInTheDocument();
+  });
+
+  it("test_step4_null_service_calls_not_found", async () => {
+    mockSlug("bella-demo");
+    mockedGetServiceDetailPage.mockResolvedValueOnce(null);
+
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          specialist: "any",
+          step: "4",
+          slot: encodeURIComponent("2026-08-17T09:00:00+03:00"),
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("test_step4_null_specialist_calls_not_found", async () => {
+    mockSlug("bella-demo");
+    mockedGetServiceDetailPage.mockResolvedValueOnce({
+      id: 5,
+      name: "Manicure",
+      duration_minutes: 60,
+    });
+    mockedGetSpecialistDetailPage.mockResolvedValueOnce(null);
+
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          specialist: "9",
+          step: "4",
+          slot: encodeURIComponent("2026-08-17T09:00:00+03:00"),
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("test_step4_malformed_percent_sequence_in_slot_calls_not_found", async () => {
+    mockSlug("bella-demo");
+
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          specialist: "any",
+          step: "4",
+          // A literal trailing "%" is not a valid percent-escape --
+          // decodeURIComponent throws a URIError on this.
+          slot: "2026-08-17T09%3A00%3A00+03:00%",
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(mockedGetServiceDetailPage).not.toHaveBeenCalled();
+  });
+
+  it("test_step4_slot_missing_offset_calls_not_found", async () => {
+    mockSlug("bella-demo");
+
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          specialist: "any",
+          step: "4",
+          // Decodes fine, but has no UTC offset -- an ambiguous local time,
+          // not the shape this flow requires.
+          slot: encodeURIComponent("2026-08-17T09:00:00"),
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(mockedGetServiceDetailPage).not.toHaveBeenCalled();
   });
 
   it("test_step4_null_slug_shows_platform_message", async () => {

@@ -12,6 +12,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
+import { getServiceDetailPage } from "@/lib/catalog/getServiceDetailPage";
 import { getAvailability } from "@/lib/scheduling/getAvailability";
 import { groupAvailabilityByDay } from "@/lib/scheduling/groupAvailabilityByDay";
 import { getSpecialistDetailPage } from "@/lib/specialists/getSpecialistDetailPage";
@@ -21,7 +22,7 @@ import { SALON_SLUG_HEADER } from "@/middleware";
 
 import ServiceSelectionGrid from "../services/ServiceSelectionGrid";
 import SpecialistSelectionGrid from "../specialists/SpecialistSelectionGrid";
-import ContactInfoForm from "./ContactInfoForm";
+import BookingStep4 from "./BookingStep4";
 import DateTimeSelectionGrid from "./DateTimeSelectionGrid";
 
 interface BookingPageProps {
@@ -44,6 +45,33 @@ function paramToString(value: string | string[] | undefined): string | undefined
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// An ISO datetime with a UTC offset (or literal "Z") -- the shape every real
+// `slot` value has, since it comes straight from `getAvailability`'s
+// `available_times` (already salon-local with an offset). Seconds are
+// optional only because nothing in this app's own URLs omits them; the
+// offset itself is required, not optional -- a bare local time with no
+// offset is exactly the ambiguous shape this whole flow exists to avoid.
+const SLOT_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Safely decodes and shape-validates the raw `slot` URL param.
+ * `decodeURIComponent` throws a `URIError` on a malformed `%` sequence --
+ * uncaught, that would crash the Server Component render instead of
+ * producing a 404, unlike every other invalid-param case in this file. Both
+ * failure modes (malformed encoding, decoded-but-wrong-shape) collapse to
+ * the same `null`, so the caller can react identically to either with
+ * `notFound()`.
+ */
+function decodeSlot(slot: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(slot);
+  } catch {
+    return null;
+  }
+  return SLOT_SHAPE.test(decoded) ? decoded : null;
 }
 
 // Pure UTC calendar-date arithmetic, same reasoning as
@@ -213,14 +241,42 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
       notFound();
     }
 
+    const startDatetime = decodeSlot(slot);
+    if (startDatetime === null) {
+      notFound();
+    }
+
+    const serviceId = Number(service);
+    if (Number.isNaN(serviceId)) {
+      notFound();
+    }
+
+    const specialistId = specialist === "any" ? undefined : Number(specialist);
+    if (specialistId !== undefined && Number.isNaN(specialistId)) {
+      notFound();
+    }
+
+    const [serviceDetail, specialistDetail] = await Promise.all([
+      getServiceDetailPage(slug, serviceId),
+      specialistId === undefined ? Promise.resolve(null) : getSpecialistDetailPage(slug, specialistId),
+    ]);
+    if (serviceDetail === null) {
+      notFound();
+    }
+    if (specialistId !== undefined && specialistDetail === null) {
+      notFound();
+    }
+
     return (
       <main className="flex flex-col gap-6 p-8">
-        <ContactInfoForm
+        <BookingStep4
+          serviceName={serviceDetail.name}
+          specialistName={specialistId === undefined ? null : (specialistDetail?.name ?? null)}
           slug={slug}
           entry={entry === "service" ? "service" : "specialist"}
           service={service}
           specialist={specialist}
-          startDatetime={decodeURIComponent(slot)}
+          startDatetime={startDatetime}
         />
       </main>
     );
