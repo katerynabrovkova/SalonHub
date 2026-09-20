@@ -26,6 +26,11 @@ urlpatterns = [
         name="guest-appointment-pay",
     ),
     path(
+        "appointments/",
+        views.AccountBookingCreateView.as_view(),
+        name="account-booking-create",
+    ),
+    path(
         "appointments/mine/",
         views.AccountAppointmentListView.as_view(),
         name="account-appointment-list",

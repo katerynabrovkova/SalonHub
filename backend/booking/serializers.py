@@ -236,6 +236,52 @@ class GuestBookingRequestSerializer(serializers.Serializer):
         self.fields["service"].queryset = Service.objects.all()
 
 
+class AccountBookingRequestSerializer(serializers.Serializer):
+    """
+    Input validation for the account booking POST endpoint (docs/DECISIONS.md
+    § Stage 15 planning, item 5, "Cycle B — account booking endpoint
+    contract, decided 20.09.2026"). Same specialist/service/start_datetime
+    handling as GuestBookingRequestSerializer above (including "any" via
+    SpecialistOrAnyField) -- but no `customer_email` field at all: the
+    Customer's email is always `request.user.email` (the authenticated
+    Account's own, verified email), never the payload, so there is nothing
+    here for a caller to even attempt to override. A `customer_email` sent
+    anyway is simply ignored, the same as any other field this serializer
+    doesn't declare -- a plain Serializer never rejects unknown input keys.
+
+    `customer_name`/`customer_phone` are declared `required=False`: they are
+    only actually required when `request.user.customer_id` is `None` (the
+    new-Customer sub-case) -- checked in `validate()` below, which needs
+    `self.context["request"]` for that, the same context every DRF generic
+    view supplies automatically via `get_serializer()`. When an Account
+    already has a linked Customer, both fields are accepted-but-unused if
+    sent (the view never reads them in that branch) -- validate() does not
+    reject them, since "ignored" is exactly the required contract, not an
+    error.
+    """
+
+    specialist = SpecialistOrAnyField(queryset=Specialist.unscoped_objects.none())
+    service = serializers.PrimaryKeyRelatedField(queryset=Service.unscoped_objects.none())
+    start_datetime = _OffsetRequiredDateTimeField()
+    customer_name = serializers.CharField(max_length=255, required=False)
+    customer_phone = serializers.CharField(max_length=32, required=False)
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["specialist"].queryset = Specialist.objects.all()
+        self.fields["service"].queryset = Service.objects.all()
+
+    def validate(self, attrs: dict) -> dict:
+        account = self.context["request"].user
+        if account.customer_id is None:
+            missing = [field for field in ("customer_name", "customer_phone") if field not in attrs]
+            if missing:
+                raise serializers.ValidationError(
+                    {field: ["This field is required."] for field in missing}
+                )
+        return attrs
+
+
 class AppointmentCreatedSerializer(serializers.ModelSerializer):
     """
     Response shape for the created appointment, nested under the "appointment"

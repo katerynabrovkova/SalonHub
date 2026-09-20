@@ -37,13 +37,18 @@ from rest_framework.views import APIView
 
 from booking.models import Appointment, CancelledBy
 from booking.serializers import (
+    AccountBookingRequestSerializer,
     AppointmentAccountSerializer,
     AppointmentCreatedSerializer,
     AppointmentGuestSerializer,
     GuestBookingRequestSerializer,
 )
-from booking.services import cancel_appointment, create_guest_appointment
-from core.exceptions import InvalidOrExpiredTokenError
+from booking.services import (
+    cancel_appointment,
+    create_account_appointment,
+    create_guest_appointment,
+)
+from core.exceptions import EmailNotVerifiedError, InvalidOrExpiredTokenError
 from core.permissions import HasValidGuestToken
 from core.tenancy import get_current_salon_id
 from payments.providers.base import PaymentProvider
@@ -344,5 +349,72 @@ class GuestBookingCreateView(APIView):
                 "appointment": AppointmentCreatedSerializer(appointment).data,
                 "guest_token": raw_token,
             },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AccountBookingCreateView(APIView):
+    """
+    ``POST appointments/`` — the authenticated Account books directly,
+    without the guest contact-form/token flow (docs/DECISIONS.md § Stage 15
+    planning, item 5, "Cycle B — account booking endpoint contract, decided
+    20.09.2026"). No explicit `authentication_classes`/`permission_classes`
+    override: relies on the project-wide `AccountJWTCookieAuthentication` +
+    `IsAuthenticated` defaults, same posture as `AccountAppointmentListView`/
+    `AccountAppointmentCancelView`/`accounts.views.MeView` — an
+    unauthenticated request is already rejected with 401 before this view's
+    code runs.
+
+    Order of checks, in this exact sequence (docs/DECISIONS.md's "order of
+    checks" bullet): (1) authentication (401, via the global default,
+    above), (2) the unverified-Account check below (403
+    `email_not_verified`), (3) `AccountBookingRequestSerializer` validation
+    (400), (4) `create_account_appointment`'s own `transaction.atomic()`.
+    The verification check is a plain `if` at the top of `post()`, not
+    folded into the serializer or a permission class, specifically so it
+    always runs before body validation — a validation error (e.g. missing
+    `customer_name`) must never differ depending on whether the Account is
+    verified, and an unverified Account must get the identical 403
+    regardless of whether a Customer already exists for its email (the
+    Refined 19.09.2026 entry's anti-enumeration reasoning).
+
+    No view-level try/except: `SlotNotOfferedError` (400) and
+    `SlotUnavailableError` (409), both raised by `create_account_appointment`
+    via the same § Stage 7.C core `create_guest_appointment` wraps,
+    propagate to the existing `core.exceptions.exception_handler` —
+    identical mapping to `GuestBookingCreateView`, reused rather than
+    reimplemented.
+    """
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        account = request.user
+        if account.email_verified_at is None:
+            raise EmailNotVerifiedError()
+
+        body = AccountBookingRequestSerializer(data=request.data, context={"request": request})
+        body.is_valid(raise_exception=True)
+
+        # Salon is not a TenantScopedModel — it's the tenant root — so
+        # Salon.objects is a plain manager (§ Stage 6.I decisions' same
+        # reasoning).
+        salon = get_object_or_404(Salon, pk=get_current_salon_id())
+
+        # The single now = timezone.now() call site (§ Stage 6.F/6.I
+        # decisions) — passed explicitly into the orchestrator, never re-read.
+        now = timezone.now()
+
+        appointment = create_account_appointment(
+            salon=salon,
+            account=account,
+            specialist=body.validated_data["specialist"],
+            service=body.validated_data["service"],
+            start_datetime=body.validated_data["start_datetime"],
+            now=now,
+            customer_name=body.validated_data.get("customer_name"),
+            customer_phone=body.validated_data.get("customer_phone"),
+        )
+
+        return Response(
+            {"appointment": AppointmentCreatedSerializer(appointment).data},
             status=status.HTTP_201_CREATED,
         )

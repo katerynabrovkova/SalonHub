@@ -28,13 +28,14 @@ import psycopg
 from django.db import IntegrityError, transaction
 from django.db.models import Count
 
-from accounts.models import Customer
+from accounts.models import Account, Customer
 from accounts.services import get_or_create_guest_customer
 from booking.constants import SLOT_HOLD_DURATION
 from booking.guest_tokens import issue_guest_token
 from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus, CancelledBy
 from catalog.models import Service
 from core.exceptions import (
+    EmailNotVerifiedError,
     InvalidStateTransitionError,
     PaymentProviderError,
     SlotNotOfferedError,
@@ -302,6 +303,111 @@ def create_guest_appointment(
             booking_link_mode="guest",
         )
         return appointment, raw_token
+
+
+def create_account_appointment(
+    *,
+    salon: Salon,
+    account: Account,
+    specialist: Specialist | Literal["any"],
+    service: Service,
+    start_datetime: dt.datetime,
+    now: dt.datetime,
+    customer_name: str | None,
+    customer_phone: str | None,
+    rng: random.Random | None = None,
+) -> Appointment:
+    """
+    docs/DECISIONS.md § Stage 15 planning, item 5, "Cycle B — account
+    booking endpoint contract, decided 20.09.2026", built on the Customer-
+    resolution shape from the Refined 19.09.2026 entry above.
+
+    The outer transaction.atomic() here plays the same role as
+    create_guest_appointment's: the entire source of "no orphaned Customer
+    / no appointment without its notification journalled" atomicity, since
+    ATOMIC_REQUESTS isn't set. `select_for_update()` on the Account row is
+    taken first, inside this same transaction, so two simultaneous first
+    bookings from the same Account serialize on that lock: the second
+    request's SELECT ... FOR UPDATE blocks until the first commits its
+    Customer link, then sees `customer_id` already set and reuses it,
+    never racing `get_or_create` into two Customers for the same email.
+
+    Customer resolution: if the (locked) Account already has a linked
+    Customer, that Customer is used unchanged -- customer_name/
+    customer_phone are never applied in this branch, even if sent,
+    regardless of what the account row's own email is (the caller supplied
+    a real name/phone once already, when that Customer was first created
+    or claimed). Otherwise, get_or_create a Customer by
+    (salon, account.email) -- never a payload-supplied email -- and link it
+    to the Account. This mirrors accounts.services.get_or_create_guest_customer's
+    Option A: name/phone are applied unconditionally in this branch, so a
+    returning guest Customer picked up by an Account also gets its
+    name/phone refreshed from what the Account holder just typed, not
+    silently kept stale from an old guest booking.
+
+    create_appointment / create_appointment_for_any_specialist are reused
+    completely unchanged -- only this function's Customer-resolution step
+    and its lack of a guest token differ from create_guest_appointment's.
+    No guest token is issued; record_and_dispatch_notification is called
+    with booking_link_mode="account", same dedup_key format as the guest
+    path (docs/DECISIONS.md § Stage 15 planning, item 5, Cycle C).
+    """
+    with transaction.atomic():
+        locked_account = Account.objects.select_for_update().get(pk=account.pk)
+        # Defense in depth: AccountBookingCreateView.post() already checks
+        # this before this function is ever called, but this function must
+        # not trust every future caller to remember that -- checked again
+        # here, on the just-locked row (not the `account` argument's
+        # possibly-stale copy), before any Customer lookup or write.
+        if locked_account.email_verified_at is None:
+            raise EmailNotVerifiedError()
+        if locked_account.customer_id is not None:
+            customer = Customer.objects.get(pk=locked_account.customer_id)
+        else:
+            # AccountBookingRequestSerializer.validate() already required
+            # both fields whenever account.customer_id is None -- this
+            # branch is only reached in exactly that case, so both are
+            # guaranteed non-None here, not just optimistically assumed.
+            assert customer_name is not None
+            assert customer_phone is not None
+            customer, created = Customer.objects.get_or_create(
+                salon=salon,
+                email=locked_account.email,
+                defaults={"name": customer_name, "phone": customer_phone},
+            )
+            if not created:
+                customer.name = customer_name
+                customer.phone = customer_phone
+                customer.save(update_fields=["name", "phone"])
+            locked_account.customer = customer
+            locked_account.save(update_fields=["customer"])
+
+        if specialist == "any":
+            appointment = create_appointment_for_any_specialist(
+                salon=salon,
+                service=service,
+                customer=customer,
+                start_datetime=start_datetime,
+                now=now,
+                rng=rng,
+            )
+        else:
+            appointment = create_appointment(
+                salon=salon,
+                specialist=specialist,
+                service=service,
+                customer=customer,
+                start_datetime=start_datetime,
+                now=now,
+            )
+        record_and_dispatch_notification(
+            salon=salon,
+            trigger_type=NotificationTrigger.BOOKING_CREATED,
+            appointment=appointment,
+            dedup_key=f"booking_created:appointment:{appointment.pk}",
+            booking_link_mode="account",
+        )
+        return appointment
 
 
 # Customer-initiated cancellations (the client themselves — GUEST via a

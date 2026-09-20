@@ -49,6 +49,22 @@ class InvalidStateTransitionError(DomainError):
     default_message = "This action isn't valid for the current state."
 
 
+class EmailNotVerifiedError(DomainError):
+    """
+    docs/DECISIONS.md § Stage 15 planning, item 5, "Cycle B — account
+    booking endpoint contract, decided 20.09.2026": account-aware booking
+    rejects an unverified Account regardless of whether a Customer already
+    exists for its email -- the response must be identical either way (the
+    Refined 19.09.2026 entry's anti-enumeration reasoning), so this carries
+    no per-case detail. Raised from AccountBookingCreateView.post() itself,
+    before serializer validation ever runs.
+    """
+
+    code = "email_not_verified"
+    status_code = status.HTTP_403_FORBIDDEN
+    default_message = "Please verify your email before booking directly from your account."
+
+
 class ReviewRequiresCompletedAppointmentError(DomainError):
     """
     docs/DECISIONS.md § Stage 11 Part 2: a review may only be left for a
