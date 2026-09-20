@@ -68,6 +68,7 @@ def _make_notification(
     status=NotificationStatus.PENDING,
     sent_at=None,
     dedup_key="k",
+    booking_link_mode=None,
 ):
     with tenant_context(salon.id):
         return Notification.objects.create(
@@ -79,6 +80,7 @@ def _make_notification(
             dedup_key=dedup_key,
             status=status,
             sent_at=sent_at,
+            booking_link_mode=booking_link_mode,
         )
 
 
@@ -289,6 +291,7 @@ def test_build_message_for_booking_created_builds_subject_body_and_payment_link(
         customer=customer,
         appointment=appointment,
         trigger=NotificationTrigger.BOOKING_CREATED,
+        booking_link_mode="guest",
     )
 
     with tenant_context(salon.id):
@@ -320,6 +323,7 @@ def test_build_message_for_booking_created_link_carries_the_re_derived_token(
         customer=customer,
         appointment=appointment,
         trigger=NotificationTrigger.BOOKING_CREATED,
+        booking_link_mode="guest",
     )
 
     with tenant_context(salon.id):
@@ -445,6 +449,7 @@ def test_build_message_for_booking_created_renders_in_customer_preferred_languag
         customer=customer,
         appointment=appointment,
         trigger=NotificationTrigger.BOOKING_CREATED,
+        booking_link_mode="guest",
     )
 
     with tenant_context(salon.id):

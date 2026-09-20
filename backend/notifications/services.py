@@ -28,7 +28,12 @@ from core.formatting import format_datetime_for_salon
 from core.i18n import resolve_language_code, resolve_translation
 from core.urls import build_salon_frontend_url
 from notifications.channels.base import NotificationChannel
-from notifications.models import Notification, NotificationStatus, NotificationTrigger
+from notifications.models import (
+    BookingLinkMode,
+    Notification,
+    NotificationStatus,
+    NotificationTrigger,
+)
 from notifications.models import NotificationChannel as ChannelChoices
 from tenants.models import Salon
 
@@ -219,11 +224,27 @@ def _build_message(notification: Notification) -> tuple[str, str]:
             ),
         }[lang_code]
         when = format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang=lang_code)
-        token = derive_guest_token(appointment.id)
-        link = (
-            build_salon_frontend_url(salon.slug, "/booking/pay")
-            + f"#appointment_id={appointment.id}&token={token}"
-        )
+        # booking_link_mode is set by record_and_dispatch_notification at
+        # record time (docs/DECISIONS.md § Stage 15 planning, item 5, Cycle
+        # C) and read back here, not re-derived or inferred -- explicit
+        # checks, no fall-through else, so a future third mode (or a bug
+        # that leaves the field unset) fails loudly instead of silently
+        # becoming a guest link.
+        if notification.booking_link_mode == BookingLinkMode.GUEST:
+            token = derive_guest_token(appointment.id)
+            link = (
+                build_salon_frontend_url(salon.slug, "/booking/pay")
+                + f"#appointment_id={appointment.id}&token={token}"
+            )
+        elif notification.booking_link_mode == BookingLinkMode.ACCOUNT:
+            link = build_salon_frontend_url(salon.slug, "/client")
+        else:
+            raise ValueError(
+                "BOOKING_CREATED notification "
+                f"{notification.pk!r} has booking_link_mode="
+                f"{notification.booking_link_mode!r}, expected "
+                f"{BookingLinkMode.GUEST!r} or {BookingLinkMode.ACCOUNT!r}"
+            )
         minutes = int(SLOT_HOLD_DURATION.total_seconds() // 60)
         body = body_template.format(
             salon=resolve_translation(salon.name, preferred), when=when, link=link, minutes=minutes
@@ -328,6 +349,7 @@ def record_and_dispatch_notification(
     trigger_type: str,
     appointment: Appointment,
     dedup_key: str,
+    booking_link_mode: str | None = None,
 ) -> None:
     """
     Record a PENDING Notification journal row for a trigger event and
@@ -336,6 +358,20 @@ def record_and_dispatch_notification(
     own atomic() block, right after a status save — currently
     PaymentWebhookView.post (payments/views.py) and
     booking.services.cancel_appointment.
+
+    `booking_link_mode` is meaningful only for trigger_type=BOOKING_CREATED
+    (docs/DECISIONS.md § Stage 15 planning, item 5, Cycle C) — the caller's
+    explicit choice of which link the confirmation email carries, never
+    inferred from whether the appointment's Customer has a linked Account.
+    Validated up front, before any DB write, dedup lookup, or token
+    derivation, so a caller that forgets it (or passes a typo'd value) fails
+    loudly at the call site rather than silently defaulting to the guest
+    link. The validated value is persisted on the row (not just checked and
+    discarded) because the actual send happens later, in a Celery task that
+    may run in a different process — _build_message reads it back off the
+    row rather than the value handed to this call ever reaching it directly.
+    Every other trigger_type ignores the parameter (it's stored as None,
+    which _build_message never reads for a non-BOOKING_CREATED trigger).
 
     Own nested atomic() savepoint, one per call: a redelivered or re-run
     trigger reproduces the same dedup_key, so the INSERT can violate
@@ -352,6 +388,16 @@ def record_and_dispatch_notification(
     redelivery or re-run before it reaches this INSERT; the unique-violation
     branch is defence in depth.
     """
+    if trigger_type == NotificationTrigger.BOOKING_CREATED and booking_link_mode not in (
+        BookingLinkMode.GUEST,
+        BookingLinkMode.ACCOUNT,
+    ):
+        raise ValueError(
+            "record_and_dispatch_notification: BOOKING_CREATED requires an "
+            f"explicit booking_link_mode of {BookingLinkMode.GUEST!r} or "
+            f"{BookingLinkMode.ACCOUNT!r}, got {booking_link_mode!r}"
+        )
+
     # Imported here, not at module top: notifications.tasks imports
     # send_notification/mark_notification_failed from this module, so a
     # top-level import the other way would be a circular import.
@@ -366,6 +412,7 @@ def record_and_dispatch_notification(
                 appointment=appointment,
                 customer_id=appointment.customer_id,
                 dedup_key=dedup_key,
+                booking_link_mode=booking_link_mode,
             )
     except IntegrityError as exc:
         cause = exc.__cause__

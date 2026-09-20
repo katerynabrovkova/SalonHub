@@ -30,6 +30,23 @@ class NotificationStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class BookingLinkMode(models.TextChoices):
+    """
+    Which link a BOOKING_CREATED notification's email carries (docs/DECISIONS.md
+    § Stage 15 planning, item 5, Cycle C) — set explicitly by the
+    booking-creation call site at record time (never inferred from whether the
+    appointment's Customer has a linked Account) and persisted here so the
+    deferred, async send (record_and_dispatch_notification schedules a Celery
+    task; the actual link is built later, in a possibly different process, by
+    notifications.services._build_message reading this same row) can read it
+    back without the original call's arguments being in scope. Meaningless for
+    every other trigger_type, which is why the field is nullable.
+    """
+
+    GUEST = "guest", "Guest"
+    ACCOUNT = "account", "Account"
+
+
 class Notification(TenantScopedModel, TimeStamped):
     """
     Send log / dedup ledger (docs/ARCHITECTURE.md § 9). `appointment` is
@@ -54,6 +71,9 @@ class Notification(TenantScopedModel, TimeStamped):
         max_length=16, choices=NotificationStatus.choices, default=NotificationStatus.PENDING
     )
     sent_at = models.DateTimeField(null=True, blank=True)
+    booking_link_mode = models.CharField(
+        max_length=16, choices=BookingLinkMode.choices, null=True, blank=True
+    )
 
     class Meta(TenantScopedModel.Meta):
         abstract = False

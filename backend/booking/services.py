@@ -299,6 +299,7 @@ def create_guest_appointment(
             trigger_type=NotificationTrigger.BOOKING_CREATED,
             appointment=appointment,
             dedup_key=f"booking_created:appointment:{appointment.pk}",
+            booking_link_mode="guest",
         )
         return appointment, raw_token
 
