@@ -3400,6 +3400,31 @@ Scope, in build order:
    (`backend/notifications/services.py:222-226`) was verified against
    the file and is correct as written.
 
+   Corrected 20.09.2026 — the "explicit parameter passed down from the
+   booking-creation call site" above undersold what actually landed
+   (Cycle C):
+
+   - The mode is passed to `record_and_dispatch_notification` as a
+     keyword-only `booking_link_mode: str | None = None`, **and**
+     persisted on the row as `Notification.booking_link_mode` (nullable,
+     choices `guest`/`account`). Reason: the email is built later, in
+     `_build_message`, inside a Celery task that may run in a different
+     process — a call-site argument alone can't reach it there, so the
+     validated value has to be written to the row for that later,
+     out-of-process read to find.
+   - For `BOOKING_CREATED`, a missing (`None`) or unknown mode raises
+     `ValueError`, both at record time (before any DB write) and again
+     in `_build_message` — explicit checks in both places, no
+     fall-through to the guest link. Every other trigger doesn't use
+     the field at all (stays `NULL`).
+   - Migration `notifications.0005` adds the field and backfills every
+     existing `booking_created` row to `"guest"` (every one predates
+     this field and was recorded by `create_guest_appointment`, the
+     only call site that has ever dispatched that trigger).
+   - Cycle B's account-booking path must pass
+     `booking_link_mode="account"` at its own call site when it's
+     built — not yet done, since Cycle B's endpoint doesn't exist yet.
+
    Cycle B — account booking endpoint contract, decided 20.09.2026:
 
    - Endpoint: `POST appointments/`, same URL family and tenant
