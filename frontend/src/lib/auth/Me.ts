@@ -14,4 +14,5 @@ export interface Me {
   role: "admin" | "client";
   name: string | null;
   phone: string | null;
+  email_verified: boolean;
 }

@@ -63,7 +63,13 @@ afterEach(() => {
 describe("ClientProfilePage", () => {
   it("test_all_four_rows_render_with_a_linked_customer", async () => {
     mockApiRoutes({
-      me: { email: "alice@example.com", role: "client", name: "Alice", phone: "+10000000000" },
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: "Alice",
+        phone: "+10000000000",
+        email_verified: true,
+      },
     });
 
     renderProfile();
@@ -79,7 +85,13 @@ describe("ClientProfilePage", () => {
 
   it("test_only_email_and_password_rows_render_with_no_linked_customer", async () => {
     mockApiRoutes({
-      me: { email: "unlinked@example.com", role: "client", name: null, phone: null },
+      me: {
+        email: "unlinked@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      },
     });
 
     renderProfile();
@@ -94,7 +106,13 @@ describe("ClientProfilePage", () => {
 
   it("test_row_links_point_to_their_own_subpages", async () => {
     mockApiRoutes({
-      me: { email: "alice@example.com", role: "client", name: "Alice", phone: "+10000000000" },
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: "Alice",
+        phone: "+10000000000",
+        email_verified: true,
+      },
     });
 
     renderProfile();
@@ -120,7 +138,13 @@ describe("ClientProfilePage", () => {
 
   it("test_back_link_points_to_client_dashboard", async () => {
     mockApiRoutes({
-      me: { email: "alice@example.com", role: "client", name: null, phone: null },
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      },
     });
 
     renderProfile();
@@ -132,7 +156,13 @@ describe("ClientProfilePage", () => {
   it("test_logout_button_confirmed_calls_logout_and_navigates_to_login", async () => {
     const user = userEvent.setup();
     mockApiRoutes({
-      me: { email: "alice@example.com", role: "client", name: null, phone: null },
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      },
       logout: () => undefined,
     });
 
@@ -152,7 +182,13 @@ describe("ClientProfilePage", () => {
     const user = userEvent.setup();
     vi.spyOn(window, "confirm").mockReturnValue(false);
     mockApiRoutes({
-      me: { email: "alice@example.com", role: "client", name: null, phone: null },
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      },
     });
 
     renderProfile();

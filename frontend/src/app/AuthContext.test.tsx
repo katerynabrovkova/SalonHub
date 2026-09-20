@@ -42,7 +42,13 @@ beforeEach(() => {
 
 describe("AuthProvider", () => {
   it("test_fetches_me_on_mount_and_exposes_the_result", async () => {
-    mockedApiRequest.mockResolvedValueOnce({ email: "person@example.com", role: "client" });
+    mockedApiRequest.mockResolvedValueOnce({
+      email: "person@example.com",
+      role: "client",
+      name: null,
+      phone: null,
+      email_verified: true,
+    });
 
     render(
       <AuthProvider>
@@ -80,7 +86,13 @@ describe("AuthProvider", () => {
     mockedApiRequest
       .mockRejectedValueOnce(new ApiError(401, "not_authenticated", "Not authenticated.")) // mount GET /auth/me/
       .mockResolvedValueOnce(undefined) // POST /auth/login/
-      .mockResolvedValueOnce({ email: "alice@example.com", role: "admin" }); // login()'s own GET /auth/me/
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "admin",
+        name: null,
+        phone: null,
+        email_verified: true,
+      }); // login()'s own GET /auth/me/
 
     function LoginButton() {
       const { login } = useAuth();
@@ -112,7 +124,13 @@ describe("AuthProvider", () => {
   it(
     "test_value_persists_across_a_simulated_rerender_of_children_with_the_same_provider_instance",
     async () => {
-      mockedApiRequest.mockResolvedValueOnce({ email: "person@example.com", role: "client" });
+      mockedApiRequest.mockResolvedValueOnce({
+        email: "person@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      });
 
       function OtherChild() {
         return <p>a different child than before</p>;
@@ -148,7 +166,13 @@ describe("AuthProvider", () => {
   it("test_logout_posts_to_the_logout_endpoint", async () => {
     const user = userEvent.setup();
     mockedApiRequest
-      .mockResolvedValueOnce({ email: "alice@example.com", role: "admin" }) // mount GET /auth/me/
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "admin",
+        name: null,
+        phone: null,
+        email_verified: true,
+      }) // mount GET /auth/me/
       .mockResolvedValueOnce(undefined); // POST /auth/logout/
 
     render(
@@ -169,7 +193,13 @@ describe("AuthProvider", () => {
   it("test_logout_clears_me_on_success_visible_without_a_remount", async () => {
     const user = userEvent.setup();
     mockedApiRequest
-      .mockResolvedValueOnce({ email: "alice@example.com", role: "admin" }) // mount GET /auth/me/
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "admin",
+        name: null,
+        phone: null,
+        email_verified: true,
+      }) // mount GET /auth/me/
       .mockResolvedValueOnce(undefined); // POST /auth/logout/
 
     render(
@@ -191,7 +221,13 @@ describe("AuthProvider", () => {
   it("test_logout_clears_me_even_when_the_logout_call_rejects", async () => {
     const user = userEvent.setup();
     mockedApiRequest
-      .mockResolvedValueOnce({ email: "alice@example.com", role: "admin" }) // mount GET /auth/me/
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "admin",
+        name: null,
+        phone: null,
+        email_verified: true,
+      }) // mount GET /auth/me/
       .mockRejectedValueOnce(
         new ApiError(400, "invalid_token", "Invalid or already-used refresh token."),
       ); // POST /auth/logout/
@@ -210,6 +246,180 @@ describe("AuthProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
     expect(screen.getByTestId("role")).toHaveTextContent("");
+  });
+});
+
+describe("AuthProvider refresh", () => {
+  function RefreshButton() {
+    const { refresh } = useAuth();
+    return <button onClick={() => void refresh()}>refresh</button>;
+  }
+
+  it("test_refresh_replaces_me_with_the_new_auth_me_response", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      }) // mount GET /auth/me/
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "client",
+        name: "Alice",
+        phone: "+10000000000",
+        email_verified: true,
+      }); // refresh()'s own GET /auth/me/
+
+    function NameReadout() {
+      const { me } = useAuth();
+      return <span data-testid="name">{me?.name ?? ""}</span>;
+    }
+
+    render(
+      <AuthProvider>
+        <NameReadout />
+        <RefreshButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("name")).toHaveTextContent(""));
+
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+
+    await waitFor(() => expect(screen.getByTestId("name")).toHaveTextContent("Alice"));
+  });
+
+  it("test_loading_never_flips_true_during_refresh", async () => {
+    const user = userEvent.setup();
+    const observedLoadingValues: boolean[] = [];
+
+    function LoadingRecorder() {
+      const { loading } = useAuth();
+      observedLoadingValues.push(loading);
+      return null;
+    }
+
+    let resolveRefresh: (value: unknown) => void = () => {};
+    const pendingRefresh = new Promise((resolve) => {
+      resolveRefresh = resolve;
+    });
+    mockedApiRequest
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      }) // mount GET /auth/me/
+      .mockReturnValueOnce(pendingRefresh); // refresh()'s own GET /auth/me/
+
+    render(
+      <AuthProvider>
+        <LoadingRecorder />
+        <RefreshButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(observedLoadingValues.at(-1)).toBe(false));
+
+    // The mount fetch itself legitimately passes through `true` before
+    // settling -- only values observed from here on (spanning the refresh
+    // call) are what this test is actually about.
+    observedLoadingValues.length = 0;
+
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+
+    resolveRefresh({
+      email: "alice@example.com",
+      role: "client",
+      name: "Alice",
+      phone: null,
+      email_verified: true,
+    });
+    await waitFor(() => expect(observedLoadingValues.at(-1)).toBe(false));
+
+    expect(observedLoadingValues).not.toContain(true);
+  });
+
+  it("test_a_401_during_refresh_sets_me_to_null", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      }) // mount GET /auth/me/
+      .mockRejectedValueOnce(
+        new ApiError(401, "not_authenticated", "Authentication credentials were not provided."),
+      ); // refresh()'s own GET /auth/me/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <RefreshButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com"));
+
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
+    expect(screen.getByTestId("role")).toHaveTextContent("");
+  });
+
+  it("test_a_non_401_failure_during_refresh_keeps_the_previous_me_and_does_not_reject", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest
+      .mockResolvedValueOnce({
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      }) // mount GET /auth/me/
+      .mockRejectedValueOnce(new Error("network down")); // refresh()'s own GET /auth/me/
+
+    let refreshResult: "resolved" | "rejected" | null = null;
+
+    function RefreshCapture() {
+      const { refresh } = useAuth();
+      return (
+        <button
+          onClick={() =>
+            void refresh().then(
+              () => {
+                refreshResult = "resolved";
+              },
+              () => {
+                refreshResult = "rejected";
+              },
+            )
+          }
+        >
+          refresh
+        </button>
+      );
+    }
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <RefreshCapture />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com"));
+
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+
+    await waitFor(() => expect(refreshResult).toBe("resolved"));
+    expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com");
   });
 });
 

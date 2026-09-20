@@ -14,9 +14,10 @@
  * a crash from the root layout itself.
  */
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { apiRequest } from "@/lib/api/client";
+import { ApiError } from "@/lib/api/errors";
 import type { Me } from "@/lib/auth/Me";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 
@@ -31,6 +32,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<Me>;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -104,8 +106,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMe(null);
   }
 
+  // Re-fetches `auth/me/` and replaces `me`, without touching `loading` --
+  // ClientLayout and the booking wrapper render nothing while `loading` is
+  // true, so flipping it here would unmount whatever called this (e.g. right
+  // after a successful account booking, on its way to /client).
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      const result = await apiRequest<Me>(slug, "/auth/me/");
+      setMe(result);
+    } catch (err) {
+      // A 401 means the session ended -- same "not an error to surface"
+      // reasoning as the mount effect above. Any other failure (network,
+      // 5xx) leaves `me` as it was rather than guessing; this promise still
+      // resolves either way, never rejects, so a caller can always await it
+      // and move on.
+      if (err instanceof ApiError && err.status === 401) {
+        setMe(null);
+      }
+    }
+  }, [slug]);
+
   return (
-    <AuthContext.Provider value={{ me, loading, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ me, loading, login, logout, refresh }}>
+      {children}
+    </AuthContext.Provider>
   );
 }
 

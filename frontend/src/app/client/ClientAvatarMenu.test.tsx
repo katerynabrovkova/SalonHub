@@ -23,7 +23,13 @@ import ClientAvatarMenu from "./ClientAvatarMenu";
 
 const mockedApiRequest = vi.mocked(apiRequest);
 
-const ME = { email: "alice@example.com", role: "client" as const, name: "Alice", phone: null };
+const ME = {
+  email: "alice@example.com",
+  role: "client" as const,
+  name: "Alice",
+  phone: null,
+  email_verified: true,
+};
 
 function mockApiRoutes({ logout }: { logout?: () => unknown } = {}) {
   mockedApiRequest.mockImplementation((...args) => {

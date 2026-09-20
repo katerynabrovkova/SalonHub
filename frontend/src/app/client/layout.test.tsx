@@ -40,7 +40,13 @@ describe("ClientLayout", () => {
 
   it("test_renders_children_when_signed_in", () => {
     mockedUseAuth.mockReturnValue({
-      me: { email: "alice@example.com", role: "client" },
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      },
       loading: false,
       login: vi.fn(),
       logout: vi.fn(),

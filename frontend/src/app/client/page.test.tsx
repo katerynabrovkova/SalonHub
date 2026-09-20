@@ -31,7 +31,13 @@ const mockedApiRequest = vi.mocked(apiRequest);
 // ClientAvatarMenu (item 7) reads useAuth(), so this page now needs a real
 // AuthProvider wrapping it, not just the bare component -- same reasoning
 // login/page.test.tsx/register's tests already wrap their pages.
-const ME = { email: "alice@example.com", role: "client" as const, name: "Alice", phone: "+10000000000" };
+const ME = {
+  email: "alice@example.com",
+  role: "client" as const,
+  name: "Alice",
+  phone: "+10000000000",
+  email_verified: true,
+};
 
 function renderDashboard() {
   return render(

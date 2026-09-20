@@ -111,7 +111,14 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     mockApiRoutes({
       login: () => Promise.resolve(undefined),
-      meAfterLogin: () => Promise.resolve({ email: "person@example.com", role: "admin" }),
+      meAfterLogin: () =>
+        Promise.resolve({
+          email: "person@example.com",
+          role: "admin",
+          name: null,
+          phone: null,
+          email_verified: true,
+        }),
     });
 
     renderLoginPage();
@@ -126,7 +133,14 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     mockApiRoutes({
       login: () => Promise.resolve(undefined),
-      meAfterLogin: () => Promise.resolve({ email: "person@example.com", role: "client" }),
+      meAfterLogin: () =>
+        Promise.resolve({
+          email: "person@example.com",
+          role: "client",
+          name: null,
+          phone: null,
+          email_verified: true,
+        }),
     });
 
     renderLoginPage();
