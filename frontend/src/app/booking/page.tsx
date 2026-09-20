@@ -225,6 +225,17 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
     }
     const dateFrom = rawDateFrom ?? todayIsoDate();
     const dateTo = addDays(dateFrom, WINDOW_DAYS - 1);
+    // addDays hits toISOString()'s extended 6-digit-year format for year
+    // 10000+ (e.g. "+010000-01-13"), which its own .slice(0, 10) then cuts
+    // to a garbled, non-date string (e.g. "+010000-01") for a dateFrom
+    // within WINDOW_DAYS - 1 of that rollover. Sending that to
+    // getAvailability gets a correctly-rejected 400 from the backend, which
+    // getAvailability then turns into a generic thrown Error indistinguishable
+    // from a real server failure -- caught here instead, same notFound()
+    // convention as every other invalid param in this branch.
+    if (!DATE_SHAPE.test(dateTo)) {
+      notFound();
+    }
 
     const { availableTimes } = await getAvailability(
       slug,

@@ -369,6 +369,53 @@ describe("BookingPage routing skeleton", () => {
     );
   });
 
+  it("test_step3_date_from_whose_window_end_overflows_the_iso_year_calls_not_found", async () => {
+    mockSlug("bella-demo");
+
+    // addDays(dateFrom, 13) internally hits toISOString()'s extended
+    // 6-digit-year format for year 10000 ("+010000-01-13"), and page.tsx's
+    // own dateTo computation would otherwise slice that to the garbled
+    // "+010000-01" -- this proves the new dateTo guard catches it before
+    // it ever reaches getAvailability.
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          specialist: "any",
+          step: "3",
+          date_from: "9999-12-31",
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(mockedGetAvailability).not.toHaveBeenCalled();
+  });
+
+  it("test_step3_date_from_at_the_last_valid_window_end_renders_normally", async () => {
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({ availableTimes: [] });
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "any",
+        step: "3",
+        date_from: "9999-12-18",
+      }),
+    });
+    render(element);
+
+    expect(mockedGetAvailability).toHaveBeenCalledWith(
+      "bella-demo",
+      "5",
+      "9999-12-18",
+      "9999-12-31",
+      undefined,
+    );
+    expect(screen.getByRole("button", { name: "9999-12-18" })).toBeInTheDocument();
+  });
+
   it("test_step_beyond_4_renders_not_implemented_placeholder", async () => {
     const element = await BookingPage({
       searchParams: searchParamsOf({ entry: "service", service: "5", step: "5" }),
