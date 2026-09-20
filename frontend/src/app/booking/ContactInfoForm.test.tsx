@@ -88,7 +88,7 @@ describe("ContactInfoForm", () => {
     );
 
     await fillForm(user);
-    await user.click(screen.getByRole("button", { name: "Забронювати" }));
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(createGuestBookingMock).toHaveBeenCalledWith({
       slug: "bella-demo",
@@ -112,7 +112,7 @@ describe("ContactInfoForm", () => {
     );
 
     await fillForm(user);
-    await user.click(screen.getByRole("button", { name: "Забронювати" }));
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     await waitFor(() =>
       expect(pushMock).toHaveBeenCalledWith("/booking/pay#appointment_id=42&token=tok-abc"),
@@ -132,7 +132,7 @@ describe("ContactInfoForm", () => {
     );
 
     await fillForm(user);
-    await user.click(screen.getByRole("button", { name: "Забронювати" }));
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     await waitFor(() =>
       expect(pushMock).toHaveBeenCalledWith(
@@ -159,7 +159,7 @@ describe("ContactInfoForm", () => {
     );
 
     await fillForm(user);
-    await user.click(screen.getByRole("button", { name: "Забронювати" }));
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Something went wrong. Please try again.",
@@ -172,7 +172,7 @@ describe("ContactInfoForm", () => {
     createGuestBookingMock.mockRejectedValueOnce(
       new ApiError(409, "SOME_OTHER_CONFLICT", "Something else conflicted."),
     );
-    await user.click(screen.getByRole("button", { name: "Забронювати" }));
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Something went wrong. Please try again.",
@@ -195,10 +195,10 @@ describe("ContactInfoForm", () => {
     );
 
     await fillForm(user);
-    await user.click(screen.getByRole("button", { name: "Забронювати" }));
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Забронювати" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Підтвердити запис" })).toBeDisabled();
     });
 
     // Clean up the dangling promise so it doesn't leak into other tests.

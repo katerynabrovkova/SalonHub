@@ -137,7 +137,7 @@ export default function ContactInfoForm({
       {error !== null ? <p role="alert">{error}</p> : null}
 
       <button type="submit" disabled={pending}>
-        Забронювати
+        Підтвердити запис
       </button>
     </form>
   );
