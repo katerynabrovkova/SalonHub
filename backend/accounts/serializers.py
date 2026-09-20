@@ -71,8 +71,10 @@ class MeSerializer(serializers.ModelSerializer):
     Read representation for ``GET auth/me/`` (docs/DECISIONS.md § "`/me/`
     endpoint (Stage 12)", widened in § Stage 15 planning, item 7). No
     `salon` (the frontend already has the slug from the subdomain before
-    login happens) and no `email_verified_at` (deferred until an actual
-    "verify your email" UI exists).
+    login happens). `email_verified` is a derived boolean
+    (`email_verified_at is not None`) -- the timestamp itself is never
+    exposed (docs/DECISIONS.md § Stage 15 planning, item 5, "Extended
+    19.09.2026").
 
     `name`/`phone` are sourced from the Account's linked `Customer`
     (`Account.customer`, a nullable forward `OneToOneField` -- unlike
@@ -89,10 +91,11 @@ class MeSerializer(serializers.ModelSerializer):
 
     name = serializers.SerializerMethodField()
     phone = serializers.SerializerMethodField()
+    email_verified = serializers.SerializerMethodField()
 
     class Meta:
         model = Account
-        fields = ["email", "role", "name", "phone"]
+        fields = ["email", "role", "name", "phone", "email_verified"]
         read_only_fields = fields
 
     def validate_email(self, value: str) -> str:
@@ -103,6 +106,9 @@ class MeSerializer(serializers.ModelSerializer):
 
     def get_phone(self, obj: Account) -> str | None:
         return obj.customer.phone if obj.customer is not None else None
+
+    def get_email_verified(self, obj: Account) -> bool:
+        return obj.email_verified_at is not None
 
 
 class LogoutSerializer(serializers.Serializer):

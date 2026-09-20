@@ -37,6 +37,7 @@ The contract under test (docs/DECISIONS.md § "`/me/` endpoint (Stage 12)"):
 """
 
 import pytest
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import Account, AccountRole, Customer
@@ -88,6 +89,7 @@ def test_me_authenticated_returns_email_and_role(client, salon) -> None:
         "role": account.role,
         "name": None,
         "phone": None,
+        "email_verified": False,
     }
 
 
@@ -117,6 +119,7 @@ def test_me_with_a_linked_customer_returns_its_name_and_phone(client, salon) -> 
         "role": account.role,
         "name": "Alice",
         "phone": "+10000000000",
+        "email_verified": False,
     }
 
 
@@ -143,6 +146,58 @@ def test_me_unauthenticated_returns_401(client, salon) -> None:
     response = client.get(_me_url(salon.slug))
 
     assert response.status_code == 401
+
+
+def test_me_returns_email_verified_false_when_email_verified_at_is_none(client, salon) -> None:
+    """docs/DECISIONS.md § Stage 15 planning, item 5, "Extended 19.09.2026":
+    `MeSerializer` gains a read-only `email_verified` boolean derived from
+    `Account.email_verified_at is not None`."""
+    account = _make_account(salon, email="unverified@example.com")
+    assert account.email_verified_at is None
+    client.post(
+        _login_url(salon.slug),
+        {"email": account.email, "password": STRONG_PASSWORD},
+        format="json",
+    )
+
+    response = client.get(_me_url(salon.slug))
+
+    assert response.status_code == 200
+    assert response.data["email_verified"] is False
+
+
+def test_me_returns_email_verified_true_when_email_verified_at_is_set(client, salon) -> None:
+    """Same decision as above — the true branch."""
+    account = _make_account(salon, email="verified@example.com")
+    with tenant_context(salon.id):
+        account.email_verified_at = timezone.now()
+        account.save(update_fields=["email_verified_at"])
+    client.post(
+        _login_url(salon.slug),
+        {"email": account.email, "password": STRONG_PASSWORD},
+        format="json",
+    )
+
+    response = client.get(_me_url(salon.slug))
+
+    assert response.status_code == 200
+    assert response.data["email_verified"] is True
+
+
+def test_me_does_not_expose_email_verified_at(client, salon) -> None:
+    """The timestamp itself must never be exposed, only the derived boolean
+    (docs/DECISIONS.md § Stage 15 planning, item 5, "Extended 19.09.2026")."""
+    account = _make_account(salon, email="no-timestamp-leak@example.com")
+    client.post(
+        _login_url(salon.slug),
+        {"email": account.email, "password": STRONG_PASSWORD},
+        format="json",
+    )
+
+    response = client.get(_me_url(salon.slug))
+
+    assert response.status_code == 200
+    assert "email_verified_at" not in response.data
 
 
 def test_me_wrong_salon_cookie_returns_401_or_404(client, salon, other_salon) -> None:
