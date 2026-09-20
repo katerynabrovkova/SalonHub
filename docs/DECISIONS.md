@@ -2750,6 +2750,44 @@ workflow, during read-only recon ahead of building step 3.
   day strip, with no distinction between "outside the booking window,"
   "fully booked," or any other reason.** The API returns absence, not a
   reason code — existing backend behavior, not a gap to fix here.
+- **Known issue, recorded 20.09.2026: "Далі →" has no upper bound.** The
+  booking limit is `Salon.max_advance_days` (`backend/tenants/models.py`,
+  default 60, enforced in `scheduling/services.py`), but the frontend
+  never learns it — `AvailabilityView` returns only `available_times`,
+  and the salon info endpoint (`getSalonInfoPage.ts`) returns only
+  `currency`. Past the limit, every day looks identical to a fully
+  booked one (the ambiguity noted in the bullet above), and "Далі →"
+  keeps linking forward indefinitely. Not a dead end: the in-page "←
+  Назад" link (`DateTimeSelectionGrid.tsx`'s previous-window control,
+  added 20.09.2026) and the browser Back button both return the user to
+  a real window. Not fixed now. The fix has two parts: (a) the salon
+  info endpoint — deliberately narrow today — gains `max_advance_days`,
+  which widens that contract and needs its own decision and test; (b)
+  the frontend stops rendering "Далі →" once the next window would
+  start after today + `max_advance_days`.
+  Owner: the frontend design pass deferred to Stages 18-21 by the Stage
+  12 closure decision (11.09.2026); the date selector may be reworked
+  there. Trigger to do it earlier: any report of a user lost past the
+  booking window.
+- **Known issue, recorded 20.09.2026: `todayIsoDate()` uses the UTC
+  date, not the salon's local date.** Same convention this step already
+  used before today's `minDateFrom`/"← Назад" addition — not introduced
+  by it, not fixed by it. Near midnight (salon-local), the initial
+  window start and the "← Назад" floor can be one day off from the
+  salon's actual "today."
+- **Read-only check, recorded 20.09.2026: a `date_from` in the past is a
+  valid date, not an error.** `AvailabilityQuerySerializer.date_from` is
+  a bare `DateField` with no past-date/min-value validation, and
+  `compute_candidate_start_times`'s only range check
+  (`scheduling/services.py:206-209`) is `date_from > date_to`, which a
+  past `date_from` doesn't trigger. Confirmed against
+  `test_filter_candidates_by_booking_window_candidate_before_lower_bound_excluded`
+  (`backend/tests/test_scheduling_availability.py:450`): a candidate
+  before `lower_bound` (`now + min_lead_time_hours`) is silently
+  excluded, not rejected. So a past-`date_from` request returns 200 with
+  an empty (or partially empty) `available_times` — the same "every day
+  disabled, no reason given" ambiguity as the bullet above, not a
+  distinct error path.
 - **Selecting a time slot appends `slot=<iso datetime>` to the URL** and
   advances the flow to the next step. This value must be built with
   `encodeURIComponent()` (or equivalent): `available_times` are
