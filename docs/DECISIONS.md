@@ -3534,6 +3534,107 @@ Scope, in build order:
      confirmed it has no view-level try/except — `SlotNotOfferedError`/
      `SlotUnavailableError` propagate to `core.exceptions.exception_handler`
      — and confirmed it declares no `throttle_classes`.
+
+   Cycle D — frontend account-aware booking (step 4), decided 20.09.2026:
+
+   - Structure: `booking/page.tsx`'s step-4 branch fetches the summary
+     data server-side (`Promise.all`) and renders a new client wrapper
+     component; the wrapper renders a shared `BookingSummary` above one
+     of two forms. The existing `ContactInfoForm` stays the guest form;
+     its only change is the button label (see below).
+     `BookingContactInfoContext` is unchanged.
+   - Summary data (both flows): service name and duration via a new
+     frontend helper `getServiceDetailPage`, mirroring
+     `getSpecialistDetailPage` (`GET /services/<id>/`, `null` on 404),
+     always fetched; specialist name via `getSpecialistDetailPage` when
+     `specialist !== "any"`; for `"any"` the summary shows "Будь-який
+     спеціаліст". No backend change — `GET /services/<id>/`
+     (`ServiceDetailView`) already exists. Steps 2/3's data cannot be
+     reused because step 4 is a separate Server Component render with no
+     state carried over from earlier steps, so step 4 makes its own 1-2
+     requests.
+   - Slot formatting: one pure helper that takes the date and time from
+     the ISO string itself (the offset already carries the salon's wall
+     time), never `new Date(iso)` in the browser's timezone; the date is
+     formatted via `Date.UTC` from the `YYYY-MM-DD` part with
+     `timeZone: "UTC"`. Precedent: `DateTimeSelectionGrid`'s
+     `slot.slice(11, 16)`.
+   - States: while `AuthContext` is loading, render nothing (precedent:
+     `client/layout.tsx`); no session, role `"admin"`, or
+     `email_verified` false -> `BookingSummary` + the existing guest
+     form; role `"client"` + `email_verified` true + Customer linked ->
+     summary + a line with the account email + confirm button, no
+     fields; role `"client"` + verified + no Customer -> summary + email
+     read-only + name and phone fields (values kept in
+     `BookingContactInfoContext` across the step 4 -> 3 -> 4 round
+     trip). Role `"admin"` gets the guest form because whether salon
+     staff may book as customers was never decided; the backend does not
+     restrict role on `POST appointments/` (open question, not changed
+     here).
+   - Button label: "Підтвердити запис" in both forms. The guest form's
+     current label is "Забронювати" (`ContactInfoForm.tsx:140`); it is
+     changed in its own small commit before the rest of cycle D,
+     updating only the tests that match on the old label text, no other
+     assertion.
+   - Account-flow copy: the account email is shown read-only ("Email
+     береться з вашого облікового запису"); a line under the button:
+     "Місце тримається 15 хвилин. Оплатити запис можна в особистому
+     кабінеті." It appears in the account flow only, because a guest
+     goes straight to `/booking/pay`. No deposit amount is shown (no
+     Payment row exists before payment starts).
+   - "Customer linked" is derived from `me.name !== null` (`MeSerializer`
+     returns `null` only when no Customer is linked), in exactly one
+     helper function.
+   - `Me` type gains `email_verified: boolean`; existing `Me` fixtures
+     updated. This is a frontend-only correction, not a new backend
+     field: `MeSerializer` already returns `email_verified`
+     (`backend/accounts/serializers.py:94,98,110-111`, landed § Extended
+     19.09.2026 above) — the frontend `Me` type
+     (`frontend/src/lib/auth/Me.ts`) was simply never updated to include
+     it. This item's own earlier recon (planning this cycle) stated
+     `/me` "lacks" `email_verified`; that was true of the frontend type
+     only, never the backend contract — corrected here.
+   - Submit uses a new helper `createAccountBooking` built on
+     `apiRequest` (cookie credentials + CSRF), not the credential-less
+     `createGuestBooking`. Payload mirrors the guest one minus
+     `customer_email`; `name`/`phone` are sent only in the unlinked
+     case. Errors: 409 `SLOT_NO_LONGER_AVAILABLE` -> back to step 3 with
+     context intact (same as guest); 403 `email_not_verified` -> inline
+     message; anything else -> generic inline message, no navigation.
+   - Success: `AuthContext` gets a new `refresh` function that re-fetches
+     `auth/me/`, called after a successful booking and before redirecting
+     to `/client` (`me` is fetched once on mount, so without it a stale
+     `me` would keep showing the name/phone form and an empty profile).
+   - Dependency: an account booking lives in `pending_payment` for 15
+     minutes and can only be paid via item 14, so cycle D must not reach
+     production without item 14.
+   - Known issue, not fixed here: `client/page.tsx`'s `formatDateTime`
+     uses `new Date(iso).toLocaleString` in the browser's timezone, so a
+     client outside the salon's timezone sees a different wall time than
+     the salon's.
+
+   Recon checks done before writing this cycle:
+   - `ServiceDetailView.get_queryset()` (`backend/catalog/views.py:155-156`)
+     builds on `Service.objects` (the tenant-scoped default manager, not
+     `unscoped_objects`), so a service id belonging to another salon is
+     simply absent from the queryset and
+     `RetrieveUpdateDestroyAPIView`'s `get_object()` raises a plain 404
+     — correct behavior, but no existing test in
+     `backend/tests/test_catalog_api.py` exercises a cross-salon GET on
+     `services/<id>/` specifically (its cross-salon coverage is
+     `test_cross_salon_staff_include_inactive_gets_ordinary_public_result`
+     and `test_posting_a_category_id_from_another_salon_returns_400`,
+     neither of which is this case).
+   - `booking/page.tsx` resolves every invalid/unresolvable param the
+     same way: an invalid `entry`, a missing required id, `step === 1`,
+     a non-numeric service/specialist id, or `getSpecialistDetailPage`
+     returning `null` (§ step 2, entry=specialist) all call Next.js
+     `notFound()` (a 404 page) — the one different case is a missing
+     `SALON_SLUG_HEADER`, which renders a "platform still in
+     development" placeholder instead, unrelated to param validity. The
+     new summary fetch must follow the same convention: a `null` from
+     `getServiceDetailPage`/`getSpecialistDetailPage` in step 4 must
+     also call `notFound()`, matching every existing step's precedent.
 6. **Frontend: a `/verify-email` page.** Recon-confirmed gap: the
    verification email links to a frontend URL
    (`/verify-email#token=<token>`, built by `build_salon_frontend_url`
