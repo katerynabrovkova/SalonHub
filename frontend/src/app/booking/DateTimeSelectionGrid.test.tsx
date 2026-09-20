@@ -22,6 +22,7 @@ describe("DateTimeSelectionGrid", () => {
       <DateTimeSelectionGrid
         availabilityByDay={{ "2026-08-17": ["2026-08-17T09:00:00+03:00"] }}
         dateFrom={DATE_FROM}
+        minDateFrom={DATE_FROM}
         entry="service"
         service="5"
         specialist="any"
@@ -44,6 +45,7 @@ describe("DateTimeSelectionGrid", () => {
       <DateTimeSelectionGrid
         availabilityByDay={{ "2026-08-17": ["2026-08-17T09:00:00+03:00"] }}
         dateFrom={DATE_FROM}
+        minDateFrom={DATE_FROM}
         entry="service"
         service="5"
         specialist="any"
@@ -68,6 +70,7 @@ describe("DateTimeSelectionGrid", () => {
           "2026-08-18": ["2026-08-18T14:00:00+03:00"],
         }}
         dateFrom={DATE_FROM}
+        minDateFrom={DATE_FROM}
         entry="service"
         service="5"
         specialist="any"
@@ -89,6 +92,7 @@ describe("DateTimeSelectionGrid", () => {
       <DateTimeSelectionGrid
         availabilityByDay={{ "2026-08-17": ["2026-08-17T09:00:00+03:00"] }}
         dateFrom={DATE_FROM}
+        minDateFrom={DATE_FROM}
         entry="specialist"
         service="5"
         specialist="12"
@@ -108,6 +112,7 @@ describe("DateTimeSelectionGrid", () => {
       <DateTimeSelectionGrid
         availabilityByDay={{}}
         dateFrom={DATE_FROM}
+        minDateFrom={DATE_FROM}
         entry="service"
         service="5"
         specialist="any"
@@ -120,5 +125,60 @@ describe("DateTimeSelectionGrid", () => {
       "href",
       "/booking?entry=service&service=5&specialist=any&step=3&date_from=2026-08-31",
     );
+  });
+
+  it("test_previous_window_link_goes_back_14_days_and_preserves_params", () => {
+    render(
+      <DateTimeSelectionGrid
+        availabilityByDay={{}}
+        dateFrom="2026-09-01"
+        minDateFrom="2026-08-01"
+        entry="specialist"
+        service="5"
+        specialist="12"
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: /назад/i });
+
+    expect(link).toHaveAttribute(
+      "href",
+      "/booking?entry=specialist&service=5&specialist=12&step=3&date_from=2026-08-18",
+    );
+  });
+
+  it("test_previous_window_link_clamps_to_min_date_from", () => {
+    render(
+      <DateTimeSelectionGrid
+        availabilityByDay={{}}
+        dateFrom="2026-08-05"
+        minDateFrom="2026-08-01"
+        entry="service"
+        service="5"
+        specialist="any"
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: /назад/i });
+
+    expect(link).toHaveAttribute(
+      "href",
+      "/booking?entry=service&service=5&specialist=any&step=3&date_from=2026-08-01",
+    );
+  });
+
+  it("test_no_previous_window_link_when_date_from_equals_min_date_from", () => {
+    render(
+      <DateTimeSelectionGrid
+        availabilityByDay={{}}
+        dateFrom="2026-08-01"
+        minDateFrom="2026-08-01"
+        entry="service"
+        service="5"
+        specialist="any"
+      />,
+    );
+
+    expect(screen.queryByRole("link", { name: /назад/i })).not.toBeInTheDocument();
   });
 });

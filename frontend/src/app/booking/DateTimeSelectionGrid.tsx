@@ -35,6 +35,9 @@ interface DateTimeSelectionGridProps {
   availabilityByDay: Record<string, string[]>;
   /** YYYY-MM-DD, the first day of the currently loaded window. */
   dateFrom: string;
+  /** YYYY-MM-DD, the earliest window start "← Назад" is allowed to reach
+   * (today, per booking/page.tsx). */
+  minDateFrom: string;
   entry: "service" | "specialist";
   /** Service id as it already appears in the URL. */
   service: string;
@@ -70,6 +73,21 @@ function buildNextWindowUrl(
   return `/booking?${buildBaseParams(entry, service, specialist)}&step=3&date_from=${nextDateFrom}`;
 }
 
+/** Plain string comparison, not Date arithmetic — YYYY-MM-DD sorts
+ * lexicographically the same as chronologically, same reasoning
+ * groupAvailabilityByDay.ts's day-key slicing already relies on. */
+function buildPreviousWindowUrl(
+  entry: "service" | "specialist",
+  service: string,
+  specialist: string,
+  dateFrom: string,
+  minDateFrom: string,
+): string {
+  const candidate = addDays(dateFrom, -WINDOW_DAYS);
+  const previousDateFrom = candidate < minDateFrom ? minDateFrom : candidate;
+  return `/booking?${buildBaseParams(entry, service, specialist)}&step=3&date_from=${previousDateFrom}`;
+}
+
 function buildSlotUrl(
   entry: "service" | "specialist",
   service: string,
@@ -82,6 +100,7 @@ function buildSlotUrl(
 export default function DateTimeSelectionGrid({
   availabilityByDay,
   dateFrom,
+  minDateFrom,
   entry,
   service,
   specialist,
@@ -117,12 +136,19 @@ export default function DateTimeSelectionGrid({
         })}
       </div>
 
-      {/* Own row directly under the day strip, right-aligned — not inline
-          within the horizontal day-scroll and not below the time-slot grid
-          below. Text and (lack of) styling mirror services/page.tsx's
-          pagination `<Link>` exactly: a bare `<Link>`, no className, inside
-          a flex row that does the layout. */}
-      <nav className="flex justify-end">
+      {/* Own row directly under the day strip — not inline within the
+          horizontal day-scroll and not below the time-slot grid below. Text
+          and (lack of) styling mirror services/page.tsx's pagination
+          `<Link>` exactly: a bare `<Link>`, no className, inside a flex row
+          that does the layout. Right-aligned (justify-end) when "Далі →" is
+          the only link, same as before this prop existed; "← Назад" appearing
+          switches the row to justify-between so both ends stay put. */}
+      <nav className={`flex ${dateFrom > minDateFrom ? "justify-between" : "justify-end"}`}>
+        {dateFrom > minDateFrom ? (
+          <Link href={buildPreviousWindowUrl(entry, service, specialist, dateFrom, minDateFrom)}>
+            ← Назад
+          </Link>
+        ) : null}
         <Link href={buildNextWindowUrl(entry, service, specialist, dateFrom)}>Далі →</Link>
       </nav>
 

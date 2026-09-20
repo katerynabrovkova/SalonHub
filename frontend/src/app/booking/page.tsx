@@ -47,6 +47,27 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * True when `date` is YYYY-MM-DD and survives a `Date.UTC` round trip
+ * unchanged. `Date.UTC` silently normalizes an unreal calendar date (e.g.
+ * 2026-02-30 -> 2026-03-02) instead of rejecting it, so this re-slices the
+ * round-tripped ISO string back to YYYY-MM-DD and compares against the
+ * input -- a mismatch means the input wasn't a real date to begin with.
+ * The shape check runs first so a non-numeric string (e.g. "abc") never
+ * reaches `Date.UTC` at all, which would otherwise produce `NaN` and throw
+ * a `RangeError` on `.toISOString()`.
+ */
+function isValidCalendarDate(date: string): boolean {
+  if (!DATE_SHAPE.test(date)) {
+    return false;
+  }
+  const [year, month, day] = date.split("-").map(Number);
+  const roundTripped = new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
+  return roundTripped === date;
+}
+
 // An ISO datetime with a UTC offset (or literal "Z") -- the shape every real
 // `slot` value has, since it comes straight from `getAvailability`'s
 // `available_times` (already salon-local with an offset). Seconds are
@@ -198,7 +219,11 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
       notFound();
     }
 
-    const dateFrom = paramToString(params.date_from) ?? todayIsoDate();
+    const rawDateFrom = paramToString(params.date_from);
+    if (rawDateFrom !== undefined && !isValidCalendarDate(rawDateFrom)) {
+      notFound();
+    }
+    const dateFrom = rawDateFrom ?? todayIsoDate();
     const dateTo = addDays(dateFrom, WINDOW_DAYS - 1);
 
     const { availableTimes } = await getAvailability(
@@ -214,6 +239,7 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
         <DateTimeSelectionGrid
           availabilityByDay={groupAvailabilityByDay(availableTimes)}
           dateFrom={dateFrom}
+          minDateFrom={todayIsoDate()}
           entry={entry === "service" ? "service" : "specialist"}
           service={service}
           specialist={specialist}

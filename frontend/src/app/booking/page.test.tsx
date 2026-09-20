@@ -292,6 +292,83 @@ describe("BookingPage routing skeleton", () => {
     ).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
+  it("test_step3_non_date_date_from_calls_not_found", async () => {
+    mockSlug("bella-demo");
+
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          specialist: "any",
+          step: "3",
+          date_from: "abc",
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(mockedGetAvailability).not.toHaveBeenCalled();
+  });
+
+  it("test_step3_unreal_calendar_date_from_calls_not_found", async () => {
+    mockSlug("bella-demo");
+
+    // 2026-02-30 doesn't exist -- Date.UTC would silently normalize it to
+    // 2026-03-02 rather than rejecting it, which is exactly the bug this
+    // round-trip check exists to catch.
+    await expect(
+      BookingPage({
+        searchParams: searchParamsOf({
+          entry: "service",
+          service: "5",
+          specialist: "any",
+          step: "3",
+          date_from: "2026-02-30",
+        }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(mockedGetAvailability).not.toHaveBeenCalled();
+  });
+
+  it("test_step3_no_date_from_renders_with_no_previous_window_link", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00Z"));
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({ availableTimes: [] });
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({ entry: "service", service: "5", specialist: "any", step: "3" }),
+    });
+    render(element);
+    vi.useRealTimers();
+
+    expect(screen.getByRole("link", { name: /далі/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /назад/i })).not.toBeInTheDocument();
+  });
+
+  it("test_step3_far_future_date_from_renders_a_clamped_previous_window_link", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00Z"));
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({ availableTimes: [] });
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "any",
+        step: "3",
+        date_from: "2099-01-01",
+      }),
+    });
+    render(element);
+    vi.useRealTimers();
+
+    expect(screen.getByRole("link", { name: /назад/i })).toHaveAttribute(
+      "href",
+      "/booking?entry=service&service=5&specialist=any&step=3&date_from=2098-12-18",
+    );
+  });
+
   it("test_step_beyond_4_renders_not_implemented_placeholder", async () => {
     const element = await BookingPage({
       searchParams: searchParamsOf({ entry: "service", service: "5", step: "5" }),
