@@ -3399,6 +3399,116 @@ Scope, in build order:
    Line-reference check: the `BOOKING_CREATED` link citation above
    (`backend/notifications/services.py:222-226`) was verified against
    the file and is correct as written.
+
+   Cycle B — account booking endpoint contract, decided 20.09.2026:
+
+   - Endpoint: `POST appointments/`, same URL family and tenant
+     resolution as `appointments/mine/` (`GET`) and
+     `appointments/<id>/cancel/` (`POST`) (`backend/booking/urls.py`),
+     authenticated via the project-wide `AccountJWTCookieAuthentication`
+     + `IsAuthenticated` defaults — no explicit
+     `authentication_classes`/`permission_classes` override, same
+     posture as `AccountAppointmentListView`/`AccountAppointmentCancelView`.
+   - Request: the same fields as `GuestBookingRequestSerializer`
+     (`specialist` — a real pk or `"any"` — `service`, `start_datetime`)
+     but no `customer_email` field: the Customer's email always comes
+     from `request.user.email`, never the payload, per the Refined
+     19.09.2026 decision above. `customer_name`/`customer_phone` are
+     required only when `account.customer_id` is `None` (the
+     new-Customer sub-case); when a Customer is already linked, both
+     are ignored if sent — the linked Customer's existing `name`/`phone`
+     are never overwritten by this endpoint.
+   - Response: 201, `{"appointment": <AppointmentCreatedSerializer
+     data>}` — the same nested shape and fields
+     (`id`/`status`/`start_datetime`/`end_datetime`) as the guest
+     endpoint's 201 body, minus the `guest_token` key (no guest token is
+     issued for an account booking, per the Refined 19.09.2026 decision
+     above).
+   - Errors:
+     - Unauthenticated: 401, same global default as every other account
+       endpoint — no view-level check needed.
+     - Unverified Account (`email_verified_at is None`): 403 with a
+       stable, machine-readable `code: "email_not_verified"` body,
+       identical whether or not a Customer with that email already
+       exists in the salon — same anti-enumeration reasoning as the
+       Refined 19.09.2026 decision's `customer_salon_email_uniq` point;
+       a distinct response for the two cases would itself leak whether
+       the email belongs to an existing Customer.
+     - Missing `customer_name`/`customer_phone` in the unlinked-Customer
+       case: 400 with the normal DRF field-error body.
+     - Slot/domain errors (`SlotNotOfferedError` -> 400,
+       `SlotUnavailableError` -> 409): the exact same mapping as
+       `GuestBookingCreateView`, via the same
+       `core.exceptions.exception_handler` — reused, not reimplemented,
+       since both views wrap the same `create_appointment`/
+       `create_appointment_for_any_specialist` core.
+     - Throttling: none. `REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"]`
+       (`backend/config/settings/base.py:167`) globally installs
+       `ScopedRateThrottle`, but `ScopedRateThrottle.allow_request`
+       returns `True` unconditionally for any view with no
+       `throttle_scope` attribute set — the global class alone throttles
+       nothing. `GuestBookingCreateView`
+       (`backend/booking/views.py:302-348`) declares no
+       `throttle_scope`, unlike the guest-token views
+       (`GuestAppointmentDetailView`/`GuestAppointmentCancelView`/
+       `GuestAppointmentPayView`, all `throttle_scope = "guest_token"`,
+       rate `"20/min"` per `DEFAULT_THROTTLE_RATES`
+       (`backend/config/settings/base.py:176-182`)). So the guest
+       booking-creation endpoint is unthrottled today, and the new
+       account endpoint matches: also unthrottled.
+   - Order of checks in the view, in this exact sequence: (1)
+     authentication (`AccountJWTCookieAuthentication` + the global
+     `IsAuthenticated`, -> 401), (2) the unverified-Account check (->
+     403 `email_not_verified`), (3) request-body validation (->
+     400), (4) the `transaction.atomic()` that resolves/links the
+     Customer and creates the appointment. The 403 check must run
+     before body validation — never folded into a serializer
+     `validate()` — so that a validation error (e.g. missing
+     `customer_name`) never differs depending on whether the Account is
+     verified or on whether a Customer exists for its email; an
+     unverified Account always gets the same 403 regardless of what
+     else is wrong with the request body.
+   - Dependency: this item's whole safety argument (Refined 19.09.2026
+     above — linking an unproven email to an existing Customer would
+     expose that Customer's history) rests on the invariant
+     "`email_verified_at` set implies the Account's current email is
+     proven." That invariant is not self-maintaining — see item 8 below,
+     which must reset `email_verified_at` to `None` and require
+     re-verification whenever the Account's email changes, or a changed,
+     unverified email would keep reading as verified here.
+   - Known issue, not fixed by this item: no rate limiting on booking
+     creation, guest or account endpoint (see the Throttling point
+     above) — a 15-minute slot hold (`create_appointment`'s PENDING
+     window) can be created without limit by either flow. Not addressed
+     here.
+   - Concurrency: the `Account` row is locked with `select_for_update()`
+     inside the same `transaction.atomic()` that resolves/links the
+     Customer and creates the appointment (already decided, Refined
+     19.09.2026 above) — restated here as this item's explicit
+     concurrency contract: two simultaneous first bookings from the same
+     Account converge on one Customer (the second request's
+     `select_for_update()` blocks until the first commits, then sees
+     `account.customer_id` already set and reuses it, never racing
+     `get_or_create` into two Customers); a second booking for the same
+     slot still gets the normal slot-conflict error
+     (`SlotUnavailableError` -> 409) from the shared `create_appointment`
+     core, unaffected by the Account-row lock.
+   - Out of scope for this cycle: the `BOOKING_CREATED` notification
+     link for account bookings is Cycle C's scope, not this endpoint's.
+
+   Recon checks done before writing this contract:
+   - `backend/booking/urls.py`: confirmed the `appointments/mine/` /
+     `appointments/<id>/cancel/` URL family and naming convention.
+   - `GuestBookingRequestSerializer` (`backend/booking/serializers.py:208-236`):
+     confirmed its exact field set (`specialist`, `service`,
+     `start_datetime`, `customer_name`, `customer_email`,
+     `customer_phone`) and that `specialist`/`service` are
+     `PrimaryKeyRelatedField`s rebound to tenant-scoped querysets in
+     `__init__`.
+   - `GuestBookingCreateView` (`backend/booking/views.py:302-348`):
+     confirmed it has no view-level try/except — `SlotNotOfferedError`/
+     `SlotUnavailableError` propagate to `core.exceptions.exception_handler`
+     — and confirmed it declares no `throttle_classes`.
 6. **Frontend: a `/verify-email` page.** Recon-confirmed gap: the
    verification email links to a frontend URL
    (`/verify-email#token=<token>`, built by `build_salon_frontend_url`
@@ -3433,10 +3543,17 @@ Scope, in build order:
 8. **Backend + frontend: change email.** Must (a) require verification
    of the new email address before it becomes active — reuse the
    existing token-signing pattern (`accounts/tokens.py`) rather than
-   inventing a new one, if it fits (recon first to confirm); and (b)
-   keep the old email valid for login until the new one is verified —
-   an in-flight, unverified email change must never lock the account
-   holder out. Surfaced in the profile panel (item 7).
+   inventing a new one, if it fits (recon first to confirm); (b) keep
+   the old email valid for login until the new one is verified — an
+   in-flight, unverified email change must never lock the account
+   holder out; and (c) preserve the invariant `email_verified_at`
+   non-`None` only while the Account's *current* email is proven — set
+   it at the moment the new email's own verification succeeds and
+   becomes active per (a); if any implementation instead swaps the
+   email before verification, it must reset `email_verified_at` to
+   `None` in that same transaction. Item 5's account-aware booking (§
+   Stage 15 planning, item 5, Cycle B) relies on this invariant.
+   Surfaced in the profile panel (item 7).
 9. **Backend + frontend: change password (authenticated).** Requires
    the current password — distinct from the existing unauthenticated
    `PasswordResetConfirmView` flow (which stays as-is for "forgot
