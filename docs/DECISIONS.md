@@ -3579,6 +3579,40 @@ Scope, in build order:
    `None` in that same transaction. Item 5's account-aware booking (§
    Stage 15 planning, item 5, Cycle B) relies on this invariant.
    Surfaced in the profile panel (item 7).
+
+   Note, recorded before implementation: `Account.email` and
+   `Customer.email` are two separate columns that happen to be equal
+   today only because nothing changes `Account.email` yet
+   (`create_account_appointment` derives the Customer from
+   `account.email` at booking time, per item 5's Cycle B). Once this
+   item lets an Account change its email, the two columns diverge — the
+   Customer keeps the old address until something else updates it,
+   which nothing in this codebase does today.
+
+   Consequence this item must decide *before* implementation (recon the
+   actual current behavior first, don't assume): a later Account
+   registered and verified with that same old address would, in
+   `create_account_appointment`, `get_or_create` the Customer by
+   `(salon, account.email)` and find the Customer already linked to the
+   first Account. `Account.customer`'s `OneToOneField` uniqueness
+   constraint then raises `IntegrityError` on the attempted relink,
+   which is not translated by `core.exceptions.exception_handler` and
+   surfaces as a bare 500. The outer `transaction.atomic()` rolls back,
+   so no data leaks or gets overwritten — but the requesting user still
+   sees a 500, not a clean error.
+
+   This item's decision must cover: (a) whether `Customer.email` follows
+   the Account's email change (keeping the two columns in sync going
+   forward), and (b) what `create_account_appointment` should do when
+   the Customer it finds is already linked to a *different* Account — a
+   neutral, generic error, never one that reveals to the caller that
+   another Account exists for that email (same anti-enumeration
+   reasoning as the Refined 19.09.2026 entry's `email_not_verified`
+   response).
+
+   Not reachable today — `Account.email` cannot change by any existing
+   path — so nothing is fixed in item 5 for this; it is this item's scope
+   once it lands.
 9. **Backend + frontend: change password (authenticated).** Requires
    the current password — distinct from the existing unauthenticated
    `PasswordResetConfirmView` flow (which stays as-is for "forgot
