@@ -48,6 +48,17 @@ current stage. `Stage N` references elsewhere point at this list.
 22. Productionization — Docker, CI/CD, README
 23. Production-readiness audit (fresh session)
 
+**Clarification 20.09.2026 (no stage added or renumbered):** Stage 18
+begins with the design system (color tokens, typography scale, shared
+component library), which the Stage 12 closure decision deferred to
+Stages 18-21; the admin UI of Stages 18-21 is built on top of it. The
+frontend design pass over the client-facing pages (`/services`,
+`/specialists`, `/booking`, `/client`), the full apex marketing landing
+page, and UI-chrome i18n also belong to Stages 18-21. The exact scope of
+that pass is decided when Stage 18 starts, using the salon-site visual
+references. Known issues waiting for this pass: the unbounded "Далі →"
+on booking step 3 (see its known-issue entry).
+
 ## Open questions
 
 Not yet decided — recorded so they surface before the stages that depend
