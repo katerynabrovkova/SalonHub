@@ -37,6 +37,25 @@ def _service_detail_url(salon, service) -> str:
     return f"/api/v1/salons/{salon.slug}/services/{service.id}/"
 
 
+@pytest.fixture
+def other_salon_service_category(other_salon):
+    with tenant_context(other_salon.id):
+        return ServiceCategory.objects.create(salon=other_salon, name={"en": "Nails"})
+
+
+@pytest.fixture
+def other_salon_service(other_salon, other_salon_service_category):
+    with tenant_context(other_salon.id):
+        return Service.objects.create(
+            salon=other_salon,
+            category=other_salon_service_category,
+            name={"en": "Foreign Manicure"},
+            duration_minutes=60,
+            price="500.00",
+            buffer_minutes=15,
+        )
+
+
 # --- public reads / write authorization ------------------------------------
 
 
@@ -89,6 +108,24 @@ def test_cross_salon_staff_include_inactive_gets_ordinary_public_result(
 
     assert response.status_code == 200
     assert response.data["results"] == []
+
+
+def test_cross_salon_get_on_service_detail_returns_404_not_the_foreign_service(
+    client, salon, other_salon, other_salon_service
+):
+    # Control: the same id, fetched through its own salon's tenant, succeeds
+    # -- proves the id is real and the URL shape is right, so the 404 below
+    # can only be tenant isolation, not a typo'd id or path.
+    control_response = client.get(_service_detail_url(other_salon, other_salon_service))
+    assert control_response.status_code == 200
+    assert control_response.data["id"] == other_salon_service.id
+
+    response = client.get(_service_detail_url(salon, other_salon_service))
+
+    assert response.status_code == 404
+    body = response.content.decode()
+    assert "Foreign Manicure" not in body
+    assert "500.00" not in body
 
 
 # --- soft delete -------------------------------------------------------------
