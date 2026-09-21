@@ -228,9 +228,8 @@ def test_cancel_of_an_already_cancelled_appointment_surfaces_the_services_except
 
 
 def test_guest_token_is_rejected_on_a_non_guest_endpoint(client, salon, token):
-    response = client.post(
-        f"/api/v1/salons/{salon.slug}/auth/logout/",
-        {"refresh": "irrelevant"},
+    response = client.get(
+        f"/api/v1/salons/{salon.slug}/auth/me/",
         HTTP_X_GUEST_TOKEN=token,
     )
 

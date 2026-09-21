@@ -186,7 +186,9 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     # 15 min access / 7 day refresh, rotating with blacklist-after-rotation:
     # a stolen refresh token is single-use, dead the moment the legitimate
-    # client rotates it. docs/DECISIONS.md § Stage 3 decisions.
+    # client rotates it. The auth cookies' max-age follows these lifetimes:
+    # docs/DECISIONS.md, Session renewal and session lifetime, decided
+    # 21.09.2026.
     "ACCESS_TOKEN_LIFETIME": dt.timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": dt.timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,

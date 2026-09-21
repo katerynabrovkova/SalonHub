@@ -9,13 +9,17 @@ cookie turns a public request into ``401 token_not_valid``. The planned fix
 
 Tests 1-6: for each public view, a request carrying a garbage cookie must get
 exactly the status and error code the same request gets with no cookie, and
-never ``token_not_valid``. Tests 7-8 guard against over-fixing: ``MeView`` and
-``LogoutView`` must keep rejecting an invalid cookie with 401 (they already do).
+never ``token_not_valid``. Test 7 guards against over-fixing: ``MeView`` must keep
+rejecting an invalid cookie with 401. Test 8 pins the new logout contract
+(docs/DECISIONS.md, Session renewal and session lifetime, decided 21.09.2026):
+``LogoutView`` no longer authenticates, so an invalid cookie still logs out (205).
 """
 
 import datetime as dt
 
 import pytest
+from django.middleware.csrf import get_token
+from django.test import RequestFactory
 from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
@@ -43,7 +47,9 @@ def _expired_access_token() -> str:
     token = AccessToken()
     token["user_id"] = "1"
     token["identity_model"] = "account"
-    token.set_exp(from_time=timezone.now() - dt.timedelta(days=1), lifetime=dt.timedelta(minutes=15))
+    token.set_exp(
+        from_time=timezone.now() - dt.timedelta(days=1), lifetime=dt.timedelta(minutes=15)
+    )
     return str(token)
 
 
@@ -134,7 +140,16 @@ def test_me_with_invalid_access_cookie_is_still_401(salon) -> None:
     assert response.status_code == 401
 
 
-def test_logout_with_invalid_access_cookie_is_still_401(salon) -> None:
-    response = _client_with_cookie(GARBAGE).post(_url(salon.slug, "logout"), {}, format="json")
+def test_logout_with_invalid_access_cookie_still_logs_out(salon) -> None:
+    # Session cycle S1 (docs/DECISIONS.md § Session renewal, decision 3): logout
+    # no longer authenticates, so a stale access cookie must not block it.
+    client = APIClient(enforce_csrf_checks=True)
+    client.cookies[ACCESS_COOKIE] = GARBAGE
+    token = get_token(RequestFactory().get("/"))
+    client.cookies["csrftoken"] = token
 
-    assert response.status_code == 401
+    response = client.post(_url(salon.slug, "logout"), {}, format="json", HTTP_X_CSRFTOKEN=token)
+
+    assert response.status_code == 205
+    assert response.cookies[ACCESS_COOKIE].value == ""
+    assert int(response.cookies[ACCESS_COOKIE]["max-age"]) == 0

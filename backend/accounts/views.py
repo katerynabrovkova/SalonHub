@@ -19,18 +19,21 @@ creates a `role=client` unverified `Account`. `VerifyEmailView` (Stage
 3-R.D.4) consumes the token that registration mails out; password-reset and
 resend-verification follow in 3-R.D.5.
 
-Login and refresh opt out of the project-wide IsAuthenticated default with
-AllowAny; logout relies on that default deliberately — it needs a valid
-access token to blacklist a refresh token (docs/DECISIONS.md § Stage 3
-decisions).
+Login, refresh and logout opt out of the project-wide IsAuthenticated default
+with AllowAny. Logout also opts out of authentication: it never needs a valid
+access token. It always clears all session cookies and answers 205, and it
+blacklists the refresh token when one is present and valid (an invalid,
+expired or already blacklisted one is ignored). It stays CSRF protected via
+`enforce_csrf_on_unsafe`. See docs/DECISIONS.md, Session renewal and session
+lifetime, decided 21.09.2026.
 
 Stage 12 (docs/DECISIONS.md § Stage 12) moved the session onto two httpOnly
 cookies set by these views: `LoginView`/`RefreshView` write an `access_token`
 cookie (`Path=/`) and a `refresh_token` cookie (scoped to this salon's
 `auth/refresh/` path) and return an empty JSON body; `RefreshView` and
 `LogoutView` read the refresh token from its cookie, not the request body;
-`LogoutView` also clears both cookies. Cookie mechanics live in
-`accounts/cookies.py`. Unsafe cookie-authenticated requests are CSRF-checked
+`LogoutView` also clears them (and the `session_hint` cookie). Cookie mechanics
+live in `accounts/cookies.py`. Unsafe cookie-authenticated requests are CSRF-checked
 via Django's engine — `AccountJWTCookieAuthentication` does this for
 Account-authenticated writes; the three AllowAny cookie-driven views here call
 `accounts.csrf.enforce_csrf_on_unsafe` themselves (the auth class never runs
@@ -397,17 +400,27 @@ class MeView(APIView):
 
 
 class LogoutView(APIView):
+    """
+    Always clears the session cookies and answers 205; blacklists the refresh
+    token when one is present and valid (docs/DECISIONS.md, Session renewal
+    and session lifetime, decided 21.09.2026, decision 3). Authentication is
+    off, so an expired access token cannot block logout; the view-level CSRF
+    check below is therefore the only CSRF guard and must stay first.
+    """
+
+    authentication_classes = ()
+    permission_classes = [AllowAny]
+
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
-        # See LoginView.post: AllowAny/global-default + cookie-driven, CSRF
-        # enforced here rather than by the authentication class.
         enforce_csrf_on_unsafe(request)
-        response = Response(status=status.HTTP_205_RESET_CONTENT)
         raw_refresh = request.COOKIES.get(REFRESH_COOKIE)
-        try:
-            if raw_refresh:
+        if raw_refresh:
+            try:
                 RefreshToken(raw_refresh).blacklist()
-        except TokenError as exc:
-            clear_auth_cookies(response, salon_slug=str(kwargs["slug"]))
-            raise InvalidOrExpiredTokenError("Invalid or already-used refresh token.") from exc
+            except TokenError:
+                # Invalid, expired or already blacklisted: nothing to revoke,
+                # and the caller learns nothing about the token.
+                pass
+        response = Response(status=status.HTTP_205_RESET_CONTENT)
         clear_auth_cookies(response, salon_slug=str(kwargs["slug"]))
         return response
