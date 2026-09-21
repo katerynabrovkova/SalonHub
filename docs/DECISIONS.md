@@ -3938,3 +3938,20 @@ Known issues, recorded and not fixed here:
   21.09.2026), but the `ScopedRateThrottle` of register, password-reset
   request and resend-verification now keys on the IP instead of the user pk,
   even for a logged-in caller.
+
+### Slot-taken notice on step 3, decided 21.09.2026
+
+Found in manual testing: when a slot is taken by someone else, both booking
+forms send the user back to step 3 with no explanation, so it looks like a bug.
+
+- The slot-gone branch of `ContactInfoForm` and `AccountBookingForm` redirects to
+  `buildSlotTakenUrl` (next to `buildStep3Url`, which is unchanged): the step-3 URL
+  plus `&notice=slot_taken`.
+- `booking/page.tsx` step 3 sets `slotTaken` only when `notice` equals exactly
+  `slot_taken`. Any other value is ignored (no `notFound`, no message) and the value
+  is never rendered.
+- `DateTimeSelectionGrid` takes an optional `slotTaken` (default false) and shows a
+  `role="status"` line above the day strip. Its "Далі" and "Назад" links do not carry
+  the notice, so it disappears once the user pages on.
+- The four slot-gone tests (409 and 400 `SLOT_NOT_OFFERED`, both forms) had their
+  expected URL changed on purpose to include the notice: a contract change.

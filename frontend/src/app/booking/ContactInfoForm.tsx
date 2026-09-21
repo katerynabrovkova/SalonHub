@@ -52,6 +52,18 @@ export function buildStep3Url(
   return `/booking?entry=${entry}&service=${service}&specialist=${specialist}&step=3&date_from=${dateFromOf(startDatetime)}`;
 }
 
+/** Step-3 URL for the slot-gone branch: `buildStep3Url` plus the notice the
+ * step-3 page turns into "this time was just taken" (docs/DECISIONS.md,
+ * "Slot-taken notice on step 3", decided 21.09.2026). */
+export function buildSlotTakenUrl(
+  entry: "service" | "specialist",
+  service: string,
+  specialist: string,
+  startDatetime: string,
+): string {
+  return `${buildStep3Url(entry, service, specialist, startDatetime)}&notice=slot_taken`;
+}
+
 export default function ContactInfoForm({
   slug,
   entry,
@@ -90,7 +102,7 @@ export default function ContactInfoForm({
       return;
     } catch (err) {
       if (isSlotGoneError(err)) {
-        router.push(buildStep3Url(entry, service, specialist, startDatetime));
+        router.push(buildSlotTakenUrl(entry, service, specialist, startDatetime));
         return;
       }
       setError("Something went wrong. Please try again.");

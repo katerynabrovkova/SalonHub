@@ -608,6 +608,71 @@ describe("BookingPage routing skeleton", () => {
       }),
     ).rejects.toThrow("NEXT_NOT_FOUND");
   });
+  it("test_step3_notice_slot_taken_renders_the_slot_taken_message", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00Z"));
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({ availableTimes: [] });
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "any",
+        step: "3",
+        notice: "slot_taken",
+      }),
+    });
+    render(element);
+    vi.useRealTimers();
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "На жаль, цей час щойно зайняли. Оберіть, будь ласка, інший.",
+    );
+  });
+
+  it("test_step3_garbage_notice_renders_the_grid_with_no_message", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00Z"));
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({ availableTimes: [] });
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "any",
+        step: "3",
+        notice: "garbage",
+      }),
+    });
+    render(element);
+    vi.useRealTimers();
+
+    expect(screen.getByRole("link", { name: /далі/i })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText(/garbage/)).not.toBeInTheDocument();
+  });
+
+  it("test_step3_no_notice_renders_no_message", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00Z"));
+    mockSlug("bella-demo");
+    mockedGetAvailability.mockResolvedValueOnce({ availableTimes: [] });
+
+    const element = await BookingPage({
+      searchParams: searchParamsOf({
+        entry: "service",
+        service: "5",
+        specialist: "any",
+        step: "3",
+      }),
+    });
+    render(element);
+    vi.useRealTimers();
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
 });
 
 // Red phase (docs/DECISIONS.md § Stage 14 implementation decisions). None

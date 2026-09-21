@@ -181,4 +181,70 @@ describe("DateTimeSelectionGrid", () => {
 
     expect(screen.queryByRole("link", { name: /назад/i })).not.toBeInTheDocument();
   });
+
+  it("test_slot_taken_true_renders_the_notice_with_role_status", () => {
+    render(
+      <DateTimeSelectionGrid
+        availabilityByDay={{}}
+        dateFrom={DATE_FROM}
+        minDateFrom={DATE_FROM}
+        entry="service"
+        service="5"
+        specialist="any"
+        slotTaken
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "На жаль, цей час щойно зайняли. Оберіть, будь ласка, інший.",
+    );
+  });
+
+  it("test_slot_taken_omitted_or_false_renders_no_notice", () => {
+    const { rerender } = render(
+      <DateTimeSelectionGrid
+        availabilityByDay={{}}
+        dateFrom={DATE_FROM}
+        minDateFrom={DATE_FROM}
+        entry="service"
+        service="5"
+        specialist="any"
+      />,
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    rerender(
+      <DateTimeSelectionGrid
+        availabilityByDay={{}}
+        dateFrom={DATE_FROM}
+        minDateFrom={DATE_FROM}
+        entry="service"
+        service="5"
+        specialist="any"
+        slotTaken={false}
+      />,
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("test_next_and_previous_links_do_not_carry_the_notice_param", () => {
+    render(
+      <DateTimeSelectionGrid
+        availabilityByDay={{}}
+        dateFrom="2026-09-01"
+        minDateFrom="2026-08-01"
+        entry="service"
+        service="5"
+        specialist="any"
+        slotTaken
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /далі/i }).getAttribute("href")).not.toContain(
+      "notice",
+    );
+    expect(screen.getByRole("link", { name: /назад/i }).getAttribute("href")).not.toContain(
+      "notice",
+    );
+  });
 });

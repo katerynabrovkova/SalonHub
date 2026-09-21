@@ -136,7 +136,7 @@ describe("ContactInfoForm", () => {
 
     await waitFor(() =>
       expect(pushMock).toHaveBeenCalledWith(
-        "/booking?entry=service&service=5&specialist=any&step=3&date_from=2026-08-17",
+        "/booking?entry=service&service=5&specialist=any&step=3&date_from=2026-08-17&notice=slot_taken",
       ),
     );
 
@@ -200,7 +200,7 @@ describe("ContactInfoForm", () => {
 
     await waitFor(() =>
       expect(pushMock).toHaveBeenCalledWith(
-        "/booking?entry=service&service=5&specialist=any&step=3&date_from=2026-08-17",
+        "/booking?entry=service&service=5&specialist=any&step=3&date_from=2026-08-17&notice=slot_taken",
       ),
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

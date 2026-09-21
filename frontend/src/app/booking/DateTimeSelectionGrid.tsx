@@ -43,6 +43,9 @@ interface DateTimeSelectionGridProps {
   service: string;
   /** Specialist id, or "any", as it already appears in the URL. */
   specialist: string;
+  /** True when the user was sent back here because the slot they chose was
+   * taken meanwhile (booking/page.tsx, from `notice=slot_taken`). */
+  slotTaken?: boolean;
 }
 
 /**
@@ -104,6 +107,7 @@ export default function DateTimeSelectionGrid({
   entry,
   service,
   specialist,
+  slotTaken = false,
 }: DateTimeSelectionGridProps) {
   const router = useRouter();
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -118,6 +122,9 @@ export default function DateTimeSelectionGrid({
 
   return (
     <div className="flex flex-col gap-6">
+      {slotTaken && (
+        <p role="status">На жаль, цей час щойно зайняли. Оберіть, будь ласка, інший.</p>
+      )}
       <div className="flex gap-2 overflow-x-auto">
         {days.map((day) => {
           const hasSlots = (availabilityByDay[day]?.length ?? 0) > 0;

@@ -254,6 +254,7 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
           entry={entry === "service" ? "service" : "specialist"}
           service={service}
           specialist={specialist}
+          slotTaken={paramToString(params.notice) === "slot_taken"}
         />
       </main>
     );

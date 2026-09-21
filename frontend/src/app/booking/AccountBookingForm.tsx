@@ -27,7 +27,7 @@ import { createAccountBooking } from "@/lib/booking/createAccountBooking";
 import { isSlotGoneError } from "@/lib/booking/isSlotGoneError";
 
 import { useBookingContactInfo } from "./BookingContactInfoContext";
-import { buildStep3Url } from "./ContactInfoForm";
+import { buildSlotTakenUrl } from "./ContactInfoForm";
 
 interface AccountBookingFormProps {
   slug: string;
@@ -76,7 +76,7 @@ export default function AccountBookingForm({
       return;
     } catch (err) {
       if (isSlotGoneError(err)) {
-        router.push(buildStep3Url(entry, service, specialist, startDatetime));
+        router.push(buildSlotTakenUrl(entry, service, specialist, startDatetime));
         return;
       }
       if (err instanceof ApiError && err.code === "email_not_verified") {
