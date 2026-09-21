@@ -3819,3 +3819,122 @@ Explicitly out of scope for Stage 15:
   guest `Customer` to an `Account` by matching email at verification
   time, covering the guest→Account linking need without a separate claim
   flow.
+
+### Session renewal and session lifetime, decided 21.09.2026
+
+Agreed in discussion after manual testing with a real backend. Extends
+"Cookie mechanism resolved" (§ Stage 12) and Stage 15 planning item 12
+(route protection); it does not edit either. The token lifetimes (15 min
+access, 7 day rotating refresh with blacklist-after-rotation) were not
+recorded in this file before (only in `config/settings/base.py`), so this
+entry is their first record here.
+
+Why: found in manual testing.
+
+- The access token lives 15 minutes and the frontend never calls
+  `auth/refresh/`. After 15 minutes `/client` shows a generic load error,
+  and the next reload bounces the user to `/login`.
+- Both auth cookies are session cookies (no `max-age`), so the "7 day
+  refresh token" holds only while the browser stays open.
+- `LogoutView` authenticates first. With an expired access token it answers
+  401, clears no cookies and does not blacklist the refresh token, which
+  stays alive server-side. Any silent renewal would then resurrect a
+  logged-out user.
+
+Decisions:
+
+1. **Session lifetime.** The `refresh_token` cookie gets `max-age` equal to
+   `REFRESH_TOKEN_LIFETIME` (7 days) and the `access_token` cookie gets
+   `max-age` equal to `ACCESS_TOKEN_LIFETIME` (15 minutes). Both are re-set
+   on every refresh. Tradeoff accepted: on a shared computer a person stays
+   signed in for up to 7 days unless they log out, so logout must really
+   work (item 3). A "remember me" checkbox is out of scope.
+2. **Presence hint cookie.** The backend sets a third cookie next to the two
+   auth cookies. It is NOT httpOnly, has the same `max-age` as the refresh
+   cookie, holds no secret (a constant value such as `"1"`), and is cleared
+   together with the others on logout. Attributes: `Path=/` (so the
+   frontend can read it on every page), host-only like the other cookies,
+   and `SameSite` and `Secure` equal to the access cookie's settings. The
+   frontend reads it from
+   `document.cookie`, as it already reads `csrftoken`, to decide whether a
+   silent refresh is worth trying. The backend never trusts it and it is
+   never used for authorization, so it does not conflict with "never in
+   JS-readable state" in § Authenticated session transport (that rule is
+   about tokens). Reason: most visitors are guests with no refresh cookie,
+   so without the hint every guest page load would cost a guaranteed failing
+   refresh request and log noise. If a refresh fails, the frontend deletes
+   the hint cookie itself.
+3. **Logout.** `LogoutView` no longer requires a valid access token. It
+   always clears all cookies and, when a refresh token is present,
+   blacklists it, answering 205 either way. A refresh token that is present
+   but invalid, expired or already blacklisted is ignored: the cookies are
+   still cleared and the answer is still 205. It stays CSRF protected (cookie
+   plus header, § CSRF protection resolved). This deliberately replaces the
+   earlier requirement that logout authenticates first, which was never a
+   recorded decision: it came from the project-default authentication, and
+   the `accounts/views.py` module docstring describes it as deliberate
+   ("needs a valid access token to blacklist a refresh token", citing a
+   Stage 3 entry that does not exist in this file). That docstring is
+   updated in the same change as the code. The test
+   `test_logout_with_invalid_access_cookie_is_still_401` (written
+   21.09.2026 as an over-fix guard) has its expectation changed
+   accordingly.
+4. **Renewal is reactive, inside `apiRequest`.** On a 401 from a credentialed
+   request, run one refresh and retry the original request once. Safe for
+   unsafe methods too, because a 401 from authentication means the action
+   never ran. Never retried: `auth/login`, `auth/refresh`, `auth/logout`,
+   `auth/csrf`. The initial `auth/me` on mount goes through the same path,
+   so a returning user after 15+ minutes is silently signed back in, but
+   only when the hint cookie is present.
+5. **One refresh in flight per tab**, shared by all requests waiting on a
+   401. Cross-tab races are accepted (see known issues).
+6. **When refresh fails.** Only a definitive 401 from `auth/refresh` means
+   "session lost". A network error, a timeout or any 5xx from the refresh
+   request must NOT log the user out: `me` and the hint cookie stay, and the
+   original request fails with its own error, so a later attempt can
+   succeed. If the refresh succeeded and the retried original request
+   answers 401 again, that also means session lost (the fresh token was just
+   rejected, for example a deactivated account); it is never retried a
+   second time. On session lost, `me` is cleared through a window event that
+   `AuthProvider` listens to, and the hint cookie is deleted. `/client`
+   redirects to `/login` carrying the current path in a `next` query
+   parameter, and after a successful login the user is sent to `next`.
+   `next` is accepted only as a same-site path: it must start with a single
+   `/`, must not start with `//`, must not contain a backslash or a scheme,
+   and must not point at `/login` itself. Anything else falls back to
+   today's default (`/client`, or `/admin` for staff). The account booking
+   form simply degrades to the guest form when `me` becomes null.
+7. **Guests never call refresh** (no hint cookie, no request).
+8. **No throttle scope is added to refresh** in this change.
+9. **Order of work**, each cycle with its own tests and commit:
+   S1 backend (cookie lifetimes, hint cookie, `LogoutView`; includes a test
+   proving that a refresh issues a new refresh token whose expiry is about
+   7 days from now, not inherited from the old token, and that all three
+   cookies get fresh `max-age` values); S2 frontend
+   (`apiRequest` retry and single-flight, mount check, session-expired
+   event); S3 (login `next` parameter and redirects). Item 14 ("Оплатити")
+   starts after S3, since a payment flow needs a session that does not die
+   mid-payment.
+
+Known issues, recorded and not fixed here:
+
+- Token rotation is not atomic. Two truly parallel refreshes with the same
+  token both succeed (reproduced 21.09.2026), and a request sent after a
+  rotation with the old token gets 401. Within one tab the single in-flight
+  refresh avoids it; across tabs it is accepted (worst case: one re-login).
+  The Web Locks API is a possible later fix.
+- `auth/refresh` has no throttle.
+- The session is sliding: every refresh issues a new refresh token with a
+  fresh 7 day expiry, so an active user is never signed out and there is no
+  absolute maximum session length. Accepted for a booking site; an absolute
+  cap can be added later.
+- The settings comment in `config/settings/base.py` (lines 186-194) and the
+  `accounts/views.py` module docstring cite a Stage 3 decisions entry that
+  does not exist; both are corrected to point at this entry in cycle S1.
+- `apiRequest` throws a raw `SyntaxError` for error responses with an empty
+  or non-JSON body (for example a 502 from a proxy). Harmless today because
+  callers catch any error.
+- The public auth views ignore a stale access cookie (fix committed
+  21.09.2026), but the `ScopedRateThrottle` of register, password-reset
+  request and resend-verification now keys on the IP instead of the user pk,
+  even for a logged-in caller.
