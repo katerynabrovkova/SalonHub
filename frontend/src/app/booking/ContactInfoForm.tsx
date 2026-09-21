@@ -43,7 +43,7 @@ function dateFromOf(startDatetime: string): string {
   return startDatetime.slice(0, 10);
 }
 
-function buildStep3Url(
+export function buildStep3Url(
   entry: "service" | "specialist",
   service: string,
   specialist: string,

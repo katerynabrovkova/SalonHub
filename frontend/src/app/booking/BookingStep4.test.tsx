@@ -57,6 +57,12 @@ describe("BookingStep4", () => {
     expect(screen.getByText("Olena")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Підтвердити запис" })).toBeInTheDocument();
     expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Місце тримається 15 хвилин. Оплатити запис можна в особистому кабінеті."),
+    ).not.toBeInTheDocument();
+    const emailInput = screen.getByLabelText("Email");
+    expect(emailInput).toBeInTheDocument();
+    expect(emailInput).not.toHaveAttribute("readonly");
   });
 
   it("test_admin_role_renders_the_guest_form", () => {
@@ -76,6 +82,12 @@ describe("BookingStep4", () => {
     renderStep4();
 
     expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Місце тримається 15 хвилин. Оплатити запис можна в особистому кабінеті."),
+    ).not.toBeInTheDocument();
+    const emailInput = screen.getByLabelText("Email");
+    expect(emailInput).toBeInTheDocument();
+    expect(emailInput).not.toHaveAttribute("readonly");
   });
 
   it("test_client_with_unverified_email_renders_the_guest_form", () => {
@@ -95,5 +107,62 @@ describe("BookingStep4", () => {
     renderStep4();
 
     expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Місце тримається 15 хвилин. Оплатити запис можна в особистому кабінеті."),
+    ).not.toBeInTheDocument();
+    const emailInput = screen.getByLabelText("Email");
+    expect(emailInput).toBeInTheDocument();
+    expect(emailInput).not.toHaveAttribute("readonly");
+  });
+
+  it("test_verified_client_with_linked_customer_renders_account_form_without_name_and_phone_inputs", () => {
+    mockedUseAuth.mockReturnValue({
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: "Alice",
+        phone: "+10000000000",
+        email_verified: true,
+      },
+      loading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    renderStep4();
+
+    expect(
+      screen.getByText("Запис на ім'я вашого облікового запису: alice@example.com"),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Ім'я")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Телефон")).not.toBeInTheDocument();
+  });
+
+  it("test_verified_client_without_linked_customer_renders_account_form_with_name_and_phone_inputs", () => {
+    mockedUseAuth.mockReturnValue({
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      },
+      loading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    renderStep4();
+
+    expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
+    expect(screen.getByLabelText("Телефон")).toBeInTheDocument();
+    const emailInput = screen.getByLabelText("Email");
+    expect(emailInput).toHaveValue("alice@example.com");
+    expect(emailInput).toHaveAttribute("readonly");
+    expect(
+      screen.getByText("Місце тримається 15 хвилин. Оплатити запис можна в особистому кабінеті."),
+    ).toBeInTheDocument();
   });
 });
