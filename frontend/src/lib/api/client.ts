@@ -86,7 +86,13 @@ export async function apiRequest<T>(
     return undefined as T;
   }
 
-  const body: unknown = await response.json();
+  let body: unknown;
+  if (response.ok) {
+    const text = await response.text();
+    body = text === "" ? undefined : JSON.parse(text);
+  } else {
+    body = await response.json();
+  }
 
   if (!response.ok) {
     if (isErrorEnvelope(body)) {
