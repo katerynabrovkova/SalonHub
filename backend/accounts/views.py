@@ -77,7 +77,24 @@ from core.tenancy import get_current_salon_id
 from tenants.models import Salon
 
 
-class RegisterView(APIView):
+class PublicEndpointMixin:
+    """
+    Opts a public (AllowAny) view out of authentication entirely.
+
+    The ``access_token`` cookie is a session cookie (no ``max_age``), so it
+    outlives the 15-minute token inside it and a browser keeps sending a stale
+    one. DRF runs authentication before permissions, so with the project-default
+    classes a stale or garbage cookie raises ``InvalidToken`` (401
+    ``token_not_valid``) before ``AllowAny`` is ever consulted. A public
+    endpoint has no use for the caller's identity, so it must not authenticate
+    at all. List this mixin BEFORE ``APIView`` in the bases, or the default
+    ``authentication_classes`` silently wins.
+    """
+
+    authentication_classes = ()
+
+
+class RegisterView(PublicEndpointMixin, APIView):
     """
     Client self-registration (docs/DECISIONS.md § Stage 3-R.D.3). Public
     write (AllowAny), set explicitly — DEFAULT_PERMISSION_CLASSES is
@@ -143,7 +160,7 @@ def _verify_and_link(*, account_id: int, salon: Salon, now: dt.datetime) -> None
                 account.save(update_fields=["customer"])
 
 
-class VerifyEmailView(APIView):
+class VerifyEmailView(PublicEndpointMixin, APIView):
     """
     Confirm a client's email from the token in the verification link
     (docs/DECISIONS.md § Stage 3-R.D.4). Public write (AllowAny) — the
@@ -174,7 +191,7 @@ class VerifyEmailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class PasswordResetRequestView(APIView):
+class PasswordResetRequestView(PublicEndpointMixin, APIView):
     """
     Start a password reset (docs/DECISIONS.md § Stage 3-R.D.5). Public write
     (AllowAny). No-enumeration: an identical empty ``202`` whether or not an
@@ -203,7 +220,7 @@ class PasswordResetRequestView(APIView):
         return Response(status=status.HTTP_202_ACCEPTED)
 
 
-class PasswordResetConfirmView(APIView):
+class PasswordResetConfirmView(PublicEndpointMixin, APIView):
     """
     Complete a password reset from the ``uid`` + ``token`` in the emailed
     link (docs/DECISIONS.md § Stage 3-R.D.5). Public write (AllowAny), no
@@ -243,7 +260,7 @@ class PasswordResetConfirmView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class ResendVerificationView(APIView):
+class ResendVerificationView(PublicEndpointMixin, APIView):
     """
     Re-send the email-verification link (docs/DECISIONS.md § Stage 3-R.D.5).
     Public write (AllowAny). Reuses D.3/D.4's token helper and Celery task
@@ -272,7 +289,7 @@ class ResendVerificationView(APIView):
         return Response(status=status.HTTP_202_ACCEPTED)
 
 
-class AuthCsrfView(APIView):
+class AuthCsrfView(PublicEndpointMixin, APIView):
     """
     ``GET /api/v1/salons/<slug>/auth/csrf/`` — primes the ``csrftoken`` cookie
     (docs/DECISIONS.md § Stage 12). ``get_csrf_token(request)`` forces
