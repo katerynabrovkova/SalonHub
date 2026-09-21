@@ -3939,6 +3939,80 @@ Known issues, recorded and not fixed here:
   request and resend-verification now keys on the IP instead of the user pk,
   even for a logged-in caller.
 
+#### S2 design details
+
+Decided 21.09.2026, in discussion, before cycle S2 starts. Nothing here is
+implemented yet. It fills in items 4 to 7 above and refines item 6 in one
+place (point 2: the "own error" of a request after an unsure renewal is a
+distinct error type). Two backend facts it rests on were re-read in code on
+the same day: a missing `csrftoken` cookie makes `enforce_csrf_on_unsafe`
+raise `PermissionDenied`, which answers 403 (`CSRF Failed: CSRF cookie not
+set.`); and `RefreshView` answers 401 for all four of: no refresh cookie,
+expired token, blacklisted token, malformed token.
+
+1. **Three outcomes.** A renewal attempt ends as `renewed`, `lost` (the
+   refresh request answered 401) or `unsure` (network error, timeout, 403,
+   5xx, anything else). Only `lost` deletes the hint cookie and dispatches
+   the session-expired event.
+2. **What the original request throws.** On `renewed` it is retried once. On
+   `lost` the original 401 `ApiError` is rethrown. On `unsure` a distinct
+   error is thrown that is not an `ApiError` with status 401, so
+   `AuthContext` keeps `me` and the hint (today it treats any 401 as
+   signed out, in the mount effect and in its `refresh()`).
+3. **A 401 on the retry is final.** After a successful renewal, a 401 on the
+   retried request is treated as `lost`. No second refresh.
+4. **The hint gates only the renewal attempt.** It applies to every 401,
+   including the mount `/auth/me/`. `/auth/me/` is still called on mount
+   with or without the hint; without it, the 401 simply passes through
+   unrenewed. (Item 4 above only says the mount check renews silently "when
+   the hint cookie is present"; it does not say to skip the call.)
+5. **Exclusion list.** Exactly `auth/login`, `auth/refresh`, `auth/logout`
+   and `auth/csrf`, matched exactly against the salon-relative path passed
+   to `apiRequest` (`"/auth/login/"` and so on). No prefix matching.
+6. **Renewal fetch.** Renewal uses a lower-level fetch that returns the raw
+   `Response`, not `apiRequest`, so it needs no recursion guard and can read
+   the status without parsing the body (a non-JSON 401 or 5xx from a proxy
+   must not become a `SyntaxError`). It has a 10 second `AbortSignal`
+   timeout; a timeout is `unsure`. The timeout applies to the refresh
+   request only, not to other requests.
+7. **Single flight, per slug.** One renewal in flight per slug, held in a
+   module-level `Map` keyed by slug. The shared promise never rejects,
+   resolves to the outcome, and is cleared in `finally`. `apiRequest`
+   itself still takes `slug` on every call; the `client.ts` module comment
+   that says there is no module-level state is updated in S2 to say what
+   module-level state now exists (this map, and nothing else).
+8. **Late 401s accepted.** A request sent before a renewal finished can get
+   its 401 after the shared promise was cleared and start a second,
+   sequential refresh. That works (it uses the rotated cookie) and is
+   accepted. No generation counter.
+9. **Missing `csrftoken`.** No priming call before renewal. The refresh POST
+   then gets 403, which is `unsure`. Known limitation: a user with a valid
+   session but no `csrftoken` cookie (cleared selectively) is not renewed
+   and ends up at `/login`, whose mount effect primes the cookie.
+10. **Logout invariant.** After `logout()` resolves: no renewal is in
+    flight, none can start, and `session_hint` is deleted client-side even
+    if the logout POST failed. `logout()` waits for any in-flight renewal
+    before sending the POST, so a late refresh cannot set the cookies again
+    after logout cleared them. Errors are still swallowed as today.
+11. **Where the code lives.** The event name, the hint cookie helpers and
+    the renewal itself live outside `client.ts`, in their own module(s).
+    Reason: many tests mock `@/lib/api/client` with a factory that returns
+    only `apiRequest`, so anything else `AuthContext` imported from there
+    would be undefined under those mocks. The function is named
+    `renewSession`, not `refresh`, because `AuthContext.refresh` already
+    means "re-fetch me". The session-expired event carries no payload.
+12. **Known, not fixed in S2.** The login page's `void apiRequest(slug,
+    "/auth/csrf/")` in its mount effect has no `.catch`, so a network
+    failure is an unhandled rejection; this goes to S3, which edits that
+    page. `client.ts` reads `NEXT_PUBLIC_API_PORT` at import time, so
+    `client.test.ts` (which sets it in `beforeEach`, after the import)
+    builds `http://localhost:undefined/...` URLs; harmless while `fetch` is
+    mocked, and any new test that asserts a URL has to account for it.
+13. **Note for S3.** A deliberate logout must not add `?next=` to the
+    `/login` redirect. `ClientAvatarMenu.handleLogout` and the `/client`
+    layout effect both call `router.replace`; S3 must not rely on which one
+    runs first.
+
 ### Slot-taken notice on step 3, decided 21.09.2026
 
 Found in manual testing: when a slot is taken by someone else, both booking
