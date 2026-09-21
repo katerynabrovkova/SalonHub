@@ -20,8 +20,8 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
-import { ApiError } from "@/lib/api/errors";
 import { createGuestBooking } from "@/lib/booking/createGuestBooking";
+import { isSlotGoneError } from "@/lib/booking/isSlotGoneError";
 
 import { useBookingContactInfo } from "./BookingContactInfoContext";
 
@@ -89,7 +89,7 @@ export default function ContactInfoForm({
       router.push(`/booking/pay#appointment_id=${result.appointment.id}&token=${result.guestToken}`);
       return;
     } catch (err) {
-      if (err instanceof ApiError && err.code === "SLOT_NO_LONGER_AVAILABLE") {
+      if (isSlotGoneError(err)) {
         router.push(buildStep3Url(entry, service, specialist, startDatetime));
         return;
       }

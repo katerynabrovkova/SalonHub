@@ -24,6 +24,7 @@ import { useState, type FormEvent } from "react";
 import { useAuth } from "@/app/AuthContext";
 import { ApiError } from "@/lib/api/errors";
 import { createAccountBooking } from "@/lib/booking/createAccountBooking";
+import { isSlotGoneError } from "@/lib/booking/isSlotGoneError";
 
 import { useBookingContactInfo } from "./BookingContactInfoContext";
 import { buildStep3Url } from "./ContactInfoForm";
@@ -74,7 +75,7 @@ export default function AccountBookingForm({
       router.push("/client");
       return;
     } catch (err) {
-      if (err instanceof ApiError && err.code === "SLOT_NO_LONGER_AVAILABLE") {
+      if (isSlotGoneError(err)) {
         router.push(buildStep3Url(entry, service, specialist, startDatetime));
         return;
       }

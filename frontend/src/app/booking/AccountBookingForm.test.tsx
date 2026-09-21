@@ -190,6 +190,43 @@ describe("AccountBookingForm", () => {
     expect(screen.getByLabelText("Телефон")).toHaveValue("+10000000000");
   });
 
+  it("test_400_slot_not_offered_pushes_step3_url_refresh_not_called_context_unchanged", async () => {
+    const user = userEvent.setup();
+    // Real wire code for a slot already taken by another booking.
+    createAccountBookingMock.mockRejectedValueOnce(
+      new ApiError(400, "SLOT_NOT_OFFERED", "This slot is not currently offered."),
+    );
+
+    renderForm(false, { name: "Alice", phone: "+10000000000" });
+    await waitFor(() => expect(screen.getByLabelText("Ім'я")).toHaveValue("Alice"));
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
+
+    await waitFor(() =>
+      expect(pushMock).toHaveBeenCalledWith(
+        "/booking?entry=service&service=5&specialist=any&step=3&date_from=2026-08-17",
+      ),
+    );
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Ім'я")).toHaveValue("Alice");
+    expect(screen.getByLabelText("Телефон")).toHaveValue("+10000000000");
+  });
+
+  it("test_400_other_code_shows_generic_message_without_navigating", async () => {
+    const user = userEvent.setup();
+    createAccountBookingMock.mockRejectedValueOnce(
+      new ApiError(400, "invalid", "Invalid input."),
+    );
+
+    renderForm(true);
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Something went wrong. Please try again.",
+    );
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it("test_403_email_not_verified_shows_verify_message_no_navigation_refresh_not_called", async () => {
     const user = userEvent.setup();
     createAccountBookingMock.mockRejectedValueOnce(

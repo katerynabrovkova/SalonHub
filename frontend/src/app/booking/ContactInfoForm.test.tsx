@@ -180,6 +180,53 @@ describe("ContactInfoForm", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it("test_400_slot_not_offered_navigates_to_step3_and_shows_no_error", async () => {
+    const user = userEvent.setup();
+    // The real wire behavior: a slot already taken by another booking is no
+    // longer among the offered candidates, so the backend answers 400
+    // SLOT_NOT_OFFERED (not 409 SLOT_NO_LONGER_AVAILABLE).
+    createGuestBookingMock.mockRejectedValueOnce(
+      new ApiError(400, "SLOT_NOT_OFFERED", "This slot is not currently offered."),
+    );
+
+    render(
+      <BookingContactInfoProvider>
+        <ContactInfoForm {...BASE_PROPS} />
+      </BookingContactInfoProvider>,
+    );
+
+    await fillForm(user);
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
+
+    await waitFor(() =>
+      expect(pushMock).toHaveBeenCalledWith(
+        "/booking?entry=service&service=5&specialist=any&step=3&date_from=2026-08-17",
+      ),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("test_400_other_code_shows_generic_message_without_navigating", async () => {
+    const user = userEvent.setup();
+    createGuestBookingMock.mockRejectedValueOnce(
+      new ApiError(400, "invalid", "Invalid input."),
+    );
+
+    render(
+      <BookingContactInfoProvider>
+        <ContactInfoForm {...BASE_PROPS} />
+      </BookingContactInfoProvider>,
+    );
+
+    await fillForm(user);
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Something went wrong. Please try again.",
+    );
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it("test_submit_button_disabled_while_pending", async () => {
     const user = userEvent.setup();
     let resolveCreate: (value: unknown) => void = () => {};
