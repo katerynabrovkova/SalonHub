@@ -18,6 +18,8 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 
 import { apiRequest } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
+import { whenRenewalIdle } from "@/lib/api/renewSession";
+import { SESSION_EXPIRED_EVENT, deleteSessionHint } from "@/lib/api/sessionHint";
 import type { Me } from "@/lib/auth/Me";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 
@@ -47,6 +49,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     typeof window !== "undefined"
       ? (resolveSlugFromHost(window.location.host, PLATFORM_DOMAIN) ?? "")
       : "";
+
+  // Registered before the mount effect below so the listener is active
+  // before the first /auth/me/ call can fail (docs/DECISIONS.md § "Session
+  // renewal and session lifetime", "S2 design details").
+  useEffect(() => {
+    function handleSessionExpired() {
+      setMe(null);
+    }
+
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => {
+      window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -93,6 +109,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout(): Promise<void> {
+    // docs/DECISIONS.md § "Session renewal and session lifetime", "S2 design
+    // details", point 10 (logout invariant). Delete the hint immediately so
+    // no new renewal can start (apiRequest gates renewal on its presence),
+    // then wait for any renewal already in flight so a late "renewed"
+    // outcome can't re-set the cookies after this function has cleared them
+    // -- deleting the hint a second time, unconditionally, undoes exactly
+    // that re-set. No SESSION_EXPIRED_EVENT here: a deliberate logout is not
+    // a lost session.
+    deleteSessionHint();
+    await whenRenewalIdle(slug);
+    deleteSessionHint();
+
     // LogoutView clears both auth cookies on both success (205) and on a
     // blacklist failure (400 via InvalidOrExpiredTokenError) -- the server
     // has already signed the client out either way, so local state must

@@ -20,8 +20,18 @@ export function hasSessionHint(): boolean {
   return readCookie(SESSION_HINT_COOKIE) !== null;
 }
 
+/**
+ * Deletes the hint cookie, no event dispatch (docs/DECISIONS.md § "Session
+ * renewal and session lifetime", "S2 design details", point 10). Used
+ * directly by `AuthContext.logout()`, which must clear the cookie without
+ * declaring the session lost.
+ */
+export function deleteSessionHint(): void {
+  document.cookie = `${SESSION_HINT_COOKIE}=; max-age=0; path=/`;
+}
+
 /** Deletes the hint cookie and dispatches `SESSION_EXPIRED_EVENT` once. */
 export function markSessionLost(): void {
-  document.cookie = `${SESSION_HINT_COOKIE}=; max-age=0; path=/`;
+  deleteSessionHint();
   window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
 }
