@@ -25,27 +25,10 @@
  * Reads `document.cookie` and `window.location`, so this cannot run in
  * Server Components.
  */
+import { apiBaseUrl, readCookie } from "./browserContext";
 import { ApiError } from "./errors";
 
-const API_PORT = process.env.NEXT_PUBLIC_API_PORT;
-
-function apiBaseUrl(): string {
-  return `${window.location.protocol}//${window.location.hostname}:${API_PORT}`;
-}
-
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-
-/** Read a single cookie value from `document.cookie`, or `null` if absent. */
-function readCookie(name: string): string | null {
-  const prefix = `${name}=`;
-  for (const part of document.cookie.split(";")) {
-    const cookie = part.trim();
-    if (cookie.startsWith(prefix)) {
-      return decodeURIComponent(cookie.slice(prefix.length));
-    }
-  }
-  return null;
-}
 
 function isErrorEnvelope(
   body: unknown,
