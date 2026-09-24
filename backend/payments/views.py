@@ -203,13 +203,21 @@ class PaymentWebhookView(APIView):
                                 appointment=appointment_row,
                                 dedup_key=(f"booking_confirmed:appointment:{appointment_row.pk}"),
                             )
-                        elif appointment_row.status == AppointmentStatus.EXPIRED:
+                        elif appointment_row.status in (
+                            AppointmentStatus.EXPIRED,
+                            AppointmentStatus.CANCELLED,
+                        ):
                             # Sweep-vs-webhook rule 3 (§ Stage 8 decisions):
                             # the slot was already released by the § Stage
                             # 7.F sweep. Do not resurrect it to CONFIRMED —
                             # the payment still succeeded, so it's settled
                             # to SUCCEEDED above, and refunded once this
                             # transaction commits and releases its lock.
+                            # CANCELLED gets the same full refund: the
+                            # appointment was cancelled before this payment
+                            # was ever confirmed, so the <24h deposit rule
+                            # doesn't apply (docs/DECISIONS.md § Stage 15
+                            # planning, item 14 design details).
                             should_initiate_refund = True
                     else:
                         # Not PENDING: either an expected duplicate/race

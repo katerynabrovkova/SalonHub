@@ -131,9 +131,44 @@ class _RejectingProvider:
         raise AssertionError("must not be called past an invalid signature")
 
 
+class _AmountRecordingProvider(_FakeProvider):
+    """Same as _FakeProvider, but refund() also records amount/currency, on
+    its OWN class-level list — kept separate so _FakeProvider.calls' exact
+    dict shape, which existing tests compare with ==, is unchanged."""
+
+    calls: ClassVar[list[dict]] = []
+
+    def refund(self, *, provider_reference_id, reference, amount, currency):
+        type(self).calls.append(
+            {
+                "provider_reference_id": provider_reference_id,
+                "reference": reference,
+                "amount": amount,
+                "currency": currency,
+            }
+        )
+        return _FakeRefundIntent(provider_reference_id=f"fake_refund_{len(type(self).calls)}")
+
+
+class _FailingRefundProvider(_FakeProvider):
+    """refund() records the attempt, then raises — stand-in for a provider
+    whose refund call fails (network error, provider-reported failure).
+    initiate_refund wraps any exception into PaymentProviderError."""
+
+    calls: ClassVar[list[dict]] = []
+
+    def refund(self, *, provider_reference_id, reference, amount, currency):
+        type(self).calls.append(
+            {"provider_reference_id": provider_reference_id, "reference": reference}
+        )
+        raise RuntimeError("simulated provider refund failure")
+
+
 @pytest.fixture(autouse=True)
 def _reset_fake_provider_calls():
     _FakeProvider.calls = []
+    _AmountRecordingProvider.calls = []
+    _FailingRefundProvider.calls = []
     yield
 
 
@@ -160,6 +195,17 @@ def _make_expired_appointment(salon, specialist, service, customer, *, start=STA
         service=service,
         start=start,
         status=AppointmentStatus.EXPIRED,
+    )
+
+
+def _make_cancelled_appointment(salon, specialist, service, customer, *, start=START):
+    return make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=start,
+        status=AppointmentStatus.CANCELLED,
     )
 
 
@@ -442,3 +488,202 @@ def test_unknown_provider_reference_id_is_404_and_logs_warning(client, salon, mo
     assert response.status_code == 404
     assert "ref_missing" in caplog.text
     assert ProcessedWebhookEvent.objects.filter(provider_event_id="evt_10").count() == 0
+
+
+# --- 10. EXPIRED branch: provider refund failure ------------------------------
+
+
+def test_payment_succeeded_on_expired_appointment_refund_failure_is_502_and_leaves_refund_pending(
+    client, salon, specialist, service, customer, monkeypatch
+):
+    """Characterizes the EXPIRED branch's current failure behavior, which the
+    CANCELLED branch below must mirror (docs/DECISIONS.md § Stage 15
+    planning, item 14 design details). initiate_refund commits
+    REFUND_PENDING before calling the provider, so the failure leaves the row
+    there (for the § Stage 8.G stuck-refund sweep to flag); its
+    PaymentProviderError is not caught by the view and maps to 502. The
+    ledger row was committed by the view's own atomic() block before the
+    refund call, so a provider retry of this event is a no-op."""
+    monkeypatch.setattr(PaymentWebhookView, "provider_class", _FailingRefundProvider)
+    appt = _make_expired_appointment(salon, specialist, service, customer)
+    payment = _make_payment(
+        salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_11"
+    )
+
+    response = client.post(
+        _webhook_url(),
+        {
+            "event_id": "evt_11",
+            "event_type": "payment_succeeded",
+            "provider_reference_id": "ref_11",
+        },
+        format="json",
+        HTTP_X_SIGNATURE="sig",
+    )
+
+    assert response.status_code == 502
+    with tenant_context(salon.id):
+        payment_row = Payment.objects.get(pk=payment.pk)
+        appt_row = Appointment.objects.get(pk=appt.pk)
+    assert payment_row.status == PaymentStatus.REFUND_PENDING
+    assert appt_row.status == AppointmentStatus.EXPIRED
+    assert _FailingRefundProvider.calls == [
+        {"provider_reference_id": "ref_11", "reference": str(appt.id)}
+    ]
+    assert ProcessedWebhookEvent.objects.filter(provider_event_id="evt_11").count() == 1
+
+
+# --- 11. CANCELLED branch (item 14 design details, money fix) ----------------
+#
+# docs/DECISIONS.md § Stage 15 planning, item 14 design details: a
+# payment_succeeded webhook on a CANCELLED appointment triggers a FULL refund
+# of payment.amount, mirroring the EXPIRED branch, and never confirms the
+# appointment. START (2026-08-22) is already in the past, i.e. well inside
+# the <24h window where the customer-cancellation deposit-forfeit rule would
+# refuse a refund — the full refund here must not depend on that rule.
+
+
+def test_payment_succeeded_on_cancelled_appointment_initiates_full_refund_and_stays_cancelled(
+    client, salon, specialist, service, customer, monkeypatch
+):
+    monkeypatch.setattr(PaymentWebhookView, "provider_class", _AmountRecordingProvider)
+    appt = _make_cancelled_appointment(salon, specialist, service, customer)
+    payment = _make_payment(
+        salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_12"
+    )
+
+    response = client.post(
+        _webhook_url(),
+        {
+            "event_id": "evt_12",
+            "event_type": "payment_succeeded",
+            "provider_reference_id": "ref_12",
+        },
+        format="json",
+        HTTP_X_SIGNATURE="sig",
+    )
+
+    assert response.status_code == 200
+    with tenant_context(salon.id):
+        payment_row = Payment.objects.get(pk=payment.pk)
+        appt_row = Appointment.objects.get(pk=appt.pk)
+    assert payment_row.status == PaymentStatus.REFUND_PENDING
+    assert appt_row.status == AppointmentStatus.CANCELLED
+    assert _AmountRecordingProvider.calls == [
+        {
+            "provider_reference_id": "ref_12",
+            "reference": str(appt.id),
+            "amount": payment.amount,
+            "currency": payment.currency,
+        }
+    ]
+    assert ProcessedWebhookEvent.objects.filter(provider_event_id="evt_12").count() == 1
+
+
+def test_payment_succeeded_on_cancelled_appointment_duplicate_event_id_refunds_once(
+    client, salon, specialist, service, customer, monkeypatch
+):
+    monkeypatch.setattr(PaymentWebhookView, "provider_class", _FakeProvider)
+    appt = _make_cancelled_appointment(salon, specialist, service, customer)
+    payment = _make_payment(
+        salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_13"
+    )
+    body = {
+        "event_id": "evt_13",
+        "event_type": "payment_succeeded",
+        "provider_reference_id": "ref_13",
+    }
+
+    first = client.post(_webhook_url(), body, format="json", HTTP_X_SIGNATURE="sig")
+    second = client.post(_webhook_url(), body, format="json", HTTP_X_SIGNATURE="sig")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    with tenant_context(salon.id):
+        payment_row = Payment.objects.get(pk=payment.pk)
+        appt_row = Appointment.objects.get(pk=appt.pk)
+    assert payment_row.status == PaymentStatus.REFUND_PENDING
+    assert appt_row.status == AppointmentStatus.CANCELLED
+    assert _FakeProvider.calls == [{"provider_reference_id": "ref_13", "reference": str(appt.id)}]
+    assert ProcessedWebhookEvent.objects.filter(provider_event_id="evt_13").count() == 1
+
+
+def test_payment_succeeded_on_cancelled_appointment_second_event_id_refunds_only_once(
+    client, salon, specialist, service, customer, monkeypatch
+):
+    """A different event_id for the same Payment (e.g. the provider sending
+    a second success notification with a different reasonCode) passes the
+    ProcessedWebhookEvent ledger check — only the Payment's own status
+    (already REFUND_PENDING after the first event) can stop a second
+    refund."""
+    monkeypatch.setattr(PaymentWebhookView, "provider_class", _FakeProvider)
+    appt = _make_cancelled_appointment(salon, specialist, service, customer)
+    payment = _make_payment(
+        salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_14"
+    )
+
+    first = client.post(
+        _webhook_url(),
+        {
+            "event_id": "evt_14a",
+            "event_type": "payment_succeeded",
+            "provider_reference_id": "ref_14",
+        },
+        format="json",
+        HTTP_X_SIGNATURE="sig",
+    )
+    second = client.post(
+        _webhook_url(),
+        {
+            "event_id": "evt_14b",
+            "event_type": "payment_succeeded",
+            "provider_reference_id": "ref_14",
+        },
+        format="json",
+        HTTP_X_SIGNATURE="sig",
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    with tenant_context(salon.id):
+        payment_row = Payment.objects.get(pk=payment.pk)
+        appt_row = Appointment.objects.get(pk=appt.pk)
+    assert payment_row.status == PaymentStatus.REFUND_PENDING
+    assert appt_row.status == AppointmentStatus.CANCELLED
+    assert _FakeProvider.calls == [{"provider_reference_id": "ref_14", "reference": str(appt.id)}]
+    assert ProcessedWebhookEvent.objects.filter(provider_event_id="evt_14a").count() == 1
+    assert ProcessedWebhookEvent.objects.filter(provider_event_id="evt_14b").count() == 1
+
+
+def test_payment_succeeded_on_cancelled_appointment_refund_failure_matches_expired_branch(
+    client, salon, specialist, service, customer, monkeypatch
+):
+    """Same outcome as test 10 (the EXPIRED branch's failure case): 502,
+    Payment left REFUND_PENDING, ledger row recorded, appointment untouched."""
+    monkeypatch.setattr(PaymentWebhookView, "provider_class", _FailingRefundProvider)
+    appt = _make_cancelled_appointment(salon, specialist, service, customer)
+    payment = _make_payment(
+        salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_15"
+    )
+
+    response = client.post(
+        _webhook_url(),
+        {
+            "event_id": "evt_15",
+            "event_type": "payment_succeeded",
+            "provider_reference_id": "ref_15",
+        },
+        format="json",
+        HTTP_X_SIGNATURE="sig",
+    )
+
+    assert response.status_code == 502
+    with tenant_context(salon.id):
+        payment_row = Payment.objects.get(pk=payment.pk)
+        appt_row = Appointment.objects.get(pk=appt.pk)
+    assert payment_row.status == PaymentStatus.REFUND_PENDING
+    assert appt_row.status == AppointmentStatus.CANCELLED
+    assert _FailingRefundProvider.calls == [
+        {"provider_reference_id": "ref_15", "reference": str(appt.id)}
+    ]
+    assert ProcessedWebhookEvent.objects.filter(provider_event_id="evt_15").count() == 1

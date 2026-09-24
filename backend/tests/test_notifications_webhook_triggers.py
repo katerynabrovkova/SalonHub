@@ -284,6 +284,35 @@ def test_payment_succeeded_on_expired_appointment_emits_no_notification(
     assert mail.outbox == []
 
 
+def test_payment_succeeded_on_cancelled_appointment_emits_no_notification(
+    client, salon, specialist, service, customer, monkeypatch, django_capture_on_commit_callbacks
+):
+    """Same suppression as the EXPIRED test above, for a CANCELLED
+    appointment (docs/DECISIONS.md § Stage 15 planning, item 14 design
+    details): the payment is refunded, never confirmed, so NO
+    PAYMENT_SUCCEEDED and NO BOOKING_CONFIRMED row."""
+    monkeypatch.setattr(PaymentWebhookView, "provider_class", _FakeProvider)
+    appt = _appt(salon, specialist, service, customer, status=AppointmentStatus.CANCELLED)
+    payment = _make_payment(
+        salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_4c"
+    )
+
+    with django_capture_on_commit_callbacks(execute=True) as callbacks:
+        response = _post(client, "evt_4c", "payment_succeeded", "ref_4c")
+
+    assert response.status_code == 200
+    assert callbacks == []
+    assert _notifications(salon) == []
+    with tenant_context(salon.id):
+        payment_row = Payment.objects.get(pk=payment.pk)
+        appt_row = Appointment.objects.get(pk=appt.pk)
+    # Same "refund happened + no notification" proof as the EXPIRED test.
+    assert payment_row.status == PaymentStatus.REFUND_PENDING
+    assert _FakeProvider.refund_calls == [("ref_4c", str(appt.id))]
+    assert appt_row.status == AppointmentStatus.CANCELLED  # not confirmed
+    assert mail.outbox == []
+
+
 # --- 5. payment_failed -------------------------------------------------
 
 
