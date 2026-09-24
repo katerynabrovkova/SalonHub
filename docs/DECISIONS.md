@@ -3903,7 +3903,9 @@ Decisions:
    `/`, must not start with `//`, must not contain a backslash or a scheme,
    and must not point at `/login` itself. Anything else falls back to
    today's default (`/client`, or `/admin` for staff). The account booking
-   form simply degrades to the guest form when `me` becomes null.
+   form simply degrades to the guest form when `me` becomes null. The
+   return-path mechanism in this item is superseded by "S3 design details"
+   (24.09.2026).
 7. **Guests never call refresh** (no hint cookie, no request).
 8. **No throttle scope is added to refresh** in this change.
 9. **Order of work**, each cycle with its own tests and commit:
@@ -4012,6 +4014,74 @@ expired token, blacklisted token, malformed token.
     `/login` redirect. `ClientAvatarMenu.handleLogout` and the `/client`
     layout effect both call `router.replace`; S3 must not rely on which one
     runs first.
+
+#### S3 design details
+
+Decided 24.09.2026, in discussion, before cycle S3 starts. Nothing here is
+implemented yet. It fills in the return-after-login part of item 6 above and
+**replaces its mechanism**: item 6 said the path travels in a `next` query
+parameter and is validated as a same-site path, with `/admin` as a valid
+target for staff. S3 keeps the path in `sessionStorage` instead, and accepts
+only `/client` paths for the client role. Item 9's "login `next` parameter"
+and S2 point 13's "`?next=`" refer to the mechanism replaced here.
+
+1. **Goal and scope.** After an involuntary session loss (the
+   session-expired event, or a definitive 401 on mount or `refresh()`), the
+   user returns to the `/client` page they were on once they log in again. A
+   deliberate logout does not return them anywhere. Only the `/client`
+   subtree is covered; no admin or specialist layout exists yet.
+2. **Mechanism: `sessionStorage`, not `?next=`.** The return path is kept
+   under one key, `salonhub:return-path` (same prefix as
+   `SESSION_EXPIRED_EVENT`). Reason: a crafted link cannot plant it, so there
+   is no open redirect surface; and `sessionStorage` is per origin, so per
+   salon subdomain. Tradeoff accepted: it is also per tab, so logging in from
+   another tab does not return the user.
+3. **Where the code lives.** The helpers live in their own small module,
+   `frontend/src/lib/auth/returnPath.ts`, not in `client.ts` (same mocking
+   reason as S2 point 11): `saveReturnPath(path)` and `consumeReturnPath()`,
+   which reads and removes the value in one step. Every `sessionStorage`
+   access is wrapped in `try/catch`; a failure means "no return path", never
+   a broken login.
+4. **Signal.** `AuthContext` exposes a boolean state,
+   `loggedOutDeliberately`. `logout()` sets it to `true` in the same
+   synchronous block as `setMe(null)`, so React batches both updates and the
+   layout never sees `me === null` with a stale flag. `logout()` also clears
+   the stored return path (through `consumeReturnPath()`, discarding the
+   value). A successful `login()` resets the flag to `false`. No other path
+   sets it; the mount effect, the session-expired listener and `refresh()`
+   leave it as it is.
+5. **`client/layout.tsx`.** On `!loading && me === null`: if not
+   `loggedOutDeliberately`, save `window.location.pathname +
+   window.location.search`, read inside the effect; then
+   `router.replace("/login")` in both cases. The URL is always plain
+   `/login`, so the double `router.replace` from `ClientAvatarMenu` and
+   `client/profile/page.tsx` stays harmless, whichever runs first.
+6. **`login/page.tsx`.** After a successful login, consume the return path
+   (it is removed even if it is then rejected) and use it only if all of
+   these hold:
+   - `new URL(path, window.location.origin)` does not throw;
+   - its `origin` equals `window.location.origin`;
+   - its `pathname` is exactly `/client` or starts with `/client/`;
+   - the logged-in user's role is `client`.
+
+   Otherwise use today's role-based target (`/admin` or `/client`). The
+   validation stays even though a link cannot set `sessionStorage`: defense
+   in depth. Values such as `//evil.com`, `https://evil.com`, `/\evil.com`,
+   `javascript:alert(1)` and `/clientx` must be rejected, each with a test.
+7. **CSRF priming (S2 point 12).** Fixed in S3, since S3 edits that page.
+   If priming fails, the `csrftoken` cookie stays absent and every login
+   attempt gets 403 until a manual reload, so a `.catch` alone is not
+   enough. The mount effect's `apiRequest(slug, "/auth/csrf/")` gets a
+   `.catch` that ignores the error, and on submit, if the `csrftoken` cookie
+   is absent (`readCookie` from `browserContext`), the page first awaits
+   `GET auth/csrf/` before the login POST. If that call fails too, the page
+   shows its existing generic error. Each case gets a test.
+8. **Acceptance check.** Tests asserting an exact `/login` for a deliberate
+   logout keep passing unchanged: `ClientAvatarMenu.test.tsx:116` and
+   `client/profile/page.test.tsx:178`. The `/client` layout tests
+   (`client/layout.test.tsx:37`, `:97`) also keep their exact `/login`
+   assertion, since the URL no longer changes; they only gain assertions on
+   what was saved.
 
 ### Slot-taken notice on step 3, decided 21.09.2026
 
