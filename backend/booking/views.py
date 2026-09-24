@@ -18,8 +18,9 @@ GuestBookingCreateView (§ Stage 7.D decisions) is the one write path with no
 object to guard yet — it creates the Appointment — so it's a plain APIView,
 not a generic.
 
-AccountAppointmentListView (§ Stage 15 planning, item 1) and
-AccountAppointmentCancelView (§ Stage 15 planning, item 4) are Account-JWT
+AccountAppointmentListView (§ Stage 15 planning, item 1),
+AccountAppointmentCancelView (§ Stage 15 planning, item 4) and
+AccountAppointmentPayView (§ Stage 15 planning, item 14) are Account-JWT
 authenticated, not guest-token authenticated — separate, additive endpoints
 alongside the guest-token views above, not a replacement for any of them.
 """
@@ -56,6 +57,36 @@ from payments.providers.mock import MockPaymentProvider
 from payments.serializers import PaymentGuestSerializer
 from payments.services import initiate_payment
 from tenants.models import Salon
+
+
+def _initiate_payment_response(
+    view: "GuestAppointmentPayView | AccountAppointmentPayView", appointment: Appointment
+) -> Response:
+    """
+    Shared by GuestAppointmentPayView and AccountAppointmentPayView, which
+    differ only in how they resolve and authorize `appointment`
+    (docs/DECISIONS.md § Stage 15 planning, item 14 design details: account
+    pay's response is identical to guest pay's). Builds a fresh
+    `view.provider_class()` per request and maps initiate_payment's
+    `created` to 201 (new or FAILED-retried Payment) / 200 (existing PENDING
+    one reused). No try/except: InvalidStateTransitionError (409) and
+    PaymentProviderError (502) propagate to core.exceptions.exception_handler.
+    """
+    # The single now = timezone.now() call site for this request (§
+    # Stage 6.F/6.I decisions), passed explicitly into the service.
+    now = timezone.now()
+
+    payment, provider_data, created = initiate_payment(
+        appointment_id=appointment.id,
+        salon=appointment.salon,
+        provider=view.provider_class(),
+        now=now,
+    )
+
+    return Response(
+        {"payment": view.get_serializer(payment).data, "provider_data": provider_data},
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
 
 
 class _GuestTokenAppointmentMixin:
@@ -162,24 +193,7 @@ class GuestAppointmentPayView(_GuestTokenAppointmentMixin, generics.GenericAPIVi
     provider_class: type[PaymentProvider] = MockPaymentProvider
 
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
-        appointment = self.get_object()
-
-        # The single now = timezone.now() call site for this request (§
-        # Stage 6.F/6.I decisions), passed explicitly into the service.
-        now = timezone.now()
-
-        provider = self.provider_class()
-        payment, provider_data, created = initiate_payment(
-            appointment_id=appointment.id,
-            salon=appointment.salon,
-            provider=provider,
-            now=now,
-        )
-
-        return Response(
-            {"payment": self.get_serializer(payment).data, "provider_data": provider_data},
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        )
+        return _initiate_payment_response(self, self.get_object())
 
 
 class AccountAppointmentListView(generics.ListAPIView):
@@ -250,7 +264,13 @@ class AccountAppointmentCancelView(generics.GenericAPIView):
     guest-token identity, which doesn't apply on this Account-only path. An
     appointment belonging to another Customer, or an Account with no linked
     Customer at all, is indistinguishable from a nonexistent id: 404, never
-    403, the same anti-enumeration posture.
+    403, the same anti-enumeration posture. A missing row raises the same
+    `NotFound()` as an ownership mismatch rather than going through
+    `get_object_or_404`: Django's `Http404` renders as `{"code": "http404",
+    "message": "No Appointment matches the given query."}` while
+    `NotFound()` renders as `{"code": "not_found", ...}`, so mixing the two
+    would let a caller tell "exists in this salon but isn't yours" from
+    "doesn't exist here" by the body alone.
 
     `cancelled_by=CancelledBy.CUSTOMER`, not `GUEST` — this is the client
     cancelling through their own account, a distinct enum member from the
@@ -280,9 +300,9 @@ class AccountAppointmentCancelView(generics.GenericAPIView):
         return Appointment.objects.all()
 
     def _resolve_owned_appointment(self) -> Appointment:
-        appointment = get_object_or_404(self.get_queryset(), pk=self.kwargs["appointment_id"])
+        appointment = self.get_queryset().filter(pk=self.kwargs["appointment_id"]).first()
         customer_id = self.request.user.customer_id  # type: ignore[union-attr]
-        if customer_id is None or appointment.customer_id != customer_id:
+        if appointment is None or customer_id is None or appointment.customer_id != customer_id:
             raise NotFound()
         return appointment
 
@@ -302,6 +322,48 @@ class AccountAppointmentCancelView(generics.GenericAPIView):
         )
 
         return Response(self.get_serializer(appointment).data)
+
+
+class AccountAppointmentPayView(generics.GenericAPIView):
+    """
+    ``POST appointments/<id>/pay/`` — the authenticated Account starts
+    payment for its own Customer's appointment (docs/DECISIONS.md § Stage 15
+    planning, item 14 design details). No explicit
+    `authentication_classes`/`permission_classes` override, no role check, no
+    verification check, no throttling: same posture as
+    `AccountAppointmentCancelView`.
+
+    Ownership is resolved exactly as in `AccountAppointmentCancelView`: fetch
+    by pk through the tenant-scoped `Appointment.objects` (so another salon's
+    id is simply absent), then compare the owning Customer to the caller's
+    linked Customer. Another Customer's appointment, another salon's, a
+    nonexistent id, and an Account with no linked Customer all get the same
+    plain 404, never 403 (anti-enumeration). Written out rather than shared
+    with cancel, matching how cancel itself wrote out `ReviewCreateView`'s
+    shape. Like cancel, a missing row raises the same `NotFound()` as an
+    ownership mismatch (no `get_object_or_404`), so every 404 body is
+    byte-identical.
+
+    The response is identical to `GuestAppointmentPayView`'s, built by the
+    shared `_initiate_payment_response` above. `provider_class` is a class
+    attribute for the same test-substitution reason as the other views here.
+    """
+
+    serializer_class = PaymentGuestSerializer
+    provider_class: type[PaymentProvider] = MockPaymentProvider
+
+    def get_queryset(self) -> QuerySet[Appointment]:
+        return Appointment.objects.all()
+
+    def _resolve_owned_appointment(self) -> Appointment:
+        appointment = self.get_queryset().filter(pk=self.kwargs["appointment_id"]).first()
+        customer_id = self.request.user.customer_id  # type: ignore[union-attr]
+        if appointment is None or customer_id is None or appointment.customer_id != customer_id:
+            raise NotFound()
+        return appointment
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        return _initiate_payment_response(self, self._resolve_owned_appointment())
 
 
 class GuestBookingCreateView(APIView):

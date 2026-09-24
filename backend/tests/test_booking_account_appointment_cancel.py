@@ -29,8 +29,10 @@ from rest_framework.test import APIClient
 from accounts.models import Account, AccountRole, Customer
 from booking.models import Appointment, AppointmentStatus, CancelledBy
 from booking.views import AccountAppointmentCancelView
+from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
 from payments.models import Payment, PaymentStatus
+from specialists.models import Specialist
 from tests.conftest import make_appointment
 
 pytestmark = pytest.mark.django_db
@@ -206,6 +208,115 @@ def test_account_with_no_linked_customer_cannot_cancel_any_appointment(
     response = client.post(_cancel_url(salon, appt))
 
     assert response.status_code == 404
+
+
+@pytest.fixture
+def other_salon_appointment(other_salon):
+    """A CONFIRMED appointment that exists, but in another salon."""
+    with tenant_context(other_salon.id):
+        category = ServiceCategory.objects.create(salon=other_salon, name={"en": "Brows"})
+        other_service = Service.objects.create(
+            salon=other_salon,
+            category=category,
+            name={"en": "Brow shaping"},
+            duration_minutes=30,
+            price="400.00",
+            buffer_minutes=0,
+        )
+        other_specialist = Specialist.objects.create(salon=other_salon, name={"en": "Olga"})
+        other_customer = Customer.objects.create(
+            salon=other_salon, name="Bob", email="bob@example.com", phone="+10000000009"
+        )
+    return make_appointment(
+        salon=other_salon,
+        customer=other_customer,
+        specialist=other_specialist,
+        service=other_service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+
+
+def test_account_cannot_cancel_another_salons_appointment(
+    client, salon, other_salon, other_salon_appointment, customer_account
+):
+    """An appointment that exists, but in another salon, addressed by its id
+    under this salon's URL: 404, and the other salon's row is untouched
+    (docs/DECISIONS.md § Stage 15 planning, item 14 design details)."""
+    client.force_authenticate(user=customer_account)
+    response = client.post(_cancel_url(salon, other_salon_appointment))
+
+    assert response.status_code == 404
+    with tenant_context(other_salon.id):
+        row = Appointment.objects.get(pk=other_salon_appointment.id)
+    assert row.status == AppointmentStatus.CONFIRMED
+
+
+def test_cancel_404_bodies_are_byte_identical_for_stranger_other_salon_and_nonexistent(
+    client, salon, customer, specialist, service, other_salon_appointment, customer_account
+):
+    """Anti-enumeration: another Customer's appointment, another salon's
+    appointment, and an id that exists nowhere must be indistinguishable
+    to the caller, down to the response body."""
+    with tenant_context(salon.id):
+        stranger = Customer.objects.create(
+            salon=salon, name="Mallory", email="mallory@example.com", phone="+10000000008"
+        )
+    stranger_appt = make_appointment(
+        salon=salon,
+        customer=stranger,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    nonexistent_id = max(stranger_appt.id, other_salon_appointment.id) + 10_000
+
+    client.force_authenticate(user=customer_account)
+    stranger_resp = client.post(_cancel_url(salon, stranger_appt))
+    cross_salon_resp = client.post(_cancel_url(salon, other_salon_appointment))
+    nonexistent_resp = client.post(
+        f"/api/v1/salons/{salon.slug}/appointments/{nonexistent_id}/cancel/"
+    )
+
+    assert (
+        stranger_resp.status_code
+        == cross_salon_resp.status_code
+        == nonexistent_resp.status_code
+        == 404
+    )
+    assert stranger_resp.content == cross_salon_resp.content == nonexistent_resp.content
+
+
+def test_account_linked_to_another_salons_customer_cannot_cancel_that_salons_appointment(
+    client, salon, other_salon, other_salon_appointment
+):
+    """The tenant filter as the ONLY guard. An Account in `salon` linked to
+    a Customer of `other_salon` (a link the Django admin Account form
+    currently allows, docs/DECISIONS.md § Stage 15 planning, item 14 design
+    details, known issues) calls `salon`'s URL with that other salon's
+    appointment id. The ownership comparison would match here, so only the
+    tenant-scoped `Appointment.objects` lookup stands between the request
+    and a cross-salon cancellation."""
+    with tenant_context(other_salon.id):
+        foreign_customer = Customer.objects.get(pk=other_salon_appointment.customer_id)
+    with tenant_context(salon.id):
+        cross_linked_account = Account.objects.create_account(
+            salon=salon,
+            email="cross-linked@example.com",
+            password="a-strong-passw0rd!",
+            role=AccountRole.CLIENT,
+            customer=foreign_customer,
+        )
+
+    client.force_authenticate(user=cross_linked_account)
+    response = client.post(_cancel_url(salon, other_salon_appointment))
+
+    assert response.status_code == 404
+    with tenant_context(other_salon.id):
+        row = Appointment.objects.get(pk=other_salon_appointment.id)
+    assert row.status == AppointmentStatus.CONFIRMED
+    assert row.cancelled_at is None
 
 
 # --- 4. Non-cancellable state: 409 ------------------------------------------

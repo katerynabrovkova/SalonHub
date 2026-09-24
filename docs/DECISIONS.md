@@ -3856,6 +3856,11 @@ Scope, in build order:
       - The Django admin Account add form can link a Customer from
         another salon (`Customer.unscoped_objects.all()`, no same-salon
         check). Operator-only; a separate task.
+      - An access token carries no salon claim. Cross-salon rejection
+        (a salon-A token sent to salon B's URL gets 401) relies only on
+        the tenant-filtered Account lookup in
+        `AccountJWTAuthentication.get_user`. A salon claim is a possible
+        second layer, not done here.
 
 Explicitly out of scope for Stage 15:
 

@@ -39,6 +39,7 @@ The contract under test (docs/DECISIONS.md § "`/me/` endpoint (Stage 12)"):
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import AccessToken
 
 from accounts.models import Account, AccountRole, Customer
 from core.tenancy import tenant_context
@@ -214,3 +215,27 @@ def test_me_wrong_salon_cookie_returns_401_or_404(client, salon, other_salon) ->
     response = client.get(_me_url(other_salon.slug))
 
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("transport", ["cookie", "bearer"])
+def test_salon_a_access_token_on_salon_b_pay_endpoint_is_401(
+    client, salon, other_salon, transport
+) -> None:
+    """Same mechanism as the test above, on an unsafe account write
+    (docs/DECISIONS.md § Stage 15 planning, item 14 design details): the
+    token carries no salon claim, so rejection rests only on
+    ``AccountJWTAuthentication.get_user()``'s tenant-filtered Account lookup.
+    Covers both transports, since each runs its own authenticator class."""
+    account = _make_account(salon, email="salon-a-payer@example.com")
+    token = AccessToken()
+    token["user_id"] = str(account.pk)
+    token["identity_model"] = "account"
+    if transport == "cookie":
+        client.cookies["access_token"] = str(token)
+    else:
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    response = client.post(f"/api/v1/salons/{other_salon.slug}/appointments/1/pay/")
+
+    assert response.status_code == 401
+    assert response.data["error"]["code"] == "authentication_failed"

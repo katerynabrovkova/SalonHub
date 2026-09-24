@@ -40,4 +40,9 @@ urlpatterns = [
         views.AccountAppointmentCancelView.as_view(),
         name="account-appointment-cancel",
     ),
+    path(
+        "appointments/<int:appointment_id>/pay/",
+        views.AccountAppointmentPayView.as_view(),
+        name="account-appointment-pay",
+    ),
 ]
