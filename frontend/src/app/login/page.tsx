@@ -5,9 +5,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/app/AuthContext";
+import { readCookie } from "@/lib/api/browserContext";
 import { apiRequest } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
+import { consumeReturnPath, isSafeReturnPath } from "@/lib/auth/returnPath";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
+
+const GENERIC_ERROR = "Something went wrong. Please try again.";
 
 // Mirrors middleware.ts's PLATFORM_DOMAIN resolution, but client-side only
 // `NEXT_PUBLIC_*` env vars are ever inlined into the browser bundle
@@ -32,8 +36,10 @@ export default function LoginPage() {
   useEffect(() => {
     // Prime the CSRF cookie before the user can submit the form — login is a
     // POST, so it needs `csrftoken` set ahead of time (docs/DECISIONS.md
-    // § "Login-CSRF is in scope").
-    void apiRequest(slug, "/auth/csrf/");
+    // § "Login-CSRF is in scope"). A failure is ignored here: submit
+    // re-primes if the cookie is still missing (docs/DECISIONS.md, "S3
+    // design details", item 7).
+    apiRequest(slug, "/auth/csrf/").catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -43,8 +49,23 @@ export default function LoginPage() {
     setPending(true);
 
     try {
+      if (readCookie("csrftoken") === null) {
+        try {
+          await apiRequest(slug, "/auth/csrf/");
+        } catch {
+          setError(GENERIC_ERROR);
+          return;
+        }
+      }
       const me = await login(email, password);
-      router.push(me.role === "admin" ? "/admin" : "/client");
+      // Consumed only after a successful login, and removed even when it is
+      // then rejected (docs/DECISIONS.md, "S3 design details", item 6).
+      const returnPath = consumeReturnPath();
+      if (returnPath !== null && isSafeReturnPath(returnPath, me.role)) {
+        router.push(returnPath);
+      } else {
+        router.push(me.role === "admin" ? "/admin" : "/client");
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) {
@@ -54,10 +75,10 @@ export default function LoginPage() {
         } else if (err.status === 429) {
           setError("Забагато спроб. Спробуйте пізніше.");
         } else {
-          setError("Something went wrong. Please try again.");
+          setError(GENERIC_ERROR);
         }
       } else {
-        setError("Something went wrong. Please try again.");
+        setError(GENERIC_ERROR);
       }
     } finally {
       setPending(false);

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { runInNewContext } from "node:vm";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ApiError } from "@/lib/api/errors";
 
@@ -58,16 +59,21 @@ function mockApiRoutes({
   meBeforeLogin,
   login,
   meAfterLogin,
+  csrf,
 }: {
   meBeforeLogin?: () => Promise<unknown>;
   login?: () => Promise<unknown>;
   meAfterLogin?: () => Promise<unknown>;
+  // Receives the 0-based count of csrf calls so far: 0 is the mount priming.
+  csrf?: (callIndex: number) => Promise<unknown>;
 } = {}) {
   let loginCalled = false;
+  let csrfCalls = 0;
   mockedApiRequest.mockImplementation((...args) => {
     const [, path, options] = args as [string, string, RequestInit | undefined];
     if (path.includes("/auth/csrf/")) {
-      return Promise.resolve(undefined);
+      const callIndex = csrfCalls++;
+      return csrf ? csrf(callIndex) : Promise.resolve(undefined);
     }
     if (path.includes("/auth/login/") && (options?.method ?? "GET").toUpperCase() === "POST") {
       loginCalled = true;
@@ -88,6 +94,35 @@ beforeEach(() => {
   pushMock.mockReset();
   mockedApiRequest.mockReset();
 });
+
+afterEach(() => {
+  sessionStorage.clear();
+  document.cookie = "csrftoken=; max-age=0; path=/";
+});
+
+const RETURN_PATH_KEY = "salonhub:return-path";
+
+function meWithRole(role: "admin" | "client") {
+  return () =>
+    Promise.resolve({
+      email: "person@example.com",
+      role,
+      name: null,
+      phone: null,
+      email_verified: true,
+    });
+}
+
+function csrfCallCount() {
+  return mockedApiRequest.mock.calls.filter(([, path]) => path.includes("/auth/csrf/")).length;
+}
+
+function loginPostCalled() {
+  return mockedApiRequest.mock.calls.some(
+    ([, path, options]) =>
+      path.includes("/auth/login/") && (options?.method ?? "GET").toUpperCase() === "POST",
+  );
+}
 
 describe("LoginPage", () => {
   test("test_primes_csrf_cookie_on_mount", async () => {
@@ -228,5 +263,188 @@ describe("LoginPage", () => {
 
     const registerLink = screen.getByRole("link", { name: /зареєструватися/i });
     expect(registerLink).toHaveAttribute("href", "/register");
+  });
+});
+
+describe("LoginPage return path", () => {
+  // docs/DECISIONS.md, "S3 design details", item 6. "Nothing stored" is
+  // covered by the role-based redirect tests above.
+
+  test("test_client_login_goes_to_the_stored_client_path", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem(RETURN_PATH_KEY, "/client/profile?tab=x");
+    mockApiRoutes({ meAfterLogin: meWithRole("client") });
+
+    renderLoginPage();
+    await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalled());
+    expect(pushMock).toHaveBeenCalledWith("/client/profile?tab=x");
+    expect(pushMock).not.toHaveBeenCalledWith("/client");
+  });
+
+  test("test_client_login_with_a_foreign_origin_path_stored_goes_to_client", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem(RETURN_PATH_KEY, "https://evil.com/client");
+    mockApiRoutes({ meAfterLogin: meWithRole("client") });
+
+    renderLoginPage();
+    await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalled());
+    expect(pushMock).toHaveBeenCalledWith("/client");
+    expect(pushMock).not.toHaveBeenCalledWith("https://evil.com/client");
+  });
+
+  test("test_admin_login_with_a_client_path_stored_goes_to_admin", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem(RETURN_PATH_KEY, "/client/profile");
+    mockApiRoutes({ meAfterLogin: meWithRole("admin") });
+
+    renderLoginPage();
+    await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalled());
+    expect(pushMock).toHaveBeenCalledWith("/admin");
+    expect(pushMock).not.toHaveBeenCalledWith("/client/profile");
+  });
+
+  test.each([
+    { stored: "/client/profile?tab=x", role: "client" as const },
+    { stored: "https://evil.com/client", role: "client" as const },
+    { stored: "/client/profile", role: "admin" as const },
+  ])(
+    "test_successful_login_removes_the_stored_path_($stored,_$role)",
+    async ({ stored, role }) => {
+      const user = userEvent.setup();
+      sessionStorage.setItem(RETURN_PATH_KEY, stored);
+      mockApiRoutes({ meAfterLogin: meWithRole(role) });
+
+      renderLoginPage();
+      await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
+
+      await fillAndSubmit(user);
+
+      await waitFor(() => expect(pushMock).toHaveBeenCalled());
+      expect(sessionStorage.getItem(RETURN_PATH_KEY)).toBeNull();
+    },
+  );
+
+  test("test_failed_login_leaves_the_stored_path_in_place", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem(RETURN_PATH_KEY, "/client/profile");
+    mockApiRoutes({
+      login: () =>
+        Promise.reject(new ApiError(401, "invalid_credentials", "Email or password is incorrect.")),
+    });
+
+    renderLoginPage();
+    await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => {
+      expect(screen.getByText(/email or password is incorrect/i)).toBeInTheDocument();
+    });
+    expect(sessionStorage.getItem(RETURN_PATH_KEY)).toBe("/client/profile");
+  });
+});
+
+describe("LoginPage csrf priming", () => {
+  // docs/DECISIONS.md, "S3 design details", item 7.
+
+  test("test_a_rejecting_csrf_priming_on_mount_causes_no_unhandled_rejection", async () => {
+    // vi.fn() attaches its own rejection handler to any returned value that
+    // is `instanceof Promise` (to record mock.settledResults), which would
+    // hide a missing .catch in the page. A promise from another V8 context
+    // fails that check but is still a real, trackable promise.
+    const foreignRejection = () =>
+      runInNewContext("Promise.reject(new Error('network down'))") as Promise<unknown>;
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      mockApiRoutes({ csrf: foreignRejection });
+
+      renderLoginPage();
+      await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
+      // Node reports unhandled rejections only after the microtask queue
+      // drains; two macrotask turns give it the chance to.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
+  test("test_submit_without_csrftoken_cookie_awaits_csrf_before_the_login_post", async () => {
+    const user = userEvent.setup();
+    let resolveSubmitCsrf: (value: unknown) => void = () => {};
+    const pendingSubmitCsrf = new Promise((resolve) => {
+      resolveSubmitCsrf = resolve;
+    });
+    mockApiRoutes({
+      meAfterLogin: meWithRole("client"),
+      csrf: (callIndex) => (callIndex === 0 ? Promise.resolve(undefined) : pendingSubmitCsrf),
+    });
+
+    renderLoginPage();
+    await waitFor(() => expect(csrfCallCount()).toBe(1));
+
+    await fillAndSubmit(user);
+
+    // The submit-time csrf call is held open: the login POST must wait for it.
+    await waitFor(() => expect(csrfCallCount()).toBe(2));
+    expect(loginPostCalled()).toBe(false);
+
+    resolveSubmitCsrf(undefined);
+
+    await waitFor(() => expect(loginPostCalled()).toBe(true));
+    const calls = mockedApiRequest.mock.calls.map(([, path]) => path);
+    const submitCsrfIndex = calls.findLastIndex((path) => path.includes("/auth/csrf/"));
+    const loginIndex = calls.findIndex((path) => path.includes("/auth/login/"));
+    expect(submitCsrfIndex).toBeLessThan(loginIndex);
+  });
+
+  test("test_submit_with_csrftoken_cookie_makes_no_extra_csrf_call", async () => {
+    const user = userEvent.setup();
+    document.cookie = "csrftoken=abc; path=/";
+    mockApiRoutes({ meAfterLogin: meWithRole("client") });
+
+    renderLoginPage();
+    await waitFor(() => expect(csrfCallCount()).toBe(1));
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalled());
+    expect(loginPostCalled()).toBe(true);
+    expect(csrfCallCount()).toBe(1);
+  });
+
+  test("test_submit_without_csrftoken_cookie_and_failing_csrf_shows_generic_error_and_sends_no_login", async () => {
+    const user = userEvent.setup();
+    mockApiRoutes({
+      meAfterLogin: meWithRole("client"),
+      csrf: (callIndex) =>
+        callIndex === 0 ? Promise.resolve(undefined) : Promise.reject(new Error("network down")),
+    });
+
+    renderLoginPage();
+    await waitFor(() => expect(csrfCallCount()).toBe(1));
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => {
+      expect(screen.getByText("Something went wrong. Please try again.")).toBeInTheDocument();
+    });
+    expect(loginPostCalled()).toBe(false);
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });

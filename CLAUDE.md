@@ -158,6 +158,12 @@ salons without rework.
   extracted DOM text but not in a literal-string matcher. Fix: match with a regex that
   escapes the target string and replaces whitespace runs with `\s+`, or use a custom
   normalizer.
+- **A rejected promise returned from a `vi.fn()` mock can never be unhandled**: vitest's
+  spy attaches its own `.then(onFulfilled, onRejected)` to any `instanceof Promise`
+  return value (to record `mock.settledResults`), so a test for a missing `.catch`
+  passes vacuously. Return a promise from another V8 context instead
+  (`runInNewContext("Promise.reject(...)")` from `node:vm`); see
+  `app/login/page.test.tsx`'s unhandled-rejection test.
 
 ## Coding conventions
 
