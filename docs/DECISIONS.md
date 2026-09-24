@@ -3811,6 +3811,52 @@ Scope, in build order:
     dashboard ships first without a working pay button; this lands as a
     follow-up.
 
+    Item 14 design details, decided 24.09.2026. Nothing is implemented
+    yet.
+
+    - Pay endpoint: `AccountAppointmentPayView`,
+      `POST appointments/<id>/pay/`, calling
+      `payments.services.initiate_payment`. Ownership is resolved exactly
+      as in `AccountAppointmentCancelView`: 404 when the appointment is
+      not the caller's linked Customer's, including an appointment in
+      another salon. No role check and no verification check, same as
+      cancel. Response identical to guest pay: `{payment, provider_data}`,
+      201 when a Payment is created, 200 when an existing PENDING one is
+      reused. No throttling, same as cancel. Cross-salon 404 tests are
+      added for both pay and cancel (cancel has none today).
+    - Money fix, landing before the dashboard button and applying to both
+      the guest and the account paths: a `payment_succeeded` webhook on a
+      CANCELLED appointment triggers a full refund (as the EXPIRED branch
+      already does in `PaymentWebhookView`) and does not confirm the
+      appointment. Full, not the <24h deposit-forfeit rule, because the
+      appointment was cancelled before the payment was ever confirmed. A
+      repeated webhook must not refund twice. Reason: `cancel_appointment`
+      refunds only a SUCCEEDED Payment, so pay, then cancel, then a
+      successful webhook currently leaves a SUCCEEDED Payment on a
+      CANCELLED appointment with no refund.
+    - Frontend: the "Оплатити" button lives on the `/client` card of a
+      `pending_payment` appointment and calls the new endpoint via
+      `apiRequest`. It does not use `/booking/pay`, which stays
+      guest-token-only. After the call the card list is refetched; with
+      `provider_data` the card shows the payment link, otherwise
+      "Очікуємо підтвердження оплати". A hold countdown is deferred.
+    - Order: P1 money fix, P2 pay endpoint + cross-salon tests, P3
+      dashboard button.
+    - Still open, not decided here: whether a salon admin may book or pay
+      as a customer (Cycle D's open question above). If it is later
+      decided "no", the role check goes into both `POST appointments/` and
+      `POST appointments/<id>/pay/` together.
+    - Known issues, not fixed here:
+      - `initiate_payment` does not check `hold_expires_at`, so between
+        hold expiry and the next expiry sweep (up to 60s) pay still works.
+        The slot stays blocked meanwhile, and a success that lands after
+        the sweep is refunded.
+      - `WayForPayProvider` stays unwired; `MockPaymentProvider` remains
+        the default `provider_class` everywhere.
+      - The Django admin Account add form can link a Customer from
+        another salon (`Customer.unscoped_objects.all()`, no same-salon
+        check). Operator-only; a separate task.
+
 Explicitly out of scope for Stage 15:
 
 - **Any "claim a specific guest booking via its guest token while logged
