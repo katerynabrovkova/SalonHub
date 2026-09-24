@@ -394,3 +394,49 @@ def test_appointment_from_a_different_salon_gets_404(
         assert not Review.objects.filter(
             appointment_id=other_salon_completed_appointment.id
         ).exists()
+
+
+# --- 12. anti-enumeration: identical 404 bodies on the account path ----
+
+
+def test_account_path_404_bodies_are_byte_identical_for_stranger_other_salon_and_nonexistent(
+    client,
+    salon,
+    customer,
+    specialist,
+    service,
+    customer_account,
+    other_salon_completed_appointment,
+):
+    """Another Customer's appointment, another salon's appointment, and an
+    id that exists nowhere must be indistinguishable to an Account caller,
+    down to the response body (same rule as AccountAppointmentCancelView/
+    AccountAppointmentPayView)."""
+    with tenant_context(salon.id):
+        stranger = Customer.objects.create(
+            salon=salon, name="Mallory", email="mallory@example.com", phone="+10000000008"
+        )
+    stranger_appt = make_appointment(
+        salon=salon,
+        customer=stranger,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.COMPLETED,
+    )
+    nonexistent_id = max(stranger_appt.id, other_salon_completed_appointment.id) + 10_000
+
+    client.force_authenticate(user=customer_account)
+    stranger_resp = client.post(_review_url(salon, stranger_appt.id), PAYLOAD, format="json")
+    cross_salon_resp = client.post(
+        _review_url(salon, other_salon_completed_appointment.id), PAYLOAD, format="json"
+    )
+    nonexistent_resp = client.post(_review_url(salon, nonexistent_id), PAYLOAD, format="json")
+
+    assert (
+        stranger_resp.status_code
+        == cross_salon_resp.status_code
+        == nonexistent_resp.status_code
+        == 404
+    )
+    assert stranger_resp.content == cross_salon_resp.content == nonexistent_resp.content

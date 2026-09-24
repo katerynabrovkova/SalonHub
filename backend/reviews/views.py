@@ -22,7 +22,6 @@ booking service-layer errors.
 """
 
 from django.db.models import QuerySet
-from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny
@@ -67,9 +66,14 @@ class ReviewCreateView(generics.CreateAPIView):
             return guest_token.appointment
 
         # Account path: Appointment.objects is tenant-scoped, so an id from
-        # another salon is simply absent -> 404.
-        appointment = get_object_or_404(Appointment.objects.all(), pk=url_appointment_id)
-        if appointment.customer_id != self.request.user.customer_id:
+        # another salon is simply absent -> 404. A missing row raises the
+        # same NotFound() as an ownership mismatch rather than going through
+        # get_object_or_404, whose Http404 renders a different body
+        # ("http404" vs "not_found") and would let a caller tell "exists in
+        # this salon but isn't yours" from "doesn't exist here"
+        # (same rule as booking.views.AccountAppointmentCancelView).
+        appointment = Appointment.objects.filter(pk=url_appointment_id).first()
+        if appointment is None or appointment.customer_id != self.request.user.customer_id:
             raise NotFound()
         return appointment
 
