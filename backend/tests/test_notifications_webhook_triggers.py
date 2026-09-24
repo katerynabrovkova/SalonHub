@@ -179,21 +179,38 @@ def test_payment_succeeded_records_payment_succeeded_and_booking_confirmed(
     assert [m.to for m in mail.outbox] == [[customer.email], [customer.email]]
 
 
-# --- 2. second delivery: transition guard, NOT the dedup constraint ------
+# --- 2. second delivery on an already-confirmed booking ------------------
 
 
-def test_payment_succeeded_second_delivery_stopped_by_transition_guard(
+def test_payment_succeeded_second_delivery_on_confirmed_booking_records_no_new_notification(
     client, salon, specialist, service, customer, monkeypatch, django_capture_on_commit_callbacks
 ):
-    """Covers the status-transition guard (`if payment_row.status ==
-    PENDING`), NOT the dedup unique constraint. A second delivery with a
+    """End-to-end outcome only: a second payment_succeeded delivery with a
     fresh event_id (so the ProcessedWebhookEvent ledger does not
-    short-circuit it) finds the Payment already SUCCEEDED, so the
-    notification code inside the PENDING branch never runs — no INSERT, so
-    the dedup_key constraint is never exercised here."""
+    short-circuit it) on an already-CONFIRMED booking records and dispatches
+    no new notification, and leaves Payment SUCCEEDED / Appointment
+    CONFIRMED.
+
+    This does NOT isolate any single mechanism. Three layers stand between
+    a second delivery and a second notification: the Payment-status guard
+    (`if payment_row.status == PENDING` in payments/views.py), the
+    appointment-status check (`if appointment_row.status ==
+    PENDING_PAYMENT`), and the dedup_key unique constraint (a re-INSERT
+    collides and is tolerated as a no-op, test 3). Mutation-checked
+    (24.09.2026): the test stays green with the Payment-status guard
+    removed, and also with both view checks removed together (the
+    constraint alone still holds). On this path the Payment-status guard has
+    no observable effect at all: without it, SUCCEEDED is re-saved as
+    SUCCEEDED and the CONFIRMED appointment matches no branch. The guard's
+    real protection (no second refund once a Payment has moved past
+    SUCCEEDED) is covered in
+    tests/test_payments_webhook.py by
+    test_payment_succeeded_on_cancelled_appointment_second_event_id_refunds_only_once."""
     monkeypatch.setattr(PaymentWebhookView, "provider_class", _FakeProvider)
     appt = _appt(salon, specialist, service, customer, status=AppointmentStatus.PENDING_PAYMENT)
-    _make_payment(salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_2")
+    payment = _make_payment(
+        salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_2"
+    )
 
     with django_capture_on_commit_callbacks(execute=True):
         _post(client, "evt_2a", "payment_succeeded", "ref_2")
@@ -204,6 +221,9 @@ def test_payment_succeeded_second_delivery_stopped_by_transition_guard(
     assert second_callbacks == []
     with tenant_context(salon.id):
         assert Notification.objects.count() == 2  # still just the first delivery's pair
+        assert Payment.objects.get(pk=payment.pk).status == PaymentStatus.SUCCEEDED
+        assert Appointment.objects.get(pk=appt.pk).status == AppointmentStatus.CONFIRMED
+    assert _FakeProvider.refund_calls == []
 
 
 # --- 3. dedup unique constraint (notification_trigger_channel_dedup_uniq) -
