@@ -4043,13 +4043,14 @@ and S2 point 13's "`?next=`" refer to the mechanism replaced here.
    access is wrapped in `try/catch`; a failure means "no return path", never
    a broken login.
 4. **Signal.** `AuthContext` exposes a boolean state,
-   `loggedOutDeliberately`. `logout()` sets it to `true` in the same
-   synchronous block as `setMe(null)`, so React batches both updates and the
-   layout never sees `me === null` with a stale flag. `logout()` also clears
-   the stored return path (through `consumeReturnPath()`, discarding the
-   value). A successful `login()` resets the flag to `false`. No other path
-   sets it; the mount effect, the session-expired listener and `refresh()`
-   leave it as it is.
+   `loggedOutDeliberately`. `logout()` sets it to `true` before
+   `setMe(null)`, so any render in between has `me` present and the flag
+   `true`, which the layout ignores; the order, not React's batching, keeps
+   the layout from ever seeing `me === null` with a stale flag. `logout()`
+   also clears the stored return path (through `consumeReturnPath()`,
+   discarding the value). A successful `login()` resets the flag to `false`.
+   No other path sets it; the mount effect, the session-expired listener and
+   `refresh()` leave it as it is.
 5. **`client/layout.tsx`.** On `!loading && me === null`: if not
    `loggedOutDeliberately`, save `window.location.pathname +
    window.location.search`, read inside the effect; then

@@ -59,6 +59,20 @@ function LogoutButton() {
   return <button onClick={() => void logout()}>log out</button>;
 }
 
+function FlagReadout() {
+  const { loggedOutDeliberately } = useAuth();
+  return <span data-testid="flag">{String(loggedOutDeliberately)}</span>;
+}
+
+function AliceLoginButton() {
+  const { login } = useAuth();
+  return (
+    <button onClick={() => void login("alice@example.com", "correct-horse-battery-staple")}>
+      log in
+    </button>
+  );
+}
+
 beforeEach(() => {
   mockedApiRequest.mockReset();
   mockedWhenRenewalIdle.mockReset();
@@ -66,6 +80,7 @@ beforeEach(() => {
 
 afterEach(() => {
   clearSessionHintCookie();
+  sessionStorage.clear();
 });
 
 describe("AuthProvider", () => {
@@ -662,6 +677,155 @@ describe("AuthProvider refresh", () => {
 
     await waitFor(() => expect(refreshResult).toBe("resolved"));
     expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com");
+  });
+});
+
+describe("AuthProvider loggedOutDeliberately", () => {
+  // docs/DECISIONS.md, "S3 design details", item 4.
+
+  it("test_logged_out_deliberately_is_false_after_mount", async () => {
+    mockedApiRequest.mockResolvedValueOnce(ALICE); // mount GET /auth/me/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <FlagReadout />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+    expect(screen.getByTestId("flag")).toHaveTextContent("false");
+  });
+
+  it("test_logged_out_deliberately_is_true_after_logout", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest
+      .mockResolvedValueOnce(ALICE) // mount GET /auth/me/
+      .mockResolvedValueOnce(undefined); // POST /auth/logout/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <FlagReadout />
+        <LogoutButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com"));
+
+    await user.click(screen.getByRole("button", { name: "log out" }));
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
+    expect(screen.getByTestId("flag")).toHaveTextContent("true");
+  });
+
+  it("test_logged_out_deliberately_resets_to_false_after_a_successful_login", async () => {
+    const user = userEvent.setup();
+    mockedApiRequest
+      .mockResolvedValueOnce(ALICE) // mount GET /auth/me/
+      .mockResolvedValueOnce(undefined) // POST /auth/logout/
+      .mockResolvedValueOnce(undefined) // POST /auth/login/
+      .mockResolvedValueOnce(ALICE); // login()'s own GET /auth/me/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <FlagReadout />
+        <LogoutButton />
+        <AliceLoginButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com"));
+
+    await user.click(screen.getByRole("button", { name: "log out" }));
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
+    // Proves the reset below starts from true, not from a value that was never set.
+    expect(screen.getByTestId("flag")).toHaveTextContent("true");
+
+    await user.click(screen.getByRole("button", { name: "log in" }));
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com"));
+    expect(screen.getByTestId("flag")).toHaveTextContent("false");
+  });
+
+  it("test_logout_removes_the_stored_return_path", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem("salonhub:return-path", "/client/profile");
+    mockedApiRequest
+      .mockResolvedValueOnce(ALICE) // mount GET /auth/me/
+      .mockResolvedValueOnce(undefined); // POST /auth/logout/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <LogoutButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com"));
+
+    await user.click(screen.getByRole("button", { name: "log out" }));
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
+    expect(sessionStorage.getItem("salonhub:return-path")).toBeNull();
+  });
+
+  it("test_session_expired_event_clears_me_but_leaves_logged_out_deliberately_false", async () => {
+    mockedApiRequest.mockResolvedValueOnce(ALICE); // mount GET /auth/me/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <FlagReadout />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com"));
+
+    act(() => {
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
+    expect(screen.getByTestId("flag")).toHaveTextContent("false");
+  });
+
+  it("test_logout_never_renders_me_null_without_logged_out_deliberately_true", async () => {
+    const user = userEvent.setup();
+    const observed: { meIsNull: boolean; flag: boolean }[] = [];
+
+    function PairRecorder() {
+      const { me, loggedOutDeliberately } = useAuth();
+      observed.push({ meIsNull: me === null, flag: loggedOutDeliberately });
+      return null;
+    }
+
+    mockedApiRequest
+      .mockResolvedValueOnce(ALICE) // mount GET /auth/me/
+      .mockResolvedValueOnce(undefined); // POST /auth/logout/
+
+    render(
+      <AuthProvider>
+        <AuthReadout />
+        <PairRecorder />
+        <LogoutButton />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent("alice@example.com"));
+
+    // The mount legitimately renders me === null with the flag false while
+    // loading; only renders from the logout onward are what this is about.
+    observed.length = 0;
+
+    await user.click(screen.getByRole("button", { name: "log out" }));
+    await waitFor(() => expect(screen.getByTestId("email")).toHaveTextContent(""));
+
+    // Guards against a vacuous pass: the signed-out render must have been recorded.
+    expect(observed.some((pair) => pair.meIsNull)).toBe(true);
+    // `!== true`, not `=== false`: a flag that is missing or not yet set is
+    // just as stale as an explicit false.
+    expect(observed.filter((pair) => pair.meIsNull && pair.flag !== true)).toEqual([]);
   });
 });
 

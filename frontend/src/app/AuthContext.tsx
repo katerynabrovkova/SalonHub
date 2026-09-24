@@ -21,6 +21,7 @@ import { ApiError } from "@/lib/api/errors";
 import { whenRenewalIdle } from "@/lib/api/renewSession";
 import { SESSION_EXPIRED_EVENT, deleteSessionHint } from "@/lib/api/sessionHint";
 import type { Me } from "@/lib/auth/Me";
+import { consumeReturnPath } from "@/lib/auth/returnPath";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 
 // Mirrors middleware.ts's PLATFORM_DOMAIN resolution, but client-side only
@@ -32,6 +33,7 @@ const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "salonhub.com
 interface AuthContextValue {
   me: Me | null;
   loading: boolean;
+  loggedOutDeliberately: boolean;
   login: (email: string, password: string) => Promise<Me>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -42,6 +44,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  // docs/DECISIONS.md § "Session renewal and session lifetime", "S3 design
+  // details", item 4. Set only by logout() and reset only by login(), so
+  // client/layout.tsx can tell a deliberate logout from a lost session.
+  const [loggedOutDeliberately, setLoggedOutDeliberately] = useState(false);
 
   // Guarded: this is a "use client" component but Next.js still renders it
   // once on the server for the initial HTML, where `window` doesn't exist.
@@ -104,7 +110,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ email, password }),
     });
     const result = await apiRequest<Me>(slug, "/auth/me/");
+    // `me` first, then the reset: the reverse order could render
+    // `me === null` with the flag false.
     setMe(result);
+    setLoggedOutDeliberately(false);
     return result;
   }
 
@@ -131,6 +140,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignored -- see comment above.
     }
+    consumeReturnPath();
+    // Flag first, then `me`: the order, not React's batching, is what keeps
+    // client/layout.tsx from ever seeing `me === null` with a stale flag.
+    setLoggedOutDeliberately(true);
     setMe(null);
   }
 
@@ -155,7 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [slug]);
 
   return (
-    <AuthContext.Provider value={{ me, loading, login, logout, refresh }}>
+    <AuthContext.Provider value={{ me, loading, loggedOutDeliberately, login, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

@@ -23,16 +23,23 @@ import { useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { useAuth } from "@/app/AuthContext";
+import { saveReturnPath } from "@/lib/auth/returnPath";
 
 export default function ClientLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const { me, loading } = useAuth();
+  const { me, loading, loggedOutDeliberately } = useAuth();
 
   useEffect(() => {
     if (!loading && me === null) {
+      // docs/DECISIONS.md § "Session renewal and session lifetime", "S3
+      // design details", item 5: only a lost session remembers where the
+      // user was. The URL stays plain "/login" either way.
+      if (!loggedOutDeliberately) {
+        saveReturnPath(window.location.pathname + window.location.search);
+      }
       router.replace("/login");
     }
-  }, [loading, me, router]);
+  }, [loading, me, loggedOutDeliberately, router]);
 
   if (loading || me === null) {
     return null;
