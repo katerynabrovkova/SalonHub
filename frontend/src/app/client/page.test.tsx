@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, RenewalUnsureError } from "@/lib/api/errors";
 import type { MyAppointment } from "@/lib/booking/getMyAppointments";
@@ -80,6 +80,7 @@ function buildAppointment(overrides: Partial<MyAppointment> = {}): MyAppointment
     payment_status: null,
     payment_amount: null,
     amount_due_at_visit: null,
+    refund_deadline: null,
     ...overrides,
   };
 }
@@ -128,7 +129,23 @@ beforeEach(() => {
   mockedApiRequest.mockReset();
   mockedPay.mockReset();
   replaceMock.mockReset();
+  // Cancelling now asks for confirmation first; accept by default so the
+  // existing cancel tests exercise the request exactly as before (same
+  // convention as ClientAvatarMenu.test.tsx's logout confirm). Tests that
+  // decline, or assert the text, override this.
+  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
+
+const CONFIRM_UNPAID = "Скасувати бронювання?";
+const CONFIRM_REFUND = "Скасувати бронювання? Передоплату буде повернено.";
+const CONFIRM_NO_REFUND =
+  "Скасувати бронювання? До візиту менше 24 годин, тому передоплата не повертається.";
+
+/** How many cancel POSTs the page has sent for `id`. */
+function cancelRequestCount(id: number): number {
+  return mockedApiRequest.mock.calls.filter(([, path]) => path === `/appointments/${id}/cancel/`)
+    .length;
+}
 
 /** How many times the page has fetched `appointments/mine/` so far. */
 function listFetchCount(): number {
@@ -382,6 +399,141 @@ describe("ClientDashboardPage", () => {
       expect(screen.getByText("Бронювання не знайдено.")).toBeInTheDocument(),
     );
     expect(screen.getByText("Підтверджено")).toBeInTheDocument();
+  });
+
+  // --- 4b. Cancel confirmation (item 14 design details, refund_deadline) --
+
+  it.each([
+    [
+      "unpaid_pending_payment",
+      () => buildAppointment({ status: "pending_payment", payment_status: null }),
+      CONFIRM_UNPAID,
+    ],
+    [
+      "paid_before_the_refund_deadline",
+      () =>
+        buildAppointment({
+          status: "confirmed",
+          payment_status: "succeeded",
+          refund_deadline: new Date(Date.now() + 2 * DAY_MS).toISOString(),
+        }),
+      CONFIRM_REFUND,
+    ],
+    [
+      "paid_after_the_refund_deadline",
+      () =>
+        buildAppointment({
+          status: "confirmed",
+          payment_status: "succeeded",
+          refund_deadline: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        }),
+      CONFIRM_NO_REFUND,
+    ],
+  ] as const)(
+    "test_cancel_%s_asks_with_its_text_and_accepting_sends_the_request",
+    async (_label, makeAppointment, expectedText) => {
+      const user = userEvent.setup();
+      const appointment = makeAppointment();
+      mockApiRoutes({
+        list: () => pageOf([appointment]),
+        cancel: (id) => ({ ...appointment, id, status: "cancelled" }),
+      });
+
+      renderDashboard();
+      const card = await findCard("Manicure");
+
+      await user.click(within(card).getByRole("button", { name: "Скасувати" }));
+
+      expect(window.confirm).toHaveBeenCalledTimes(1);
+      expect(window.confirm).toHaveBeenCalledWith(expectedText);
+      await waitFor(() => expect(cancelRequestCount(appointment.id)).toBe(1));
+    },
+  );
+
+  it("test_cancel_declined_sends_no_request_and_leaves_the_card_unchanged", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const appointment = buildAppointment({ status: "confirmed" });
+    mockApiRoutes({
+      list: () => pageOf([appointment]),
+      cancel: (id) => ({ ...appointment, id, status: "cancelled" }),
+    });
+
+    renderDashboard();
+    const card = await findCard("Manicure");
+    const fetchesBefore = listFetchCount();
+    const cardBefore = card.innerHTML;
+
+    await user.click(within(card).getByRole("button", { name: "Скасувати" }));
+
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(cancelRequestCount(appointment.id)).toBe(0);
+    expect(listFetchCount()).toBe(fetchesBefore);
+    expect(within(card).getByRole("button", { name: "Скасувати" })).toBeEnabled();
+    expect(card.innerHTML).toBe(cardBefore);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  describe("with a frozen clock", () => {
+    // Only Date is faked: Testing Library's waitFor and userEvent keep
+    // their real timers.
+    const LOADED_AT = new Date("2026-10-10T09:00:00Z").getTime();
+    const DEADLINE = new Date("2026-10-10T10:00:00Z").getTime();
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(LOADED_AT);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function paidBeforeDeadline() {
+      return buildAppointment({
+        status: "confirmed",
+        payment_status: "succeeded",
+        start_datetime: new Date(DEADLINE + DAY_MS).toISOString(),
+        refund_deadline: new Date(DEADLINE).toISOString(),
+      });
+    }
+
+    it("test_cancel_text_is_chosen_at_click_time_not_at_list_load_time", async () => {
+      const user = userEvent.setup();
+      const appointment = paidBeforeDeadline();
+      mockApiRoutes({
+        list: () => pageOf([appointment]),
+        cancel: (id) => ({ ...appointment, id, status: "cancelled" }),
+      });
+
+      renderDashboard();
+      const card = await findCard("Manicure");
+
+      // The list was loaded while a refund was still possible; the page
+      // stays open past the deadline before the click.
+      vi.setSystemTime(DEADLINE + 60 * 1000);
+      await user.click(within(card).getByRole("button", { name: "Скасувати" }));
+
+      expect(window.confirm).toHaveBeenCalledWith(CONFIRM_NO_REFUND);
+    });
+
+    it("test_cancel_exactly_at_the_deadline_still_offers_the_refund_like_the_backend", async () => {
+      const user = userEvent.setup();
+      const appointment = paidBeforeDeadline();
+      mockApiRoutes({
+        list: () => pageOf([appointment]),
+        cancel: (id) => ({ ...appointment, id, status: "cancelled" }),
+      });
+
+      renderDashboard();
+      const card = await findCard("Manicure");
+
+      // booking.services._is_refund_eligible: now <= refund_deadline.
+      vi.setSystemTime(DEADLINE);
+      await user.click(within(card).getByRole("button", { name: "Скасувати" }));
+
+      expect(window.confirm).toHaveBeenCalledWith(CONFIRM_REFUND);
+    });
   });
 
   // --- 5. Pay action (item 14 design details, P3) ------------------------

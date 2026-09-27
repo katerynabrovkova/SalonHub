@@ -33,6 +33,7 @@ const APPOINTMENT: MyAppointment = {
   payment_status: "succeeded",
   payment_amount: "100.00",
   amount_due_at_visit: "400.00",
+  refund_deadline: "2026-09-30T10:00:00Z",
 };
 
 describe("getMyAppointments", () => {

@@ -151,6 +151,27 @@ function payErrorMessage(err: unknown): string {
   return "Сервіс оплати тимчасово не відповідає. Спробуйте за кілька хвилин.";
 }
 
+/**
+ * The cancel confirmation text, chosen from the clock at the moment of the
+ * click (`nowMs`), never cached at list-load time: `refund_deadline` comes
+ * from the backend's own refund rule (booking.services.refund_deadline), and
+ * `now <= refund_deadline` mirrors its `_is_refund_eligible` boundary. The
+ * backend still makes the final refund decision at cancel time
+ * (docs/DECISIONS.md § Stage 15 planning, item 14 design details).
+ *
+ * "Paid" means a SUCCEEDED Payment. A paid card without a deadline cannot
+ * come from the backend today (it only nulls the deadline when nothing is
+ * refundable); if it ever does, the dialog makes no refund claim either way.
+ */
+function cancelConfirmText(appointment: MyAppointment, nowMs: number): string {
+  if (appointment.payment_status !== "succeeded" || appointment.refund_deadline === null) {
+    return "Скасувати бронювання?";
+  }
+  return nowMs <= new Date(appointment.refund_deadline).getTime()
+    ? "Скасувати бронювання? Передоплату буде повернено."
+    : "Скасувати бронювання? До візиту менше 24 годин, тому передоплата не повертається.";
+}
+
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("uk-UA", {
     dateStyle: "medium",
@@ -160,7 +181,7 @@ function formatDateTime(iso: string): string {
 
 interface AppointmentCardProps {
   appointment: MyAppointment;
-  onCancel: (id: number) => void;
+  onCancel: (appointment: MyAppointment) => void;
   cancelling: boolean;
   onPay: (id: number) => void;
   payState: PayState;
@@ -218,7 +239,7 @@ function AppointmentCard({
       {cancellable ? (
         <button
           type="button"
-          onClick={() => onCancel(appointment.id)}
+          onClick={() => onCancel(appointment)}
           disabled={cancelling}
           className="self-start text-sm text-red-600 underline disabled:opacity-50"
         >
@@ -233,7 +254,7 @@ interface AppointmentSectionProps {
   title: string;
   appointments: MyAppointment[];
   emptyMessage: string;
-  onCancel: (id: number) => void;
+  onCancel: (appointment: MyAppointment) => void;
   cancellingId: number | null;
   onPay: (id: number) => void;
   payStates: Record<number, PayState>;
@@ -310,7 +331,13 @@ export default function ClientDashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleCancel(id: number) {
+  async function handleCancel(appointment: MyAppointment) {
+    // Declining changes nothing: no request, no state touched. Native
+    // confirm(), same as the logout confirmation in ClientAvatarMenu.
+    if (!window.confirm(cancelConfirmText(appointment, Date.now()))) {
+      return;
+    }
+    const { id } = appointment;
     setActionError(null);
     setCancellingId(id);
     try {

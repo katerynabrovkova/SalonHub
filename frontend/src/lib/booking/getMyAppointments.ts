@@ -69,6 +69,11 @@ export interface MyAppointment {
   payment_status: PaymentStatusValue | null;
   payment_amount: string | null;
   amount_due_at_visit: string | null;
+  /** When a customer cancellation stops being refund-eligible (ISO 8601);
+   * null when a cancellation could refund nothing (docs/DECISIONS.md §
+   * Stage 15 planning, item 14 design details). Compare with the clock at
+   * the moment it matters, never cache the comparison. */
+  refund_deadline: string | null;
 }
 
 interface DrfPage<T> {
