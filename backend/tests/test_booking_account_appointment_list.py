@@ -20,7 +20,9 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from accounts.models import Account, AccountRole, Customer
-from booking.models import AppointmentStatus
+from booking import services as booking_services
+from booking.models import AppointmentStatus, CancelledBy
+from booking.services import REFUND_ELIGIBILITY_CUTOFF
 from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
 from payments.models import Payment, PaymentStatus
@@ -459,6 +461,130 @@ def test_amount_due_at_visit_is_null_for_cancelled_with_refunded_payment(
 
     (row,) = response.data["results"]
     assert row["amount_due_at_visit"] is None
+
+
+# --- 3c. refund_deadline ------------------------------------------------------
+# (docs/DECISIONS.md § Stage 15 planning, item 14 design details): the moment
+# a customer cancellation stops being refund-eligible, so the dashboard can
+# decide at click time rather than at list-fetch time. Null whenever a
+# customer cancellation could refund nothing.
+
+
+def _refund_deadline(row) -> dt.datetime | None:
+    value = row["refund_deadline"]
+    return None if value is None else dt.datetime.fromisoformat(value)
+
+
+@pytest.mark.parametrize(
+    "appointment_status", [AppointmentStatus.CONFIRMED, AppointmentStatus.PENDING_PAYMENT]
+)
+def test_refund_deadline_is_start_minus_cutoff_for_a_succeeded_payment(
+    client, salon, customer, specialist, service, customer_account, appointment_status
+):
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=appointment_status,
+    )
+    _make_payment(salon, appt, status=PaymentStatus.SUCCEEDED)
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert _refund_deadline(row) == START - REFUND_ELIGIBILITY_CUTOFF
+
+
+@pytest.mark.parametrize(
+    "payment_status",
+    [None, PaymentStatus.PENDING, PaymentStatus.REFUND_PENDING, PaymentStatus.REFUNDED],
+)
+def test_refund_deadline_is_null_without_a_succeeded_payment(
+    client, salon, customer, specialist, service, customer_account, payment_status
+):
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    if payment_status is not None:
+        _make_payment(salon, appt, status=payment_status)
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert row["refund_deadline"] is None
+
+
+@pytest.mark.parametrize(
+    "appointment_status",
+    [AppointmentStatus.CANCELLED, AppointmentStatus.EXPIRED, AppointmentStatus.COMPLETED],
+)
+def test_refund_deadline_is_null_when_the_appointment_can_no_longer_be_cancelled(
+    client, salon, customer, specialist, service, customer_account, appointment_status
+):
+    """A SUCCEEDED payment on an appointment the customer can no longer
+    cancel (e.g. CANCELLED with the deposit withheld): no customer
+    cancellation can refund it, so there is no deadline to show."""
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=appointment_status,
+    )
+    _make_payment(salon, appt, status=PaymentStatus.SUCCEEDED)
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert row["refund_deadline"] is None
+
+
+def test_refund_deadline_follows_the_cutoff_constant_not_a_hardcoded_24h(
+    client, salon, customer, specialist, service, customer_account, monkeypatch
+):
+    """Fails if the serializer hardcodes 24h instead of deriving the value
+    from booking.services' cutoff, the same one cancel_appointment uses."""
+    monkeypatch.setattr(booking_services, "REFUND_ELIGIBILITY_CUTOFF", dt.timedelta(hours=37))
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=START,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    _make_payment(salon, appt, status=PaymentStatus.SUCCEEDED)
+
+    client.force_authenticate(user=customer_account)
+    response = client.get(_mine_url(salon))
+
+    (row,) = response.data["results"]
+    assert _refund_deadline(row) == START - dt.timedelta(hours=37)
+
+
+def test_refund_deadline_is_the_exact_boundary_of_cancel_appointments_rule():
+    """The deadline and the cancel-time rule are one rule: cancelling at the
+    deadline is still eligible (">=24h"), one microsecond later is not."""
+    deadline = booking_services.refund_deadline(START)
+    assert booking_services._is_refund_eligible(
+        cancelled_by=CancelledBy.CUSTOMER, now=deadline, start_datetime=START
+    )
+    assert not booking_services._is_refund_eligible(
+        cancelled_by=CancelledBy.CUSTOMER,
+        now=deadline + dt.timedelta(microseconds=1),
+        start_datetime=START,
+    )
 
 
 # --- 3b. select_related("payment", "specialist", "service") avoids N+1 -----

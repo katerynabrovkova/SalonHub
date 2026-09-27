@@ -423,12 +423,26 @@ _CUSTOMER_INITIATED_CANCELLATIONS = frozenset({CancelledBy.CUSTOMER, CancelledBy
 REFUND_ELIGIBILITY_CUTOFF = dt.timedelta(hours=24)
 
 
+def refund_deadline(start_datetime: dt.datetime) -> dt.datetime:
+    """
+    The last moment a customer-initiated cancellation is still
+    refund-eligible: cancelling at or before it qualifies (">=24h before
+    start"), after it does not. The single place REFUND_ELIGIBILITY_CUTOFF is
+    applied, shared by `_is_refund_eligible` (the cancel-time decision) and
+    `booking.serializers.AppointmentAccountSerializer.refund_deadline` (the
+    dashboard's click-time hint), so the two can never disagree
+    (docs/DECISIONS.md § Stage 15 planning, item 14 design details). Reads
+    the module-level constant at call time.
+    """
+    return start_datetime - REFUND_ELIGIBILITY_CUTOFF
+
+
 def _is_refund_eligible(
     *, cancelled_by: str, now: dt.datetime, start_datetime: dt.datetime
 ) -> bool:
     if cancelled_by not in _CUSTOMER_INITIATED_CANCELLATIONS:
         return True
-    return start_datetime - now >= REFUND_ELIGIBILITY_CUTOFF
+    return now <= refund_deadline(start_datetime)
 
 
 def cancel_appointment(

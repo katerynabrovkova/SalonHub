@@ -3846,6 +3846,15 @@ Scope, in build order:
       as a customer (Cycle D's open question above). If it is later
       decided "no", the role check goes into both `POST appointments/` and
       `POST appointments/<id>/pay/` together.
+    - Cancel confirmation, decided 27.09.2026: `appointments/mine/`
+      gains a read-only `refund_deadline` (start minus the refund cutoff,
+      from `booking.services.refund_deadline`, the same rule
+      `cancel_appointment` uses; null without a SUCCEEDED payment or once
+      the appointment can no longer be cancelled). A deadline, not a
+      boolean, because the cancel rule is evaluated at cancel time: the
+      dashboard compares it with the clock at click time to word its
+      confirm dialog, and the backend still makes the final refund
+      decision.
     - Known issues, not fixed here:
       - `initiate_payment` does not check `hold_expires_at`, so between
         hold expiry and the next expiry sweep (up to 60s) pay still works.

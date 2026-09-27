@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from booking.models import Appointment, AppointmentStatus
+from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus
+from booking.services import refund_deadline
 from catalog.models import Service
 from core.i18n import resolve_translation
 from payments.models import Payment, PaymentStatus
@@ -146,6 +147,7 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     payment_status = serializers.SerializerMethodField()
     payment_amount = serializers.SerializerMethodField()
     amount_due_at_visit = serializers.SerializerMethodField()
+    refund_deadline = serializers.SerializerMethodField()
 
     class Meta:
         model = Appointment
@@ -164,6 +166,7 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
             "payment_status",
             "payment_amount",
             "amount_due_at_visit",
+            "refund_deadline",
         ]
         read_only_fields = fields
 
@@ -187,6 +190,33 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
         ):
             return None
         return str(appointment.service_price_at_booking - payment.amount)
+
+    def get_refund_deadline(self, appointment: Appointment) -> str | None:
+        """
+        When a customer cancellation stops being refund-eligible
+        (docs/DECISIONS.md § Stage 15 planning, item 14 design details). A
+        deadline, not a boolean: the dashboard compares it with the clock at
+        click time, so a page left open across the boundary still words its
+        confirm dialog correctly. Derived from `booking.services.refund_deadline`,
+        the same rule `cancel_appointment` evaluates at cancel time, which
+        remains the final decision.
+
+        Null whenever a customer cancellation could refund nothing: no
+        SUCCEEDED payment, or an appointment that can no longer be cancelled
+        (anything outside ACTIVE_APPOINTMENT_STATUSES, e.g. CANCELLED with the
+        deposit withheld). Rendered through DateTimeField so its format
+        matches `start_datetime`'s.
+        """
+        payment = self._payment(appointment)
+        if (
+            appointment.status not in ACTIVE_APPOINTMENT_STATUSES
+            or payment is None
+            or payment.status != PaymentStatus.SUCCEEDED
+        ):
+            return None
+        return serializers.DateTimeField().to_representation(
+            refund_deadline(appointment.start_datetime)
+        )
 
 
 class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):
