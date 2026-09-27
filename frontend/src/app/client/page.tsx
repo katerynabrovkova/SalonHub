@@ -15,8 +15,17 @@
  * Tailwind-utility styling (no design system exists yet, matching
  * login/register/etc.).
  *
- * No "Оплатити" button anywhere here -- that's Stage 15 item 14, a
- * separate follow-up (AccountAppointmentPayView doesn't exist yet).
+ * Pay (docs/DECISIONS.md § Stage 15 planning, item 14 design details): a
+ * pending_payment card gets an "Оплатити" button calling
+ * `payForAppointment`. Unlike cancel's single page-level `actionError`, pay
+ * state (in flight, payment link, awaiting-confirmation flag, error) is kept
+ * per card, keyed by appointment id, so an error on one card never shows on
+ * another and survives the list refetch. The link and the awaiting text
+ * render only while the card is still pending_payment, so a refetch that
+ * finds it confirmed (or expired) drops them; the error stays, so a 409's
+ * "no longer available" message still explains why the card moved.
+ * `provider_data` is provider-controlled, so only an https: URL is ever
+ * rendered as a link.
  *
  * Cancel: on success, refetches the full list rather than patching the
  * cancelled item in place -- recon-confirmed there is no existing
@@ -33,8 +42,9 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { apiRequest } from "@/lib/api/client";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, RenewalUnsureError } from "@/lib/api/errors";
 import { getMyAppointments, type MyAppointment } from "@/lib/booking/getMyAppointments";
+import { payForAppointment } from "@/lib/booking/payForAppointment";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 
 import ClientAvatarMenu from "./ClientAvatarMenu";
@@ -97,6 +107,50 @@ function paymentLine(appointment: MyAppointment): string | null {
   return null;
 }
 
+const AWAITING_CONFIRMATION_TEXT = "Очікуємо підтвердження оплати";
+
+/** Per-card pay state, keyed by appointment id in the page. */
+interface PayState {
+  inFlight: boolean;
+  /** Validated https: payment link from the pay response, if any. */
+  link: string | null;
+  /** A pay call succeeded in this session (awaiting the webhook). */
+  started: boolean;
+  error: string | null;
+}
+
+const IDLE_PAY_STATE: PayState = { inFlight: false, link: null, started: false, error: null };
+
+/** `provider_data` if it is an https: URL, else null (never a javascript:, http: or garbage link). */
+function httpsLinkOrNull(providerData: string | null): string | null {
+  if (!providerData) {
+    return null;
+  }
+  try {
+    return new URL(providerData).protocol === "https:" ? providerData : null;
+  } catch {
+    return null;
+  }
+}
+
+function payErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status === 409) {
+    return "Це бронювання більше недоступне для оплати.";
+  }
+  if (err instanceof ApiError && err.status === 404) {
+    return "Бронювання не знайдено.";
+  }
+  // The request never reached the server (fetch threw), or apiRequest's S2
+  // silent renewal couldn't tell whether the session survived: both read as
+  // a connectivity problem to the user.
+  if (err instanceof TypeError || err instanceof RenewalUnsureError) {
+    return "Не вдалося з'єднатися. Перевірте інтернет і спробуйте ще раз.";
+  }
+  // Reached the server, which (or whose payment provider) failed: 502 and
+  // any other error.
+  return "Сервіс оплати тимчасово не відповідає. Спробуйте за кілька хвилин.";
+}
+
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("uk-UA", {
     dateStyle: "medium",
@@ -108,12 +162,24 @@ interface AppointmentCardProps {
   appointment: MyAppointment;
   onCancel: (id: number) => void;
   cancelling: boolean;
+  onPay: (id: number) => void;
+  payState: PayState;
 }
 
-function AppointmentCard({ appointment, onCancel, cancelling }: AppointmentCardProps) {
+function AppointmentCard({
+  appointment,
+  onCancel,
+  cancelling,
+  onPay,
+  payState,
+}: AppointmentCardProps) {
   const badge = STATUS_BADGES[appointment.status];
   const line = paymentLine(appointment);
   const cancellable = CANCELLABLE_STATUSES.has(appointment.status);
+  const payable = appointment.status === "pending_payment";
+  const awaitingConfirmation =
+    payable && (payState.started || appointment.payment_status === "pending");
+  const payLink = payable ? payState.link : null;
 
   return (
     <li className="flex flex-col gap-2 rounded border border-zinc-200 p-4 dark:border-zinc-700">
@@ -128,6 +194,27 @@ function AppointmentCard({ appointment, onCancel, cancelling }: AppointmentCardP
         {formatDateTime(appointment.start_datetime)}
       </p>
       {line !== null ? <p className="text-sm">{line}</p> : null}
+      {awaitingConfirmation ? <p className="text-sm">{AWAITING_CONFIRMATION_TEXT}</p> : null}
+      {payLink !== null ? (
+        <a href={payLink} className="self-start text-sm text-blue-600 underline">
+          Перейти до оплати
+        </a>
+      ) : null}
+      {payState.error !== null ? (
+        <p role="alert" className="text-sm text-red-600">
+          {payState.error}
+        </p>
+      ) : null}
+      {payable ? (
+        <button
+          type="button"
+          onClick={() => onPay(appointment.id)}
+          disabled={payState.inFlight}
+          className="self-start text-sm underline disabled:opacity-50"
+        >
+          Оплатити
+        </button>
+      ) : null}
       {cancellable ? (
         <button
           type="button"
@@ -148,6 +235,8 @@ interface AppointmentSectionProps {
   emptyMessage: string;
   onCancel: (id: number) => void;
   cancellingId: number | null;
+  onPay: (id: number) => void;
+  payStates: Record<number, PayState>;
 }
 
 function AppointmentSection({
@@ -156,6 +245,8 @@ function AppointmentSection({
   emptyMessage,
   onCancel,
   cancellingId,
+  onPay,
+  payStates,
 }: AppointmentSectionProps) {
   return (
     <section className="flex flex-col gap-4">
@@ -170,6 +261,8 @@ function AppointmentSection({
               appointment={appointment}
               onCancel={onCancel}
               cancelling={cancellingId === appointment.id}
+              onPay={onPay}
+              payState={payStates[appointment.id] ?? IDLE_PAY_STATE}
             />
           ))}
         </ul>
@@ -189,6 +282,11 @@ export default function ClientDashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [payStates, setPayStates] = useState<Record<number, PayState>>({});
+
+  function updatePayState(id: number, patch: Partial<PayState>) {
+    setPayStates((prev) => ({ ...prev, [id]: { ...(prev[id] ?? IDLE_PAY_STATE), ...patch } }));
+  }
 
   // Guarded: this is a "use client" component but Next.js still renders it
   // once on the server for the initial HTML, where `window` doesn't exist.
@@ -231,6 +329,24 @@ export default function ClientDashboardPage() {
     }
   }
 
+  async function handlePay(id: number) {
+    updatePayState(id, { inFlight: true, error: null });
+    try {
+      const response = await payForAppointment(slug, id);
+      updatePayState(id, {
+        inFlight: false,
+        started: true,
+        link: httpsLinkOrNull(response.provider_data),
+      });
+      await loadAppointments();
+    } catch (err) {
+      updatePayState(id, { inFlight: false, error: payErrorMessage(err) });
+      if (err instanceof ApiError && err.status === 409) {
+        await loadAppointments();
+      }
+    }
+  }
+
   let body: ReactNode;
 
   if (loaded === null) {
@@ -259,6 +375,8 @@ export default function ClientDashboardPage() {
           emptyMessage="Немає майбутніх записів."
           onCancel={handleCancel}
           cancellingId={cancellingId}
+          onPay={handlePay}
+          payStates={payStates}
         />
 
         <AppointmentSection
@@ -267,6 +385,8 @@ export default function ClientDashboardPage() {
           emptyMessage="Немає минулих записів."
           onCancel={handleCancel}
           cancellingId={cancellingId}
+          onPay={handlePay}
+          payStates={payStates}
         />
       </>
     );
