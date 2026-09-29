@@ -4260,3 +4260,39 @@ Implemented 29.09.2026.
    in § Stage 15 planning, item 5, "Refined 19.09.2026" ("Known issue, not
    fixed by this item: `get_or_create_guest_customer` ... unconditionally
    overwrites").
+
+### Item 10 design details (edit name and phone)
+
+Decided 29.09.2026, in discussion.
+
+1. **Endpoint.** `PATCH /api/v1/salons/<slug>/auth/me/customer/`, next to
+   `GET /api/v1/salons/<slug>/auth/me/`. Separate from `auth/me/` so that
+   email changes stay in item 8's verified flow.
+2. **Customer resolution.** Only from `request.user` (its `customer_id`),
+   never from the URL or body. No linked Customer: 404 with the same body as
+   the cancel/pay precedent (`NotFound()`, not `get_object_or_404`). The edit
+   pages are never shown to such a user, so this only guards direct
+   requests.
+3. **Body.** `name` and/or `phone`; if neither is present, 400. The
+   serializer lists exactly `name` and `phone` (never `__all__` or
+   `exclude`); any other field in the body (`email`, `salon`,
+   `preferred_language`) is ignored, and a test pins that.
+4. **Validation** matches booking: `name` max 255, `phone` max 32, both
+   non-blank after DRF's whitespace trimming, no phone format rule.
+5. **Response.** 200 with the updated `name` and `phone`.
+6. **Frontend.** Separate pages `/client/profile/name` and
+   `/client/profile/phone`, as linked from the profile, each with one field,
+   a "Зберегти" button and a back link to the profile. On success:
+   `refresh()` from `AuthContext`, then navigate to `/client/profile`. If the
+   user has no linked Customer (`me.name === null`), the page redirects to
+   `/client/profile`. Errors use `role="alert"`.
+7. **Build order.** Backend first, then frontend, each with its own
+   red/green and commit.
+8. **Planned backend tests.** Name only, phone only, both; neither gives
+   400; blank and too-long values give 400; no linked Customer gives 404;
+   unauthenticated gives 401, as for cancel, pay and `appointments/mine/`;
+   the mass-assignment guard from point 3; cross-tenant: an Account logged
+   in to salon B sends the PATCH to salon A's URL, gets 401, and no Customer
+   in either salon changes.
+9. **Unchanged, out of scope.** The `/client` layout does not check the
+   role, so an admin Account can reach these pages. Not addressed here.
