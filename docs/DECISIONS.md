@@ -4160,3 +4160,40 @@ forms send the user back to step 3 with no explanation, so it looks like a bug.
   the notice, so it disappears once the user pages on.
 - The four slot-gone tests (409 and 400 `SLOT_NOT_OFFERED`, both forms) had their
   expected URL changed on purpose to include the notice: a contract change.
+
+### Shared password field design details
+
+Decided 29.09.2026, in discussion, before items 9 and 11 start. Nothing here is
+implemented yet.
+
+1. **One component.** A shared `PasswordField` replaces the three existing
+   password inputs (login password, register password, register
+   confirm-password) and is used by item 9 (change password) and item 11
+   (reset-password confirm). It lives in `frontend/src/app/PasswordField.tsx`,
+   with its test next to it. Reason: components live next to the route that
+   uses them, and the one module shared across routes, `AuthContext.tsx`,
+   sits at the `app/` root; there is no `components/` directory, and `lib/`
+   holds no components.
+2. **Toggle.** A text button inside the field: "Показати" while hidden,
+   "Сховати" while shown. `type="button"`, so it never submits the form. Its
+   accessible name is the visible text: no `aria-label` and no `aria-pressed`,
+   since the label change already conveys the state. `aria-controls` points
+   to the input's `id`. Each field has its own independent toggle.
+3. **Only the user controls visibility.** Once shown, the password stays
+   shown until the user clicks "Сховати". No timers, no hiding on blur, on a
+   validation error or on any other event. A freshly mounted field starts
+   hidden.
+4. **`autoComplete`** is passed through per field (`current-password` or
+   `new-password`) and does not change when toggling.
+5. **Optional `hint` prop**, rendered as a `<p>` under the input and linked
+   through `aria-describedby`. The register page's "Щонайменше 8 символів"
+   uses it.
+6. **Login label.** Changes from "Password" to "Пароль".
+7. **Tests.** Clicking the toggle does not submit the form; the field stays
+   shown after advancing fake timers; toggles on two fields are independent;
+   the hint is linked through `aria-describedby`. Existing `getByLabelText`
+   regexes on password fields are anchored so they match only the input.
+8. **Open, to verify in a real browser.** Whether the browser's password
+   manager still offers to save the password when the form is submitted
+   while the field is shown. If it does not, the fix is restoring
+   `type="password"` at submit time only, which does not change point 3.
