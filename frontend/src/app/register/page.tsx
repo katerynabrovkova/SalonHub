@@ -192,7 +192,7 @@ export default function RegisterPage() {
           autoComplete="new-password"
           value={password}
           onChange={setPassword}
-          hint="Щонайменше 8 символів"
+          hint="Пароль має містити щонайменше 8 символів."
           required
         />
 

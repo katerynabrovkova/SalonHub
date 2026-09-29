@@ -170,7 +170,7 @@ describe("RegisterPage", () => {
     const describedBy = screen.getByLabelText(/^пароль$/i).getAttribute("aria-describedby");
     expect(describedBy).not.toBeNull();
     expect(document.getElementById(describedBy as string)).toHaveTextContent(
-      "Щонайменше 8 символів",
+      "Пароль має містити щонайменше 8 символів.",
     );
   });
 });

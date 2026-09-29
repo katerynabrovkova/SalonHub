@@ -37,6 +37,11 @@ export default function PasswordField({
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id}>{label}</label>
+      {hint !== undefined ? (
+        <p id={hintId} className="text-sm text-gray-500">
+          {hint}
+        </p>
+      ) : null}
       <div className="relative">
         <input
           id={id}
@@ -57,11 +62,6 @@ export default function PasswordField({
           {shown ? "Сховати" : "Показати"}
         </button>
       </div>
-      {hint !== undefined ? (
-        <p id={hintId} className="text-sm text-gray-500">
-          {hint}
-        </p>
-      ) : null}
     </div>
   );
 }

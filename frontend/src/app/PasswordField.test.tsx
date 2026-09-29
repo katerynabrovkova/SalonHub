@@ -140,6 +140,18 @@ describe("PasswordField", () => {
     expect(getInput()).not.toHaveAttribute("aria-describedby");
   });
 
+  test("test_hint_sits_between_the_label_and_the_input", () => {
+    render(<Field {...DEFAULT_PROPS} hint="Щонайменше 8 символів" />);
+
+    const label = screen.getByText("Пароль", { selector: "label" });
+    const hint = screen.getByText("Щонайменше 8 символів");
+    const input = getInput();
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+
+    expect(label.compareDocumentPosition(hint) & FOLLOWING).toBe(FOLLOWING);
+    expect(hint.compareDocumentPosition(input) & FOLLOWING).toBe(FOLLOWING);
+  });
+
   test("test_required_is_passed_to_the_input_only_when_given", () => {
     const { unmount } = render(<Field {...DEFAULT_PROPS} required />);
     expect(getInput()).toBeRequired();
