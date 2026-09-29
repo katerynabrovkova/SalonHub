@@ -42,6 +42,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 import booking.services as booking_services
+from accounts.models import Account, AccountRole
 from booking.guest_tokens import derive_guest_token, validate_guest_token
 from booking.models import Appointment, AppointmentStatus
 from core.tenancy import tenant_context
@@ -181,3 +182,37 @@ def test_slot_taken_by_another_booking_returns_409(
 
     assert response.status_code == 409
     assert response.data["error"]["code"] == "SLOT_NO_LONGER_AVAILABLE"
+
+
+# --- 4. A linked Customer keeps its name and phone ---------------------------
+# docs/DECISIONS.md § "Guest booking keeps a linked Customer's name and phone".
+
+
+def test_guest_booking_with_a_linked_customers_email_keeps_its_name_and_phone(
+    client, monkeypatch, salon, specialist, service, customer
+):
+    _working_hours(salon, specialist)
+    _freeze_now(monkeypatch)
+    with tenant_context(salon.id):
+        Account.objects.create_account(
+            salon=salon,
+            email=customer.email,
+            password="a-strong-passw0rd!",
+            role=AccountRole.CLIENT,
+            customer=customer,
+        )
+    payload = {
+        **_payload(specialist, service),
+        "customer_name": "Someone Else",
+        "customer_phone": "+19999999999",
+    }
+
+    response = client.post(_bookings_url(salon), payload, format="json")
+
+    assert response.status_code == 201
+    with tenant_context(salon.id):
+        appt = Appointment.objects.get(pk=response.data["appointment"]["id"])
+        customer.refresh_from_db()
+    assert appt.customer_id == customer.id
+    assert customer.name == "Alice"
+    assert customer.phone == "+10000000000"

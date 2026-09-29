@@ -8,7 +8,7 @@ same-salon `Account` <-> `Customer` link that replaces it lands in
 3-R.D.4.
 """
 
-from accounts.models import Customer
+from accounts.models import Account, Customer
 from tenants.models import Salon
 
 
@@ -23,16 +23,24 @@ def get_or_create_guest_customer(*, salon: Salon, name: str, email: str, phone: 
     manager filters reads but never injects `salon` on write.
 
     Option A (decided): a returning guest's name/phone are overwritten with
-    the newly supplied values on every booking, unconditionally — the risk
-    (a typo, or someone else's details under a shared email, silently
-    overwriting good data) is accepted in exchange for a self-correcting
-    default with no per-field logic. A brand-new email creates a guest row
-    (user=NULL).
+    the newly supplied values on every booking — the risk (a typo, or
+    someone else's details under a shared email, silently overwriting good
+    data) is accepted in exchange for a self-correcting default with no
+    per-field logic. A brand-new email creates a guest row (no linked
+    Account).
+
+    Exception: an existing Customer linked to an Account keeps its
+    name/phone, since for a registered user the profile is the single
+    source of truth (docs/DECISIONS.md § "Guest booking keeps a linked
+    Customer's name and phone"). The booking still goes ahead with that
+    Customer; the name/phone typed for it are not stored. The link is looked
+    up through the tenant-scoped `Account.objects`, so only an Account in
+    this salon counts.
     """
     customer, created = Customer.objects.get_or_create(
         salon=salon, email=email, defaults={"name": name, "phone": phone}
     )
-    if not created:
+    if not created and not Account.objects.filter(customer=customer).exists():
         customer.name = name
         customer.phone = phone
         customer.save(update_fields=["name", "phone"])

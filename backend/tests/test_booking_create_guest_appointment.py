@@ -47,7 +47,7 @@ import hashlib
 import pytest
 from django.utils import timezone
 
-from accounts.models import Customer
+from accounts.models import Account, AccountRole, Customer
 from accounts.services import get_or_create_guest_customer
 from booking.guest_tokens import GUEST_TOKEN_VALIDITY, validate_guest_token
 from booking.models import AppointmentStatus, GuestAccessToken
@@ -330,3 +330,103 @@ def test_create_guest_appointment_brand_new_guest_failure_does_not_orphan_custom
                 customer_phone="+10000000002",
             )
         assert not Customer.objects.filter(email="brandnew@example.com").exists()
+
+
+# --- 10. A linked Customer keeps its name and phone -----------------------
+# docs/DECISIONS.md § "Guest booking keeps a linked Customer's name and phone".
+
+
+def _link_account(salon, customer, *, email: str) -> Account:
+    with tenant_context(salon.id):
+        return Account.objects.create_account(
+            salon=salon,
+            email=email,
+            password="a-strong-passw0rd!",
+            role=AccountRole.CLIENT,
+            customer=customer,
+        )
+
+
+def test_get_or_create_guest_customer_keeps_name_and_phone_of_a_linked_customer(salon):
+    with tenant_context(salon.id):
+        linked = Customer.objects.create(
+            salon=salon, name="Alice", email="alice@example.com", phone="+10000000000"
+        )
+    _link_account(salon, linked, email="alice@example.com")
+
+    with tenant_context(salon.id):
+        returned = get_or_create_guest_customer(
+            salon=salon, name="Someone Else", email="alice@example.com", phone="+19999999999"
+        )
+        linked.refresh_from_db()
+    assert returned.pk == linked.pk
+    assert linked.name == "Alice"
+    assert linked.phone == "+10000000000"
+
+
+# --- 11. Tenant guard: a link in another salon does not count -------------
+
+
+def test_create_guest_appointment_overwrites_unlinked_customer_despite_linked_one_in_other_salon(
+    salon, other_salon, specialist, service
+):
+    _working_hours(salon, specialist)
+    with tenant_context(other_salon.id):
+        other_linked = Customer.objects.create(
+            salon=other_salon, name="Alice B", email="alice@example.com", phone="+10000000009"
+        )
+    _link_account(other_salon, other_linked, email="alice@example.com")
+    with tenant_context(salon.id):
+        unlinked = Customer.objects.create(
+            salon=salon, name="Alice", email="alice@example.com", phone="+10000000000"
+        )
+        appt, _raw_token = create_guest_appointment(
+            salon=salon,
+            specialist=specialist,
+            service=service,
+            start_datetime=FIRST_CANDIDATE,
+            now=SAFE_NOW,
+            customer_name="Alice Smith",
+            customer_email="alice@example.com",
+            customer_phone="+19999999999",
+        )
+        unlinked.refresh_from_db()
+    other_row = Customer.unscoped_objects.get(pk=other_linked.pk)
+    assert appt.customer_id == unlinked.pk
+    assert unlinked.name == "Alice Smith"
+    assert unlinked.phone == "+19999999999"
+    assert other_row.name == "Alice B"
+    assert other_row.phone == "+10000000009"
+
+
+# --- 12. An Account that is not linked does not count ----------------------
+
+
+def test_create_guest_appointment_overwrites_customer_when_same_email_account_is_not_linked(
+    salon, specialist, service
+):
+    _working_hours(salon, specialist)
+    with tenant_context(salon.id):
+        Account.objects.create_account(
+            salon=salon,
+            email="alice@example.com",
+            password="a-strong-passw0rd!",
+            role=AccountRole.CLIENT,
+        )
+        unlinked = Customer.objects.create(
+            salon=salon, name="Alice", email="alice@example.com", phone="+10000000000"
+        )
+        appt, _raw_token = create_guest_appointment(
+            salon=salon,
+            specialist=specialist,
+            service=service,
+            start_datetime=FIRST_CANDIDATE,
+            now=SAFE_NOW,
+            customer_name="Alice Smith",
+            customer_email="alice@example.com",
+            customer_phone="+19999999999",
+        )
+        unlinked.refresh_from_db()
+    assert appt.customer_id == unlinked.pk
+    assert unlinked.name == "Alice Smith"
+    assert unlinked.phone == "+19999999999"
