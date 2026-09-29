@@ -4163,8 +4163,11 @@ forms send the user back to step 3 with no explanation, so it looks like a bug.
 
 ### Shared password field design details
 
-Decided 29.09.2026, in discussion, before items 9 and 11 start. Nothing here is
-implemented yet.
+Decided 29.09.2026, in discussion, before items 9 and 11 start.
+
+Implemented 29.09.2026 (points 1-4, 6, 7 and the original point 5), with an
+explicit `required` prop instead of a spread of input props, so a caller can
+never override the input's type.
 
 1. **One component.** A shared `PasswordField` replaces the three existing
    password inputs (login password, register password, register
@@ -4187,7 +4190,11 @@ implemented yet.
    `new-password`) and does not change when toggling.
 5. **Optional `hint` prop**, rendered as a `<p>` under the input and linked
    through `aria-describedby`. The register page's "Щонайменше 8 символів"
-   uses it.
+   uses it. Changed 29.09.2026, not yet implemented: the hint is rendered
+   between the label and the input, not under the input, so it reads as an
+   instruction rather than as feedback on what was typed. Still linked through
+   `aria-describedby`. The register hint text becomes "Пароль має містити
+   щонайменше 8 символів."
 6. **Login label.** Changes from "Password" to "Пароль".
 7. **Tests.** Clicking the toggle does not submit the form; the field stays
    shown after advancing fake timers; toggles on two fields are independent;
@@ -4197,3 +4204,6 @@ implemented yet.
    manager still offers to save the password when the form is submitted
    while the field is shown. If it does not, the fix is restoring
    `type="password"` at submit time only, which does not change point 3.
+   Checked 29.09.2026 in Chrome on the local dev host: no save-password prompt
+   appeared either with the field shown or, as a control, with it hidden, so
+   the check is inconclusive here. To redo on a real HTTPS domain.
