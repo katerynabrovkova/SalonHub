@@ -4265,6 +4265,13 @@ Implemented 29.09.2026.
 
 Decided 29.09.2026, in discussion.
 
+Backend implemented 29.09.2026 (points 1-5 and 8). The frontend (point 6)
+is not built yet. Two details beyond the points below: the save also bumps
+`updated_at` (`update_fields` alone skips `auto_now` fields); and the lookup
+goes through the tenant-scoped `Customer.objects`, so a Customer linked from
+another salon (the known admin cross-salon link issue) gives a 404, not a
+500.
+
 1. **Endpoint.** `PATCH /api/v1/salons/<slug>/auth/me/customer/`, next to
    `GET /api/v1/salons/<slug>/auth/me/`. Separate from `auth/me/` so that
    email changes stay in item 8's verified flow.
