@@ -59,6 +59,13 @@ that pass is decided when Stage 18 starts, using the salon-site visual
 references. Known issues waiting for this pass: the unbounded "Далі →"
 on booking step 3 (see its known-issue entry).
 
+- Recorded 29.09.2026: on `/register` the "Паролі не збігаються." message
+  is easy to miss: plain text, not styled as an error and not linked to
+  the confirm-password field. Deferred by Katya to the design pass. A
+  possible approach is an `error` prop on `PasswordField` linked through
+  `aria-describedby`; when the message appears (on submit or on leaving
+  the field) is still to decide.
+
 ## Open questions
 
 Not yet decided — recorded so they surface before the stages that depend
