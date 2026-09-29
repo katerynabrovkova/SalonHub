@@ -158,6 +158,13 @@ salons without rework.
   extracted DOM text but not in a literal-string matcher. Fix: match with a regex that
   escapes the target string and replaces whitespace runs with `\s+`, or use a custom
   normalizer.
+- **Under `vi.useFakeTimers()`, `userEvent` clicks hang**, even with
+  `userEvent.setup({ advanceTimers: vi.advanceTimersByTime })`: Testing Library's async
+  wrapper advances fake timers only when a global `jest` exists, which Vitest lacks. Use
+  `fireEvent.click` and wrap `vi.advanceTimersByTime(...)` in `act`. Don't click with
+  real timers and switch to fake ones afterwards: a timer scheduled at click time
+  escapes the fake clock, so the test can't catch it. See `app/PasswordField.test.tsx`'s
+  `test_stays_shown_after_60_seconds`.
 - **A rejected promise returned from a `vi.fn()` mock can never be unhandled**: vitest's
   spy attaches its own `.then(onFulfilled, onRejected)` to any `instanceof Promise`
   return value (to record `mock.settledResults`), so a test for a missing `.catch`
