@@ -4214,3 +4214,44 @@ never override the input's type.
    Checked 29.09.2026 in Chrome on the local dev host: no save-password prompt
    appeared either with the field shown or, as a control, with it hidden, so
    the check is inconclusive here. To redo on a real HTTPS domain.
+
+### Remaining Stage 15 build order
+
+Decided 29.09.2026, in discussion.
+
+The remaining Stage 15 planning items are built in the order 10, 8, 9, 11,
+not 8, 9, 10, 11. Item 10 depends only on item 7 and nothing depends on it.
+9 stays before 11 because item 11's link lives on item 9's screen. The
+"Scope, in build order" list in § Stage 15 planning is not edited; this
+entry overrides it for these four items.
+
+### Guest booking keeps a linked Customer's name and phone
+
+Decided 29.09.2026, in discussion, before item 10 starts.
+
+1. **Rule.** In `get_or_create_guest_customer`
+   (`backend/accounts/services.py`), when the existing Customer is linked to
+   an Account (`Account.customer`, reverse accessor `customer.account`), a
+   guest booking no longer updates its `name` or `phone`. An existing
+   Customer with no linked Account is still overwritten as today, and a new
+   Customer is created as today. The appointment is created in every case.
+2. **Reason.** Once item 10 lets a user edit name/phone, any guest booking
+   under their email would silently undo the edit. For a registered user the
+   profile is the single source of truth. Accepted cost: the name/phone typed
+   in the guest form for that booking are not stored anywhere, since
+   appointments read them through the Customer FK with no snapshot, so the
+   salon sees the profile values.
+3. **Unchanged.** The claim-time overwrite in `create_account_appointment`'s
+   unlinked branch (`backend/booking/services.py`) stays: there the account
+   holder's own data correctly replaces guest data.
+4. **Planned tests.** A linked Customer keeps its name/phone; an unlinked
+   existing Customer is still overwritten; the appointment is created in
+   both cases. Any existing test that contradicts point 1 is changed on
+   purpose, as a contract change. Recon on 29.09.2026 found none: the two
+   existing overwrite tests in `tests/test_booking_create_guest_appointment.py`
+   use Customers with no linked Account.
+5. **Related known issue.** This addresses the Option A known issue recorded
+   in § Stage 15 planning, item 5, "Refined 19.09.2026" ("Known issue, not
+   fixed by this item: `get_or_create_guest_customer` ... unconditionally
+   overwrites"). That issue is not marked fixed until this rule is
+   implemented.
