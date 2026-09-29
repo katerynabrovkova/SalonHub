@@ -41,7 +41,7 @@ function renderLoginPage() {
 
 async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/email/i), "person@example.com");
-  await user.type(screen.getByLabelText(/password/i), "correct-horse-battery-staple");
+  await user.type(screen.getByLabelText(/^пароль$/i), "correct-horse-battery-staple");
   await user.click(screen.getByRole("button", { name: /log in/i }));
 }
 

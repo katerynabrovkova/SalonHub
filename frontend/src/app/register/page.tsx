@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
+import PasswordField from "@/app/PasswordField";
 import { apiRequest } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
@@ -183,32 +184,26 @@ export default function RegisterPage() {
           />
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor="password">Пароль</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-          {/* Cosmetic only -- real validation is server-side via Django's
-              validate_password, which enforces more than just length. */}
-          <p className="text-sm text-gray-500">Щонайменше 8 символів</p>
-        </div>
+        {/* The hint is cosmetic only -- real validation is server-side via
+            Django's validate_password, which enforces more than just length. */}
+        <PasswordField
+          id="password"
+          label="Пароль"
+          autoComplete="new-password"
+          value={password}
+          onChange={setPassword}
+          hint="Щонайменше 8 символів"
+          required
+        />
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor="confirm-password">Підтвердіть пароль</label>
-          <input
-            id="confirm-password"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-            required
-          />
-        </div>
+        <PasswordField
+          id="confirm-password"
+          label="Підтвердіть пароль"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={setConfirmPassword}
+          required
+        />
 
         {error !== null ? <p role="alert">{error}</p> : null}
 

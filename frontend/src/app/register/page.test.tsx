@@ -27,7 +27,7 @@ async function fillForm(
 ) {
   await user.type(screen.getByLabelText(/^email$/i), email);
   await user.type(screen.getByLabelText(/^пароль$/i), password);
-  await user.type(screen.getByLabelText(/підтвердіть пароль/i), confirm);
+  await user.type(screen.getByLabelText(/^підтвердіть пароль$/i), confirm);
 }
 
 beforeEach(() => {
@@ -162,5 +162,15 @@ describe("RegisterPage", () => {
     // typo than forcing a full retype -- only password/confirm reset.
     expect(screen.getByLabelText(/^email$/i)).toHaveValue("person@example.com");
     expect(screen.queryByText(/перевірте пошту/i)).not.toBeInTheDocument();
+  });
+
+  test("test_password_hint_is_linked_through_aria_describedby", () => {
+    render(<RegisterPage />);
+
+    const describedBy = screen.getByLabelText(/^пароль$/i).getAttribute("aria-describedby");
+    expect(describedBy).not.toBeNull();
+    expect(document.getElementById(describedBy as string)).toHaveTextContent(
+      "Щонайменше 8 символів",
+    );
   });
 });

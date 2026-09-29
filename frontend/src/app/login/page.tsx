@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/app/AuthContext";
+import PasswordField from "@/app/PasswordField";
 import { readCookie } from "@/lib/api/browserContext";
 import { apiRequest } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
@@ -105,17 +106,14 @@ export default function LoginPage() {
           />
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-        </div>
+        <PasswordField
+          id="password"
+          label="Пароль"
+          autoComplete="current-password"
+          value={password}
+          onChange={setPassword}
+          required
+        />
 
         {error !== null ? <p role="alert">{error}</p> : null}
 
