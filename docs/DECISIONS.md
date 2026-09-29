@@ -4190,7 +4190,7 @@ never override the input's type.
    `new-password`) and does not change when toggling.
 5. **Optional `hint` prop**, rendered as a `<p>` under the input and linked
    through `aria-describedby`. The register page's "Щонайменше 8 символів"
-   uses it. Changed 29.09.2026, not yet implemented: the hint is rendered
+   uses it. Changed and implemented 29.09.2026: the hint is rendered
    between the label and the input, not under the input, so it reads as an
    instruction rather than as feedback on what was typed. Still linked through
    `aria-describedby`. The register hint text becomes "Пароль має містити
