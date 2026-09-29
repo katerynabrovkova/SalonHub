@@ -3394,7 +3394,9 @@ Scope, in build order:
      ("Option A", same file's docstring). Now that a Customer can be
      linked to an Account, a guest booking made under a registered
      user's email silently overwrites that user's own profile
-     name/phone. Left as a known issue, not addressed here.
+     name/phone. Left as a known issue, not addressed here. Fixed
+     29.09.2026 for linked Customers, see "Guest booking keeps a linked
+     Customer's name and phone".
 
    Recon checks done before writing this refinement:
    - `MeSerializer` does not expose `email_verified_at`
@@ -4229,6 +4231,8 @@ entry overrides it for these four items.
 
 Decided 29.09.2026, in discussion, before item 10 starts.
 
+Implemented 29.09.2026.
+
 1. **Rule.** In `get_or_create_guest_customer`
    (`backend/accounts/services.py`), when the existing Customer is linked to
    an Account (`Account.customer`, reverse accessor `customer.account`), a
@@ -4249,9 +4253,10 @@ Decided 29.09.2026, in discussion, before item 10 starts.
    both cases. Any existing test that contradicts point 1 is changed on
    purpose, as a contract change. Recon on 29.09.2026 found none: the two
    existing overwrite tests in `tests/test_booking_create_guest_appointment.py`
-   use Customers with no linked Account.
+   use Customers with no linked Account. A fourth guard test was added: an
+   Account in the same salon that is not linked to the Customer does not
+   stop the overwrite, so the rule is "linked", not "has an account".
 5. **Related known issue.** This addresses the Option A known issue recorded
    in § Stage 15 planning, item 5, "Refined 19.09.2026" ("Known issue, not
    fixed by this item: `get_or_create_guest_customer` ... unconditionally
-   overwrites"). That issue is not marked fixed until this rule is
-   implemented.
+   overwrites").
