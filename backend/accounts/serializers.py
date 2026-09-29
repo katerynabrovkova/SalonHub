@@ -34,7 +34,7 @@ from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.authentication import ACCOUNT_IDENTITY_MODEL, IDENTITY_MODEL_CLAIM
-from accounts.models import Account
+from accounts.models import Account, Customer
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -109,6 +109,33 @@ class MeSerializer(serializers.ModelSerializer):
 
     def get_email_verified(self, obj: Account) -> bool:
         return obj.email_verified_at is not None
+
+
+class MeCustomerUpdateSerializer(serializers.ModelSerializer):
+    """
+    Body and response of ``PATCH auth/me/customer/`` (docs/DECISIONS.md §
+    "Item 10 design details (edit name and phone)"). Lists exactly `name`
+    and `phone`, never `__all__`/`exclude`, so any other key in the body
+    (`email`, `salon`, `preferred_language`) is ignored. The limits come from
+    the model (255 / 32, non-blank), the same as the booking serializers'
+    `customer_name`/`customer_phone`. Used with `partial=True`; `validate()`
+    rejects a body that carries neither field.
+    """
+
+    class Meta:
+        model = Customer
+        fields = ["name", "phone"]
+
+    def validate(self, attrs: dict) -> dict:
+        if not attrs:
+            raise serializers.ValidationError("Provide name and/or phone.")
+        return attrs
+
+    def update(self, instance: Customer, validated_data: dict) -> Customer:
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save(update_fields=[*validated_data, "updated_at"])
+        return instance
 
 
 class LogoutSerializer(serializers.Serializer):

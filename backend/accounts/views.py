@@ -51,7 +51,7 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import status
-from rest_framework.exceptions import NotAuthenticated
+from rest_framework.exceptions import NotAuthenticated, NotFound
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -67,6 +67,7 @@ from accounts.models import Account, Customer
 from accounts.serializers import (
     AccountTokenObtainPairSerializer,
     AccountTokenRefreshSerializer,
+    MeCustomerUpdateSerializer,
     MeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
@@ -396,6 +397,35 @@ class MeView(APIView):
 
     def get(self, request: Request, *args: object, **kwargs: object) -> Response:
         serializer = MeSerializer(request.user)
+        return Response(serializer.data)
+
+
+class MeCustomerView(APIView):
+    """
+    ``PATCH auth/me/customer/``: edit the linked Customer's name/phone
+    (docs/DECISIONS.md § "Item 10 design details (edit name and phone)").
+    Project-default authentication/permissions, so CSRF stays enforced by
+    `AccountJWTCookieAuthentication`.
+
+    The Customer comes only from `request.user.customer_id`, never from the
+    URL or body. No linked Customer raises the same bare `NotFound()` as
+    `booking.views.AccountAppointmentCancelView`/`AccountAppointmentPayView`,
+    so the 404 body is identical to theirs (`get_object_or_404`'s `Http404`
+    renders a different body). The lookup goes through the tenant-scoped
+    `Customer.objects`, so a linked Customer in another salon is a 404 too.
+    """
+
+    def patch(self, request: Request, *args: object, **kwargs: object) -> Response:
+        customer_id = request.user.customer_id  # type: ignore[union-attr]
+        customer = (
+            Customer.objects.filter(pk=customer_id).first() if customer_id is not None else None
+        )
+        if customer is None:
+            raise NotFound()
+
+        serializer = MeCustomerUpdateSerializer(customer, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(serializer.data)
 
 
