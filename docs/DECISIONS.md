@@ -4379,7 +4379,10 @@ Decided 30.09.2026, in discussion, before item 8 starts.
    `:129`) with no lowercasing and without resetting `email_verified_at`,
    which breaks "verified means the current email is proven". Fix: on the
    change form, `email` is read-only. The add form is unchanged. A client
-   changes their own email through item 8.
+   changes their own email through item 8. Implemented 30.09.2026 through
+   `AccountAdmin.get_readonly_fields`, which adds `email` only when the
+   object exists. A static `readonly_fields` entry would also lock the add
+   page; a guard test pins that the add page keeps an editable email.
 3. **Build.** Each fix gets its own red/green cycle and commit.
 
 ### Item 8 decisions (change email)
