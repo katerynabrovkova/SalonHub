@@ -65,6 +65,18 @@ on booking step 3 (see its known-issue entry).
   possible approach is an `error` prop on `PasswordField` linked through
   `aria-describedby`; when the message appears (on submit or on leaving
   the field) is still to decide.
+- Recorded 30.09.2026: user-visible English strings remain in the
+  frontend (for example the generic "Something went wrong. Please try
+  again." in `AccountBookingForm`, `ContactInfoForm` and the login page).
+  Decided by Katya: replace them with Ukrainian in a separate step after
+  Stage 15 closes. New UI is written in Ukrainian from now on. Files, under
+  `frontend/src/app/`: `admin/page.tsx`, `booking/AccountBookingForm.tsx`,
+  `booking/ContactInfoForm.tsx`, `booking/page.tsx`, `booking/pay/page.tsx`,
+  `booking/pay/PaymentStatus.tsx`, `layout.tsx` (metadata description,
+  `lang="en"`), `login/page.tsx`, `page.tsx`, `register/page.tsx` (shows
+  backend messages as-is, including `apiRequest`'s "Request failed."
+  fallback), `reviews/page.tsx`, `services/page.tsx`, `specialists/page.tsx`,
+  `specialists/[id]/page.tsx`, `verify-email/page.tsx`.
 
 ## Open questions
 
