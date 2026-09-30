@@ -229,3 +229,35 @@ def test_wrong_password_and_unknown_email_return_byte_identical_401(client, salo
     assert unknown_email.status_code == 401
     assert wrong_password.data == unknown_email.data
     assert wrong_password.content == unknown_email.content
+
+
+# --- C. email normalization before the lookup -----------------------------
+# docs/DECISIONS.md § "Email normalization and admin email lock (before
+# item 8)", point 1: stored emails are lowercase, so login strips and
+# lowercases the typed address before looking the Account up.
+
+
+def test_login_with_differently_cased_email_succeeds(client, salon) -> None:
+    _make_account(salon, email="alice@example.com")
+
+    response = client.post(
+        _login_url(salon.slug),
+        {"email": "Alice@Example.COM", "password": STRONG_PASSWORD},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.cookies.get(ACCESS_COOKIE) is not None
+
+
+def test_login_with_space_padded_email_succeeds(client, salon) -> None:
+    _make_account(salon, email="alice@example.com")
+
+    response = client.post(
+        _login_url(salon.slug),
+        {"email": "  alice@example.com  ", "password": STRONG_PASSWORD},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.cookies.get(ACCESS_COOKIE) is not None

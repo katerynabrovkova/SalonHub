@@ -65,6 +65,9 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 class ResendVerificationSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
+
 
 class MeSerializer(serializers.ModelSerializer):
     """
@@ -163,6 +166,14 @@ class AccountTokenObtainPairSerializer(TokenObtainSerializer):
 
     username_field = "email"
     token_class = RefreshToken
+
+    # The `email` field itself is added by TokenObtainSerializer.__init__,
+    # but DRF still runs this per-field hook for it. Stored emails are
+    # lowercase (AccountManager.create_account), so the lookup below must
+    # see the same form (docs/DECISIONS.md § "Email normalization and admin
+    # email lock (before item 8)", point 1).
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, str]:
         email = attrs[self.username_field]

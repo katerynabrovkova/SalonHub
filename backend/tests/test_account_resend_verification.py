@@ -159,3 +159,31 @@ def test_resend_is_throttled_after_the_configured_rate(client, salon) -> None:
         format="json",
     )
     assert response.status_code == 429
+
+
+# docs/DECISIONS.md § "Email normalization and admin email lock (before
+# item 8)", point 1: resend strips and lowercases the address before the
+# lookup. The response is an empty 202 either way, so the outbox is what
+# shows the account was found.
+
+
+def test_resend_with_differently_cased_email_sends_the_verification_email(client, salon) -> None:
+    account = _make_account(salon, email="alice@example.com")
+
+    response = client.post(_resend_url(salon.slug), {"email": "Alice@Example.COM"}, format="json")
+
+    _assert_empty_202(response)
+    assert len(mail.outbox) == 1
+    assert mail.outbox[0].to == [account.email]
+
+
+def test_resend_with_space_padded_email_sends_the_verification_email(client, salon) -> None:
+    account = _make_account(salon, email="alice@example.com")
+
+    response = client.post(
+        _resend_url(salon.slug), {"email": "  alice@example.com  "}, format="json"
+    )
+
+    _assert_empty_202(response)
+    assert len(mail.outbox) == 1
+    assert mail.outbox[0].to == [account.email]
