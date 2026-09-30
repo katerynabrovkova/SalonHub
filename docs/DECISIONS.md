@@ -4430,3 +4430,90 @@ Decided 30.09.2026, in discussion, before item 8 starts.
    looks, from reading `core/exceptions.py`, like a 400
    `unique_violation`. To be confirmed by a test during item 8, and that
    note corrected then.
+
+   Design details, decided 30.09.2026:
+
+   Backend
+   - **Request.** `POST /api/v1/salons/<slug>/auth/me/email-change/`,
+     authenticated, default authentication (CSRF enforced). Body:
+     `new_email`, `password`. The new email is stripped and lowercased.
+     Throttle scope `email_change`, 3/hour, keyed by the account. Errors,
+     each a 400 with its own code: wrong password `invalid_password`
+     (nothing sent); new email equal to the current one `same_email`;
+     invalid format the standard field validation error on `new_email`.
+     Otherwise always the same 202 with an empty body, whether the address
+     is free or taken.
+   - **Token.** `TimestampSigner` with its own salt (not the registration
+     verification salt), payload `account_id`, `old_email`, `new_email`;
+     valid 24 hours; rejected once `account.email` differs from
+     `old_email`, which also makes it single-use.
+   - **Confirm.** `POST /api/v1/salons/<slug>/auth/email-change/confirm/`,
+     public, body: `token`. In one transaction with the Account row
+     locked: check the token; re-check that no other Account and no other
+     Customer in the same salon has `new_email`; set `Account.email`, the
+     linked Customer's email (if any) and `email_verified_at`. Success 204.
+     Invalid or expired token: the existing `InvalidOrExpiredTokenError`.
+     Address taken at confirmation: 400 with code `email_unavailable`;
+     nothing changes. Sessions are not ended by the change.
+   - **Taken** means another Account or another Customer in the same
+     salon; addresses in other salons do not count.
+
+   Emails (Ukrainian, sent as plain text by Celery tasks like the existing
+   verification email; the view resolves the salon name with
+   `resolve_translation(salon.name, "uk")` and passes it to the task as a
+   plain string, since the tasks load no models)
+   1. New address, free. Subject "Підтвердіть нову адресу пошти". Body: a
+      change of email was requested for the account in salon {salon};
+      follow the link to confirm; the link is valid for 24 hours; if you
+      did not request it, ignore this letter.
+   2. New address, taken. Subject "Зміна адреси пошти". Body: someone
+      requested changing the email of an account in salon {salon} to this
+      address; "Цю адресу не можна використати." No link.
+   3. Old address, always after a correct password. Subject "Запит на
+      зміну адреси пошти". Body: a change to {new_email} was requested for
+      your account in salon {salon}; the current address keeps working
+      until the new one is confirmed; if it was not you, change your
+      password and contact the salon. The change-password and
+      forgot-password pages arrive with items 9 and 11, so until then this
+      advice has no page behind it.
+
+   Frontend
+   - **`/client/profile/email`**: back link "← Профіль" to
+     `/client/profile`; heading "Змінити email"; label "Поточна адреса"
+     with the current address as text; field "Нова адреса" (type
+     `email`); the `PasswordField` for the current password (label
+     "Поточний пароль", `autoComplete` `current-password`); hint text "Ми
+     надішлемо лист із підтвердженням на нову адресу. Поточна адреса
+     лишається робочою для входу, доки ви її не підтвердите."; button
+     "Надіслати підтвердження". On 202 the form is replaced by "Ми
+     надіслали лист на {new_email}. Перейдіть за посиланням у листі, щоб
+     підтвердити нову адресу." Errors map by code: `invalid_password` to
+     "Неправильний пароль.", `same_email` to "Це вже ваша адреса.", 429 to
+     "Забагато спроб. Спробуйте пізніше.", the rest as in item 10.
+   - **`/confirm-email-change`**, a separate public page reading `#token`
+     like `/verify-email`. States: "Підтверджуємо нову адресу...",
+     "Адресу пошти змінено." with a link to the profile, "Цю адресу не
+     можна використати.", "Посилання недійсне або застаріле.", plus the
+     connection text. How a logged-in user's `AuthContext` picks up the
+     new email after confirmation is decided at the frontend recon.
+
+   Planned backend tests
+   - **Request:** 401 unauthenticated; cross-tenant login gives 401; wrong
+     password 400 with no email sent; same email 400 (also when typed in
+     different case); invalid format 400; free address 202 with the
+     confirmation letter to the new address and the notice to the old
+     one, database unchanged; taken by another Account, and taken by
+     another unlinked Customer: 202 with the no-link letter and the
+     notice, database unchanged; the free and taken responses are
+     byte-identical; an address taken only in another salon counts as
+     free; throttle gives 429 on the 4th request.
+   - **Confirm:** a valid token changes `Account.email`, the linked
+     Customer's email and `email_verified_at` (also for an already
+     verified account); an account without a linked Customer changes only
+     the Account; expired, tampered and reused tokens give the
+     invalid-token error; a token issued before `account.email` changed is
+     rejected; address taken between request and confirm (by an Account,
+     and by a Customer) gives the taken error with nothing changed; a
+     registration verification token is rejected by this endpoint and an
+     email-change token by the verify-email endpoint; a token for another
+     salon's account is rejected on this salon's URL.
