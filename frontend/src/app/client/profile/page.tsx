@@ -7,10 +7,9 @@
  * app/client/layout.tsx (this route is inside its subtree) -- this page
  * does no auth checking of its own.
  *
- * Each row is a fully clickable link to its own not-yet-built sub-page
- * (/client/profile/email, /name, /phone, /password -- items 8-11, separate
- * follow-ups). Those routes don't exist yet, so clicking a row 404s
- * harmlessly today; no fake stub pages are added here for them.
+ * The Email and Password rows lead to /client/profile/email and
+ * /client/profile/password, which are not built yet (items 8 and 9) and
+ * 404 until then.
  *
  * Ім'я/Телефон rows are rendered ONLY when `me.name`/`me.phone` are
  * non-null (backend/accounts/serializers.py's MeSerializer: null means "no
