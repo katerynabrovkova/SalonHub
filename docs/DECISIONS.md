@@ -4293,6 +4293,42 @@ another salon (the known admin cross-salon link issue) gives a 404, not a
    `refresh()` from `AuthContext`, then navigate to `/client/profile`. If the
    user has no linked Customer (`me.name === null`), the page redirects to
    `/client/profile`. Errors use `role="alert"`.
+
+   Frontend details, decided 29.09.2026:
+
+   - One shared component, `EditProfileField`, in `app/client/profile/`,
+     used by two thin pages, `/client/profile/name` and
+     `/client/profile/phone`, that only pass settings (field, title, label,
+     input type, `maxLength`). Name: title "Змінити ім'я", label "Ім'я",
+     type `text`, `maxLength` 255. Phone: title "Змінити телефон", label
+     "Телефон", type `tel`, `maxLength` 32.
+   - The input is prefilled with the current value and has `required` and
+     `maxLength`.
+   - Submit: PATCH with only that field, then `await refresh()`, then
+     `router.push("/client/profile")`, the same order as
+     `AccountBookingForm`. The button is disabled while the request is
+     pending.
+   - No linked Customer (`me.name === null`):
+     `router.replace("/client/profile")` and render nothing.
+   - Errors: fixed Ukrainian text in a `role="alert"` element, no
+     navigation on error:
+     - `TypeError` or `RenewalUnsureError`: "Не вдалося з'єднатися.
+       Перевірте інтернет і спробуйте ще раз."
+     - 401: "Сесія завершилась. Увійдіть знову." (with a live session
+       hint, the layout already redirects to `/login` and saves the path).
+     - 404: `router.replace("/client/profile")`.
+     - Anything else, including 400: "Не вдалося зберегти. Спробуйте ще
+       раз."
+   - Back link "← Профіль" to `/client/profile`, written with `&larr;` like
+     the profile page's own back link.
+   - The stale comment on the profile page saying these routes 404 is
+     removed.
+   - Planned frontend tests. On the component: prefill, type, `maxLength`,
+     `required`; the PATCH body contains only the field; order PATCH,
+     `refresh`, push; button disabled while pending; no linked Customer
+     redirects and renders no form; each error case above, with no
+     navigation except 404; back link target. On each page: it passes its
+     settings (label, type, `maxLength`, title).
 7. **Build order.** Backend first, then frontend, each with its own
    red/green and commit.
 8. **Planned backend tests.** Name only, phone only, both; neither gives
