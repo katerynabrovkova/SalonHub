@@ -4353,3 +4353,72 @@ another salon (the known admin cross-salon link issue) gives a 404, not a
    in either salon changes.
 9. **Unchanged, out of scope.** The `/client` layout does not check the
    role, so an admin Account can reach these pages. Not addressed here.
+
+### Email normalization and admin email lock (before item 8)
+
+Decided 30.09.2026, in discussion, before item 8 starts.
+
+1. **Login and resend-verification normalize the email.** Stored emails
+   are lowercase (`AccountManager.create_account`,
+   `backend/accounts/models.py:151`), but login looks the Account up by
+   the email as typed (`backend/accounts/serializers.py:171`; SimpleJWT's
+   plain `CharField`), and so does resend-verification
+   (`ResendVerificationSerializer`, `serializers.py:65-66`, lookup at
+   `backend/accounts/views.py:288`). A capitalised or space-padded address
+   therefore fails to log in. Fix: both strip and lowercase the email
+   before the lookup, the same way register (`serializers.py:44-45`) and
+   password-reset (`serializers.py:51-52`) already do.
+2. **Admin change form: email is read-only.** The Django admin change form
+   lets an operator edit an existing Account's email
+   (`backend/accounts/admin.py:147-165`, not in `readonly_fields` at
+   `:129`) with no lowercasing and without resetting `email_verified_at`,
+   which breaks "verified means the current email is proven". Fix: on the
+   change form, `email` is read-only. The add form is unchanged. A client
+   changes their own email through item 8.
+3. **Build.** Each fix gets its own red/green cycle and commit.
+
+### Item 8 decisions (change email)
+
+Decided 30.09.2026, in discussion, before item 8 starts.
+
+1. **Request.** The user asks for the change on `/client/profile/email`
+   with the new email and their current password. A wrong password sends
+   nothing.
+2. **Token.** A separate signed "email change" token, not the registration
+   verification token (that one only verifies the current
+   `account.email`). The new address lives only in the token until
+   confirmed; nothing in the database changes before the link is clicked.
+   The token is invalid once `account.email` differs from the email it
+   was issued for.
+3. **Emails.** A link goes to the new address. A notice goes to the old
+   address saying a change was requested, and that if it was not them
+   they should change their password and contact the salon. A cancel link
+   in that notice is a later improvement, not in this item.
+4. **Confirmation.** `Account.email` and the linked Customer's email both
+   change, and `email_verified_at` is set (the new address is proven).
+   The confirm step sets `email_verified_at` itself, because the existing
+   verify step only stamps accounts that are not verified yet
+   (`backend/accounts/views.py:156`). The old address keeps working for
+   login until then.
+5. **Address taken.** The new address counts as taken if another Customer
+   or another Account in the same salon already has it. After a correct
+   password, the request response is always the same, whether the address
+   is free or taken: the page says a letter was sent to the new address.
+   If the address is free, that letter carries the confirmation link. If
+   it is taken, the letter carries no link and says only "Цю адресу не
+   можна використати." So only the owner of the new mailbox learns the
+   outcome, and nobody can probe which addresses exist in the salon, the
+   same principle as password reset's constant 202. The notice to the old
+   address is sent in both cases. The check runs again at confirmation,
+   because the address may be taken between request and click; then the
+   confirm page shows "Цю адресу не можна використати." and nothing
+   changes. Merging the two Customers is a later step.
+6. **Throttling.** The request endpoint is throttled like password reset.
+7. **Still to design.** Endpoints, pages, email texts and tests are
+   designed before the red phase and recorded as an addition to this
+   entry. Emails are in Ukrainian.
+8. **Relink error, to confirm.** The note in § Stage 15 planning, item 8,
+   that relinking an already-linked Customer "surfaces as a bare 500"
+   looks, from reading `core/exceptions.py`, like a 400
+   `unique_violation`. To be confirmed by a test during item 8, and that
+   note corrected then.
