@@ -4277,8 +4277,10 @@ Implemented 29.09.2026.
 
 Decided 29.09.2026, in discussion.
 
-Backend implemented 29.09.2026 (points 1-5 and 8). The frontend (point 6)
-is not built yet. Two details beyond the points below: the save also bumps
+Backend implemented 29.09.2026 (points 1-5 and 8). Frontend implemented
+30.09.2026 (point 6). Browser-checked by Katya; the no-linked-Customer
+redirect was not checked by hand and relies on its mutation-tested unit
+test. Two details beyond the points below: the save also bumps
 `updated_at` (`update_fields` alone skips `auto_now` fields); and the lookup
 goes through the tenant-scoped `Customer.objects`, so a Customer linked from
 another salon (the known admin cross-salon link issue) gives a 404, not a
