@@ -4364,10 +4364,15 @@ Decided 30.09.2026, in discussion, before item 8 starts.
    the email as typed (`backend/accounts/serializers.py:171`; SimpleJWT's
    plain `CharField`), and so does resend-verification
    (`ResendVerificationSerializer`, `serializers.py:65-66`, lookup at
-   `backend/accounts/views.py:288`). A capitalised or space-padded address
-   therefore fails to log in. Fix: both strip and lowercase the email
-   before the lookup, the same way register (`serializers.py:44-45`) and
-   password-reset (`serializers.py:51-52`) already do.
+   `backend/accounts/views.py:288`). A capitalised address therefore
+   failed to log in; a space-padded one did not, because DRF's
+   `CharField`/`EmailField` already trim whitespace by default. Fix: both
+   strip and lowercase the email before the lookup, the same way register
+   (`serializers.py:44-45`) and password-reset (`serializers.py:51-52`)
+   already do. Implemented 30.09.2026: login and resend-verification get
+   the same `validate_email` as `RegisterSerializer` (strip, lowercase).
+   Two space-padded tests guard DRF's trimming; without it, resend would
+   also return a 400 instead of its constant 202.
 2. **Admin change form: email is read-only.** The Django admin change form
    lets an operator edit an existing Account's email
    (`backend/accounts/admin.py:147-165`, not in `readonly_fields` at
