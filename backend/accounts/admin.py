@@ -179,3 +179,14 @@ class AccountAdmin(SalonScopedAdmin):
         if obj is None:
             return self.add_fieldsets
         return super().get_fieldsets(request, obj)
+
+    def get_readonly_fields(self, request: HttpRequest, obj: Account | None = None) -> Any:
+        # Email is read-only on the change page only: an edit here would
+        # skip lowercasing and keep email_verified_at, breaking "verified
+        # means the current email is proven". A client changes their own
+        # email through item 8 (docs/DECISIONS.md § "Email normalization and
+        # admin email lock (before item 8)", point 2).
+        readonly = super().get_readonly_fields(request, obj)
+        if obj is None:
+            return readonly
+        return (*readonly, "email")

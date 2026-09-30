@@ -10,6 +10,7 @@ django.contrib.auth.forms.UserCreationForm).
 import pytest
 from django.contrib import admin
 from django.test import RequestFactory
+from django.utils import timezone
 
 from accounts.models import Account, AccountRole, Customer
 from core.admin import SalonScopedAdmin
@@ -247,3 +248,66 @@ def test_account_admin_add_is_enabled(superuser):
 
 def test_account_admin_uses_salon_scoped_base():
     assert isinstance(admin.site._registry[Account], SalonScopedAdmin)
+
+
+# --- 15. email is read-only on the change form, editable on the add form ---
+# docs/DECISIONS.md § "Email normalization and admin email lock (before
+# item 8)", point 2: an admin email edit would skip lowercasing and keep
+# email_verified_at, breaking "verified means the current email is proven".
+# A client changes their own email through item 8.
+
+
+def _change_url(account) -> str:
+    return f"/admin/accounts/account/{account.id}/change/"
+
+
+def _current_change_form_data(client, account) -> dict:
+    """POST data mirroring the change form exactly as rendered, so the test
+    keeps working when fields are added to it."""
+    form = client.get(_change_url(account)).context["adminform"].form
+    data: dict = {"_save": "Save"}
+    for name in form.fields:
+        value = form[name].value()
+        if value is None:
+            data[name] = ""
+        elif isinstance(value, bool):
+            if value:
+                data[name] = "on"
+        else:
+            data[name] = value
+    return data
+
+
+def test_account_change_form_has_no_editable_email_field(client, superuser, admin_account):
+    client.force_login(superuser)
+
+    response = client.get(_change_url(admin_account))
+
+    assert response.status_code == 200
+    assert b'name="email"' not in response.content
+
+
+def test_account_change_post_cannot_change_email_or_verified_at(client, superuser, admin_account):
+    verified_at = timezone.now()
+    Account.unscoped_objects.filter(pk=admin_account.pk).update(email_verified_at=verified_at)
+    client.force_login(superuser)
+    data = _current_change_form_data(client, admin_account)
+    data["email"] = "changed@example.com"
+
+    response = client.post(_change_url(admin_account), data)
+
+    assert response.status_code == 302, (
+        response.context["adminform"].form.errors if response.status_code == 200 else response
+    )
+    reloaded = Account.unscoped_objects.get(pk=admin_account.pk)
+    assert reloaded.email == "admin@example.com"
+    assert reloaded.email_verified_at == verified_at
+
+
+def test_account_add_form_still_has_an_editable_email_field(client, superuser):
+    client.force_login(superuser)
+
+    response = client.get("/admin/accounts/account/add/")
+
+    assert response.status_code == 200
+    assert b'name="email"' in response.content
