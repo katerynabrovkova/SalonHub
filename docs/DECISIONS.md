@@ -4622,3 +4622,7 @@ Decided 02.10.2026, in discussion.
 2. **Not a serializer.** A required `CharField` would change the error
    for a missing token, which today is the invalid-token error.
 3. **Build.** Item 8 cycle 3, one red/green for both views.
+
+Implemented 02.10.2026 as `_token_from_body` in `backend/accounts/views.py`,
+used by both views; form-encoded bodies still work because `QueryDict` is a
+`dict` subclass.
