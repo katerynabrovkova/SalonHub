@@ -4578,3 +4578,32 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      `IntegrityError` (the address was taken between the check and the
      save), the response is the same 400 `email_unavailable` and nothing
      changes.
+
+   Cycle 2 (confirm) implemented, 02.10.2026
+   - **View.** `EmailChangeConfirmView` at `auth/email-change/confirm/`,
+     public through `PublicEndpointMixin`. In one `transaction.atomic()`
+     it reads the token, re-checks the address with `is_email_taken`, then
+     sets `Account.email`, `email_verified_at` and the linked Customer's
+     email. Success is 204.
+   - **Token reader.** `read_email_change_token` in `accounts/tokens.py`
+     unsigns with `EMAIL_CHANGE_TOKEN_MAX_AGE`, compares the payload's
+     `salon_id` with the bound salon before any lookup, locks the Account
+     through the tenant-scoped `Account.objects` with
+     `select_for_update`, and rejects the token once `account.email`
+     differs from `old_email`. Every failure raises `BadSignature` or
+     `SignatureExpired`, which the view turns into
+     `InvalidOrExpiredTokenError`.
+   - **Address taken.** `EmailUnavailableError` (`DomainError`, code
+     `email_unavailable`, 400) is raised by the re-check and by an
+     `IntegrityError` at save.
+   - **Inner atomic block.** The saves run in an inner
+     `transaction.atomic()`, kept although no test can observe it today:
+     the `IntegrityError` is re-raised as `EmailUnavailableError` out of
+     the outer block, which rolls everything back anyway. The savepoint
+     matters only if code after the `except` ever keeps using the
+     transaction.
+   - **Untestable guard.** The tenant-scoped Account lookup cannot be
+     isolated by an HTTP test while the `salon_id` check is in place: a
+     token for another salon's account is already rejected by the
+     `salon_id` check. A mutation test confirmed it (an unscoped lookup
+     alone breaks no test; removing both guards does).
