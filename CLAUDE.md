@@ -177,6 +177,12 @@ salons without rework.
 - Type hints throughout; `mypy` (with `django-stubs`) must pass.
 - Formatting/linting: `ruff` (lint + format), configured in `backend/pyproject.toml`.
 - Tests: `pytest` + `pytest-django`, against a real PostgreSQL instance.
+- **A test must never compare a hardcoded absolute date with the real
+  `timezone.now()`**, directly or through production code (guest-token expiry, lead
+  time, max advance days, review windows, etc.). Such a test passes when written and
+  fails once the calendar moves past the date; this has broken the baseline three
+  times. Freeze now with `monkeypatch.setattr(timezone, "now", ...)` as in commit
+  `7bb714d`, or build the dates relative to a frozen now.
 
 ## Running the project
 
