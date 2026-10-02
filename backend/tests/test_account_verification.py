@@ -228,3 +228,26 @@ def test_link_matches_by_email_only_not_phone(client, salon) -> None:
     assert response.status_code == 204
     row = Account.unscoped_objects.get(pk=account.pk)
     assert row.customer_id is None
+
+
+# --- 11. malformed body: same answer as a garbage token ----------------
+# docs/DECISIONS.md § "Malformed body on token endpoints (verify-email,
+# email-change confirm)".
+
+
+def test_non_string_token_answers_like_a_garbage_token(client, salon) -> None:
+    response = client.post(_verify_url(salon.slug), {"token": 123}, format="json")
+    garbage = client.post(_verify_url(salon.slug), {"token": "not-a-token"}, format="json")
+
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "invalid_or_expired_token"
+    assert response.content == garbage.content
+
+
+def test_json_array_body_answers_like_a_garbage_token(client, salon) -> None:
+    response = client.post(_verify_url(salon.slug), ["a", "b"], format="json")
+    garbage = client.post(_verify_url(salon.slug), {"token": "not-a-token"}, format="json")
+
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "invalid_or_expired_token"
+    assert response.content == garbage.content

@@ -309,3 +309,24 @@ def test_after_confirmation_login_works_with_new_email_and_not_the_old(
 
     assert new_login.status_code == 200
     assert old_login.status_code == 401
+
+
+# --- Malformed body: same answer as a garbage token ---------------------------------
+# docs/DECISIONS.md § "Malformed body on token endpoints (verify-email,
+# email-change confirm)".
+
+
+def test_non_string_token_answers_like_a_garbage_token(client, salon):
+    response = client.post(_confirm_url(salon), {"token": 123}, format="json")
+    garbage = _confirm(client, salon, "not-a-token")
+
+    _assert_invalid_token(response)
+    assert response.content == garbage.content
+
+
+def test_json_array_body_answers_like_a_garbage_token(client, salon):
+    response = client.post(_confirm_url(salon), ["a", "b"], format="json")
+    garbage = _confirm(client, salon, "not-a-token")
+
+    _assert_invalid_token(response)
+    assert response.content == garbage.content

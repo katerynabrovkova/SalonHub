@@ -113,6 +113,21 @@ class PublicEndpointMixin:
     authentication_classes = ()
 
 
+def _token_from_body(request: Request) -> str:
+    """
+    The ``token`` of a token endpoint's body (docs/DECISIONS.md § "Malformed
+    body on token endpoints (verify-email, email-change confirm)"). A body
+    that is not an object, or a token that is not a string, yields ``""`` so
+    it follows the empty-token path to ``InvalidOrExpiredTokenError`` instead
+    of crashing into a 500. A missing token stays ``""`` as before.
+    """
+    data = request.data
+    if not isinstance(data, dict):
+        return ""
+    token = data.get("token", "")
+    return token if isinstance(token, str) else ""
+
+
 class RegisterView(PublicEndpointMixin, APIView):
     """
     Client self-registration (docs/DECISIONS.md § Stage 3-R.D.3). Public
@@ -203,7 +218,7 @@ class VerifyEmailView(PublicEndpointMixin, APIView):
         now = timezone.now()
         salon = get_object_or_404(Salon, pk=get_current_salon_id())
         try:
-            account_id = read_account_verification_token(request.data.get("token", ""))
+            account_id = read_account_verification_token(_token_from_body(request))
         except (signing.SignatureExpired, signing.BadSignature) as exc:
             raise InvalidOrExpiredTokenError() from exc
         _verify_and_link(account_id=account_id, salon=salon, now=now)
@@ -506,7 +521,7 @@ class EmailChangeConfirmView(PublicEndpointMixin, APIView):
         now = timezone.now()
         with transaction.atomic():
             try:
-                account, new_email = read_email_change_token(request.data.get("token", ""))
+                account, new_email = read_email_change_token(_token_from_body(request))
             except (signing.SignatureExpired, signing.BadSignature) as exc:
                 raise InvalidOrExpiredTokenError() from exc
 
