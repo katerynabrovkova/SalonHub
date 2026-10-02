@@ -4607,3 +4607,18 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      token for another salon's account is already rejected by the
      `salon_id` check. A mutation test confirmed it (an unscoped lookup
      alone breaks no test; removing both guards does).
+
+### Malformed body on token endpoints (verify-email, email-change confirm)
+
+Decided 02.10.2026, in discussion.
+
+1. **Same answer as a bad token.** A body that is not a JSON object, or a
+   token that is not a string, gets the same `InvalidOrExpiredTokenError`
+   (400) as an empty or forged token. Today both views answer it with a
+   500 and log a traceback: they read the token with
+   `request.data.get("token", "")` (`backend/accounts/views.py:206` and
+   `:509`), so a list body raises `AttributeError` and an integer token
+   raises `TypeError` inside the signer.
+2. **Not a serializer.** A required `CharField` would change the error
+   for a missing token, which today is the invalid-token error.
+3. **Build.** Item 8 cycle 3, one red/green for both views.
