@@ -178,6 +178,9 @@ REST_FRAMEWORK = {
         "register": "3/hour",
         "password_reset": "3/hour",
         "resend_verification": "3/hour",
+        # docs/DECISIONS.md § "Item 8 decisions (change email)": keyed by the
+        # account (authenticated view), wrong-password attempts included.
+        "email_change": "3/hour",
         "guest_token": "20/min",
     },
     "EXCEPTION_HANDLER": "core.exceptions.exception_handler",

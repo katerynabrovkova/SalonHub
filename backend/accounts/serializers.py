@@ -35,6 +35,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.authentication import ACCOUNT_IDENTITY_MODEL, IDENTITY_MODEL_CLAIM
 from accounts.models import Account, Customer
+from core.exceptions import InvalidPasswordError, SameEmailError
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -139,6 +140,34 @@ class MeCustomerUpdateSerializer(serializers.ModelSerializer):
             setattr(instance, field, value)
         instance.save(update_fields=[*validated_data, "updated_at"])
         return instance
+
+
+class MeEmailChangeSerializer(serializers.Serializer):
+    """
+    Body of ``POST auth/me/email-change/`` (docs/DECISIONS.md § "Item 8
+    decisions (change email)"). Needs ``context={"account": <Account>}``.
+
+    `validate()` checks the password first, then the same-email case, and
+    raises DomainError subclasses for both so each gets its own code in the
+    envelope -- the same pattern as `ReviewCreateSerializer.validate()`
+    raising `DuplicateReviewError`. A DRF ValidationError would always carry
+    the generic `invalid` code. A bad email format is still the ordinary
+    field-level 400 on `new_email`, raised before `validate()` runs.
+    """
+
+    new_email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+    def validate_new_email(self, value: str) -> str:
+        return value.strip().lower()
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        account: Account = self.context["account"]
+        if not account.check_password(attrs["password"]):
+            raise InvalidPasswordError()
+        if attrs["new_email"] == account.email:
+            raise SameEmailError()
+        return attrs
 
 
 class LogoutSerializer(serializers.Serializer):

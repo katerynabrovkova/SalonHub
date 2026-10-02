@@ -68,16 +68,30 @@ from accounts.serializers import (
     AccountTokenObtainPairSerializer,
     AccountTokenRefreshSerializer,
     MeCustomerUpdateSerializer,
+    MeEmailChangeSerializer,
     MeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     RegisterSerializer,
     ResendVerificationSerializer,
 )
-from accounts.tasks import send_password_reset_email, send_verification_email
-from accounts.tokens import generate_account_verification_token, read_account_verification_token
+from accounts.services import is_email_taken
+from accounts.tasks import (
+    send_email_change_confirmation_email,
+    send_email_change_notice_email,
+    send_email_change_unavailable_email,
+    send_password_reset_email,
+    send_verification_email,
+)
+from accounts.tokens import (
+    generate_account_verification_token,
+    generate_email_change_token,
+    read_account_verification_token,
+)
 from core.exceptions import InvalidOrExpiredTokenError
+from core.i18n import resolve_translation
 from core.tenancy import get_current_salon_id
+from core.urls import build_salon_frontend_url
 from tenants.models import Salon
 
 
@@ -427,6 +441,46 @@ class MeCustomerView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class MeEmailChangeView(APIView):
+    """
+    ``POST auth/me/email-change/``: request an email change
+    (docs/DECISIONS.md § "Item 8 decisions (change email)"). Same
+    authentication/permissions as `MeCustomerView` (project defaults, CSRF
+    enforced by `AccountJWTCookieAuthentication`); throttled per account at
+    the ``email_change`` scope, so wrong-password attempts count too.
+
+    A wrong password or the current email is a coded 400 from the
+    serializer, before any lookup or mail. After that the response is always
+    the same empty 202: a free address gets the confirmation link, a taken
+    one (`accounts.services.is_email_taken`) a letter without a link, so
+    only the owner of the new mailbox learns which. The notice to the
+    current address is sent in both cases. Nothing in the database changes
+    here; the new address lives only in the token.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "email_change"
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        account: Account = request.user  # type: ignore[assignment]
+        serializer = MeEmailChangeSerializer(data=request.data, context={"account": account})
+        serializer.is_valid(raise_exception=True)
+        new_email = serializer.validated_data["new_email"]
+
+        salon = get_object_or_404(Salon, pk=get_current_salon_id())
+        salon_name = resolve_translation(salon.name, "uk")
+
+        if is_email_taken(account=account, email=new_email):
+            send_email_change_unavailable_email.delay(new_email, salon_name)
+        else:
+            token = generate_email_change_token(account, new_email)
+            link = build_salon_frontend_url(salon.slug, "/confirm-email-change") + f"#token={token}"
+            send_email_change_confirmation_email.delay(new_email, link, salon_name)
+        send_email_change_notice_email.delay(account.email, new_email, salon_name)
+
+        return Response(status=status.HTTP_202_ACCEPTED)
 
 
 class LogoutView(APIView):

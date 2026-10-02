@@ -42,6 +42,29 @@ def generate_account_verification_token(account: Account) -> str:
     return signer.sign_object({"account_id": account.id, "email": account.email})
 
 
+_EMAIL_CHANGE_SALT = "accounts.email-change"
+
+# 24 hours (docs/DECISIONS.md § "Item 8 decisions (change email)", design
+# details). Same fixed-security-parameter stance as
+# ACCOUNT_VERIFICATION_TOKEN_MAX_AGE above.
+EMAIL_CHANGE_TOKEN_MAX_AGE = 60 * 60 * 24
+
+
+def generate_email_change_token(account: Account, new_email: str) -> str:
+    """
+    Email-change token (docs/DECISIONS.md § "Item 8 decisions (change
+    email)"). Its own salt, so it is never accepted as a verification token
+    and vice versa. ``old_email`` is the account's email at issue time; the
+    confirm step rejects the token once ``account.email`` differs from it,
+    which also makes it single-use. The new address lives only here until
+    confirmed.
+    """
+    signer = signing.TimestampSigner(salt=_EMAIL_CHANGE_SALT)
+    return signer.sign_object(
+        {"account_id": account.id, "old_email": account.email, "new_email": new_email}
+    )
+
+
 def read_account_verification_token(token: str) -> int:
     """
     Returns the verified account id, or raises ``signing.BadSignature`` /

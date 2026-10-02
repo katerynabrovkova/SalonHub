@@ -38,5 +38,6 @@ urlpatterns = [
     path("auth/refresh/", views.RefreshView.as_view(), name="refresh"),
     path("auth/me/", views.MeView.as_view(), name="me"),
     path("auth/me/customer/", views.MeCustomerView.as_view(), name="me-customer"),
+    path("auth/me/email-change/", views.MeEmailChangeView.as_view(), name="me-email-change"),
     path("auth/logout/", views.LogoutView.as_view(), name="logout"),
 ]

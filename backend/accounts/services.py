@@ -45,3 +45,20 @@ def get_or_create_guest_customer(*, salon: Salon, name: str, email: str, phone: 
         customer.phone = phone
         customer.save(update_fields=["name", "phone"])
     return customer
+
+
+def is_email_taken(*, account: Account, email: str) -> bool:
+    """
+    Whether ``email`` belongs to another Account or another Customer in the
+    bound salon (docs/DECISIONS.md § "Item 8 decisions (change email)").
+    The account itself and its own linked Customer do not count.
+
+    Case-insensitive (``iexact``): guest booking stores ``Customer.email``
+    as typed, so an exact match would miss ``Alice@X.com``. Both lookups go
+    through the tenant-scoped managers, so other salons never count.
+    """
+    other_accounts = Account.objects.filter(email__iexact=email).exclude(pk=account.pk)
+    other_customers = Customer.objects.filter(email__iexact=email)
+    if account.customer_id is not None:
+        other_customers = other_customers.exclude(pk=account.customer_id)
+    return other_accounts.exists() or other_customers.exists()

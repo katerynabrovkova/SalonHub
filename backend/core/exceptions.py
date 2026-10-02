@@ -43,6 +43,31 @@ class InvalidOrExpiredTokenError(DomainError):
     default_message = "This link is invalid or has expired."
 
 
+class InvalidPasswordError(DomainError):
+    """
+    docs/DECISIONS.md § "Item 8 decisions (change email)": the current
+    password sent with an email-change request is wrong. Raised from
+    MeEmailChangeSerializer.validate() before any other check, so nothing is
+    sent.
+    """
+
+    code = "invalid_password"
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_message = "The password is incorrect."
+
+
+class SameEmailError(DomainError):
+    """
+    docs/DECISIONS.md § "Item 8 decisions (change email)": the requested new
+    email equals the account's current one (after stripping and
+    lowercasing). Raised from MeEmailChangeSerializer.validate().
+    """
+
+    code = "same_email"
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_message = "This is already your email address."
+
+
 class InvalidStateTransitionError(DomainError):
     code = "invalid_state_transition"
     status_code = status.HTTP_409_CONFLICT
