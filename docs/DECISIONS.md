@@ -77,6 +77,15 @@ on booking step 3 (see its known-issue entry).
   backend messages as-is, including `apiRequest`'s "Request failed."
   fallback), `reviews/page.tsx`, `services/page.tsx`, `specialists/page.tsx`,
   `specialists/[id]/page.tsx`, `verify-email/page.tsx`.
+- Recorded 02.10.2026: guest booking does not normalize `Customer.email`.
+  `customer_email` is a plain `EmailField` (`backend/booking/serializers.py:260`)
+  that only trims whitespace, and `get_or_create_guest_customer` stores it
+  as typed (`backend/accounts/services.py:40-41`). Customers that differ
+  only by letter case can therefore exist in one salon, since
+  `customer_salon_email_uniq` is case-sensitive. A fix needs normalization
+  at write time plus a data migration that checks for case collisions
+  first. Not part of item 8, which works around it with a case-insensitive
+  "taken" check (see "Item 8 decisions (change email)").
 
 ## Open questions
 
@@ -4457,6 +4466,11 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      nothing changes. Sessions are not ended by the change.
    - **Taken** means another Account or another Customer in the same
      salon; addresses in other salons do not count.
+   - **Taken is case-insensitive.** Added 02.10.2026: both the request
+     and the confirmation check match `email__iexact`, not an exact
+     match. Guest booking stores `Customer.email` without lowercasing
+     (see the known issue recorded 02.10.2026), so an exact match would
+     miss a row like `Alice@X.com` and create a duplicate person.
 
    Emails (Ukrainian, sent as plain text by Celery tasks like the existing
    verification email; the view resolves the salon name with
