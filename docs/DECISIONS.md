@@ -4608,6 +4608,40 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      `salon_id` check. A mutation test confirmed it (an unscoped lookup
      alone breaks no test; removing both guards does).
 
+   Frontend details, decided 02.10.2026
+   - **AuthContext after confirm.** On success the confirm page calls
+     `refresh()` from `AuthContext`, so a logged-in user's profile shows
+     the new address. A logged-out user is unaffected.
+   - **Success text.** The success state adds the sentence "Для входу
+     використовуйте нову адресу." before the profile link.
+   - **Request page errors.** The generic text is "Не вдалося надіслати.
+     Спробуйте ще раз."; a 400 field error on `new_email` shows
+     "Перевірте адресу пошти."; the connection and 401 texts are as in
+     item 10.
+   - **Confirm page, unexpected errors.** A 500 or any other unexpected
+     error shows "Не вдалося підтвердити адресу. Оновіть сторінку, щоб
+     спробувати ще раз.", not the invalid-link text.
+   - **Sent screen.** The "Ми надіслали лист" screen mirrors the
+     registration check-email screen. A "Надіслати ще раз" button repeats
+     the request with the values from the last successful send, held in
+     component state, then shows "Лист надіслано ще раз."; a 429 shows
+     "Забагато спроб. Спробуйте пізніше.". That 429 text is a deliberate
+     difference from registration, whose resend shows the same outcome
+     whatever happens: registration is public and hides outcomes, while
+     here the password was already accepted. Other resend errors use the
+     request page texts (connection, 401, generic). An `invalid_password`
+     on resend (the password changed in between) shows "Неправильний
+     пароль." and returns to the form. A "Вказали не ту адресу? Змінити"
+     link returns to the form with the new address filled in and the
+     password cleared, like registration (`register/page.tsx:133`). Each
+     send issues a new token; once one is confirmed the others stop
+     working, because their `old_email` no longer matches.
+   - **Checks.** The new code adds no lint or tsc errors and uses no
+     `eslint-disable` comments. `VerifyEmailStatus` is not changed in
+     item 8.
+   - **Stale comment.** The comment in `client/profile/page.tsx:10-12`
+     saying the email route 404s is updated when the page lands.
+
 ### Malformed body on token endpoints (verify-email, email-change confirm)
 
 Decided 02.10.2026, in discussion.
