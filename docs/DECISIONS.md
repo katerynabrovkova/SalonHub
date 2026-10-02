@@ -4531,3 +4531,28 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      registration verification token is rejected by this endpoint and an
      email-change token by the verify-email endpoint; a token for another
      salon's account is rejected on this salon's URL.
+
+   Cycle 1 (request) implemented, 02.10.2026
+   - **View.** `MeEmailChangeView` at `auth/me/email-change/`, with the
+     same default authentication and permissions as `MeCustomerView` and
+     `ScopedRateThrottle` at scope `email_change` (3/hour). The token
+     comes from `generate_email_change_token` in `accounts/tokens.py`
+     (salt `accounts.email-change`); its validator lands with cycle 2.
+   - **Error codes.** `invalid_password` and `same_email` are
+     `InvalidPasswordError` and `SameEmailError`, `DomainError`
+     subclasses in `core/exceptions.py`, raised from
+     `MeEmailChangeSerializer.validate()` as `ReviewCreateSerializer`
+     raises `DuplicateReviewError`. Not a DRF `ValidationError`: the
+     exception handler gives every `ValidationError` the generic code
+     `invalid`, so a distinct code needs its own `DomainError`.
+   - **Taken check.** `is_email_taken` in `accounts/services.py`
+     (case-insensitive, tenant-scoped managers only, excluding the
+     account itself and its own linked Customer). The confirm step reuses
+     it for its re-check.
+   - **Emails.** Three Celery tasks in `accounts/tasks.py` take only plain
+     strings (recipient, link, salon name, new email). The view resolves
+     the salon name and builds the link; the tasks load no models.
+   - **Order.** A bad email format is a field-level 400 on `new_email`,
+     raised by DRF's field validation before `validate()`, so it comes
+     before the password check. The wrong-password 400 still precedes the
+     same-email check, the taken lookup and any mail.
