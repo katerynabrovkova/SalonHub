@@ -16,6 +16,7 @@ trap recorded in CLAUDE.md. Three layers, each tested here:
 import datetime as dt
 
 import pytest
+from django.utils import timezone
 from rest_framework import generics
 from rest_framework.test import APIRequestFactory
 
@@ -52,7 +53,7 @@ def test_has_permission_denies_an_invalid_guest_token_action_value():
 
 
 def test_has_permission_allows_and_stashes_the_token_for_a_valid_action(
-    salon, customer, specialist, service
+    monkeypatch, salon, customer, specialist, service
 ):
     with tenant_context(salon.id):
         appointment = make_appointment(
@@ -63,6 +64,11 @@ def test_has_permission_allows_and_stashes_the_token_for_a_valid_action(
             start=dt.datetime(2026, 11, 1, 10, 0, tzinfo=dt.UTC),
         )
         raw_token, token_row = issue_guest_token(appointment)
+
+    # validate_guest_token checks expires_at (appointment end + 30 days,
+    # booking/guest_tokens.py) against the real timezone.now(); freeze now to
+    # the appointment start so the token stays valid regardless of the date.
+    monkeypatch.setattr(timezone, "now", lambda: appointment.start_datetime)
 
     request = factory.get("/", HTTP_X_GUEST_TOKEN=raw_token)
     view = _View()

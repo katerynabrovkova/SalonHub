@@ -14,6 +14,15 @@ pytestmark = pytest.mark.django_db
 START = dt.datetime(2026, 9, 1, 10, 0, tzinfo=dt.UTC)
 
 
+def _freeze_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """validate_guest_token checks expires_at (appointment end + 30 days,
+    booking/guest_tokens.py) against the real timezone.now(), and START is
+    a fixed literal, so a valid-token test fails once the real date passes
+    that expiry. Freezing now to START keeps the token valid forever, the
+    same fix as test_guest_token_derive.py."""
+    monkeypatch.setattr(timezone, "now", lambda: START)
+
+
 @pytest.fixture
 def client() -> APIClient:
     return APIClient()
@@ -44,7 +53,10 @@ def _cancel_url(salon, appointment) -> str:
 # --- retrieve -----------------------------------------------------------------
 
 
-def test_retrieve_with_a_valid_token_returns_the_appointment(client, salon, appointment, token):
+def test_retrieve_with_a_valid_token_returns_the_appointment(
+    monkeypatch, client, salon, appointment, token
+):
+    _freeze_now(monkeypatch)
     response = client.get(_detail_url(salon, appointment), HTTP_X_GUEST_TOKEN=token)
 
     assert response.status_code == 200
@@ -129,8 +141,9 @@ def test_all_guest_token_failure_modes_produce_an_identical_response(
 
 
 def test_cancel_transitions_status_and_records_cancelled_by_guest(
-    client, salon, appointment, token
+    monkeypatch, client, salon, appointment, token
 ):
+    _freeze_now(monkeypatch)
     response = client.post(_cancel_url(salon, appointment), HTTP_X_GUEST_TOKEN=token)
 
     assert response.status_code == 200
@@ -141,8 +154,9 @@ def test_cancel_transitions_status_and_records_cancelled_by_guest(
 
 
 def test_cancelling_twice_rejects_the_second_attempt_but_retrieve_still_works(
-    client, salon, appointment, token
+    monkeypatch, client, salon, appointment, token
 ):
+    _freeze_now(monkeypatch)
     first = client.post(_cancel_url(salon, appointment), HTTP_X_GUEST_TOKEN=token)
     assert first.status_code == 200
 
@@ -157,8 +171,9 @@ def test_cancelling_twice_rejects_the_second_attempt_but_retrieve_still_works(
 
 
 def test_cancel_is_rejected_for_an_appointment_not_in_an_active_status(
-    salon, customer, specialist, service, client
+    monkeypatch, salon, customer, specialist, service, client
 ):
+    _freeze_now(monkeypatch)
     completed = make_appointment(
         salon=salon,
         customer=customer,
@@ -176,7 +191,9 @@ def test_cancel_is_rejected_for_an_appointment_not_in_an_active_status(
     assert response.data["error"]["code"] == "invalid_state_transition"
 
 
-def test_cancel_updates_both_the_appointment_and_the_token_row(client, salon, appointment, token):
+def test_cancel_updates_both_the_appointment_and_the_token_row(
+    monkeypatch, client, salon, appointment, token
+):
     """
     Stage 7.E: the guest cancel view is rewritten to call
     booking.services.cancel_appointment, which knows nothing about
@@ -184,6 +201,7 @@ def test_cancel_updates_both_the_appointment_and_the_token_row(client, salon, ap
     thing most at risk of being dropped when the inline logic moves into the
     service — proving both effects land guards the rewrite.
     """
+    _freeze_now(monkeypatch)
     response = client.post(_cancel_url(salon, appointment), HTTP_X_GUEST_TOKEN=token)
 
     assert response.status_code == 200
@@ -195,7 +213,7 @@ def test_cancel_updates_both_the_appointment_and_the_token_row(client, salon, ap
 
 
 def test_cancel_of_an_already_cancelled_appointment_surfaces_the_services_exception(
-    client, salon, customer, specialist, service
+    monkeypatch, client, salon, customer, specialist, service
 ):
     """
     Appointment cancelled through some other path (not this token) before
@@ -206,6 +224,7 @@ def test_cancel_of_an_already_cancelled_appointment_surfaces_the_services_except
     core.exceptions.exception_handler with no view-level try/except, and
     that .details reaches the response body.
     """
+    _freeze_now(monkeypatch)
     already_cancelled = make_appointment(
         salon=salon,
         customer=customer,
@@ -237,8 +256,9 @@ def test_guest_token_is_rejected_on_a_non_guest_endpoint(client, salon, token):
 
 
 def test_guest_token_endpoint_is_throttled_after_the_configured_rate(
-    client, salon, appointment, token
+    monkeypatch, client, salon, appointment, token
 ):
+    _freeze_now(monkeypatch)
     for _ in range(20):  # guest_token: 20/min (docs/DECISIONS.md § Stage 3 decisions)
         response = client.get(_detail_url(salon, appointment), HTTP_X_GUEST_TOKEN=token)
         assert response.status_code == 200

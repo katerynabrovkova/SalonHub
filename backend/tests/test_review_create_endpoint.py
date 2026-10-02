@@ -38,6 +38,7 @@ pass (flagged in the RED-phase report, not assumed silently):
 import datetime as dt
 
 import pytest
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import Account, AccountRole, Customer
@@ -53,6 +54,13 @@ pytestmark = pytest.mark.django_db
 
 START = dt.datetime(2026, 9, 1, 10, 0, tzinfo=dt.UTC)
 PAYLOAD = {"rating": 5, "text": "Lovely, thorough work — would book again."}
+
+
+def _freeze_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same time-bomb fix as test_guest_appointment_access.py: the guest
+    token expires 30 days after the fixed START appointment ends, checked
+    against the real timezone.now(), so freeze now to START."""
+    monkeypatch.setattr(timezone, "now", lambda: START)
 
 
 @pytest.fixture
@@ -156,8 +164,9 @@ def test_account_owner_of_completed_appointment_can_create_review_201(
 
 
 def test_guest_with_valid_token_for_own_completed_appointment_can_create_review_201(
-    client, salon, customer, specialist, completed_appointment, guest_token
+    monkeypatch, client, salon, customer, specialist, completed_appointment, guest_token
 ):
+    _freeze_now(monkeypatch)
     response = client.post(
         _review_url(salon, completed_appointment.id),
         PAYLOAD,
@@ -242,8 +251,9 @@ def test_account_that_does_not_own_the_appointment_gets_404(
 
 
 def test_guest_token_for_a_different_appointment_than_the_url_gets_404(
-    client, salon, customer, specialist, service, completed_appointment, guest_token
+    monkeypatch, client, salon, customer, specialist, service, completed_appointment, guest_token
 ):
+    _freeze_now(monkeypatch)
     # guest_token is bound to completed_appointment; aim it at another one.
     other = make_appointment(
         salon=salon,

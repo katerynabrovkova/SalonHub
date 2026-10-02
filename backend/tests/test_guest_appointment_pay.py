@@ -34,6 +34,7 @@ from decimal import Decimal
 from typing import ClassVar
 
 import pytest
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from booking.guest_tokens import issue_guest_token
@@ -46,6 +47,13 @@ from tests.conftest import make_appointment
 pytestmark = pytest.mark.django_db
 
 START = dt.datetime(2026, 9, 1, 10, 0, tzinfo=dt.UTC)
+
+
+def _freeze_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same time-bomb fix as test_guest_appointment_access.py: the guest
+    token expires 30 days after the fixed START appointment ends, checked
+    against the real timezone.now(), so freeze now to START."""
+    monkeypatch.setattr(timezone, "now", lambda: START)
 
 
 @pytest.fixture
@@ -115,6 +123,7 @@ def _reset_fake_provider_calls():
 def test_pay_happy_path_creates_a_pending_payment_and_returns_201(
     client, salon, appointment, token, monkeypatch
 ):
+    _freeze_now(monkeypatch)
     monkeypatch.setattr(GuestAppointmentPayView, "provider_class", _FakeProvider)
 
     response = client.post(_pay_url(salon, appointment), HTTP_X_GUEST_TOKEN=token)
@@ -134,6 +143,7 @@ def test_pay_happy_path_creates_a_pending_payment_and_returns_201(
 def test_pay_second_call_with_pending_payment_returns_200_and_does_not_call_provider_again(
     client, salon, appointment, token, monkeypatch
 ):
+    _freeze_now(monkeypatch)
     monkeypatch.setattr(GuestAppointmentPayView, "provider_class", _FakeProvider)
 
     first = client.post(_pay_url(salon, appointment), HTTP_X_GUEST_TOKEN=token)
@@ -149,6 +159,7 @@ def test_pay_second_call_with_pending_payment_returns_200_and_does_not_call_prov
 def test_pay_retries_an_existing_failed_payment_in_place_and_returns_201(
     client, salon, appointment, token, monkeypatch
 ):
+    _freeze_now(monkeypatch)
     monkeypatch.setattr(GuestAppointmentPayView, "provider_class", _FakeProvider)
     with tenant_context(salon.id):
         existing = Payment.objects.create(
@@ -171,8 +182,9 @@ def test_pay_retries_an_existing_failed_payment_in_place_and_returns_201(
 
 
 def test_pay_rejects_an_appointment_not_in_pending_payment_with_409(
-    client, salon, customer, specialist, service
+    monkeypatch, client, salon, customer, specialist, service
 ):
+    _freeze_now(monkeypatch)
     confirmed = make_appointment(
         salon=salon,
         customer=customer,
@@ -194,6 +206,7 @@ def test_pay_rejects_an_appointment_not_in_pending_payment_with_409(
 def test_pay_provider_failure_returns_502_and_creates_no_payment_row(
     client, salon, appointment, token, monkeypatch
 ):
+    _freeze_now(monkeypatch)
     monkeypatch.setattr(GuestAppointmentPayView, "provider_class", _RaisingProvider)
 
     response = client.post(_pay_url(salon, appointment), HTTP_X_GUEST_TOKEN=token)

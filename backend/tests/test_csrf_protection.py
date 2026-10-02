@@ -40,6 +40,7 @@ import datetime as dt
 import pytest
 from django.middleware.csrf import get_token
 from django.test import RequestFactory
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
@@ -253,8 +254,12 @@ def test_logout_with_correct_csrf_header_succeeds(client, salon, admin_account) 
 
 
 def test_guest_token_write_is_exempt_from_csrf(
-    client, salon, customer, specialist, service
+    monkeypatch, client, salon, customer, specialist, service
 ) -> None:
+    # The guest token expires 30 days after the fixed START appointment
+    # ends, checked against the real timezone.now() (booking/guest_tokens.py);
+    # freeze now to START so the token stays valid regardless of the date.
+    monkeypatch.setattr(timezone, "now", lambda: START)
     appointment = make_appointment(
         salon=salon, customer=customer, specialist=specialist, service=service, start=START
     )
