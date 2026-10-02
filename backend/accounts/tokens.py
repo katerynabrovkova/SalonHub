@@ -25,6 +25,7 @@ signer intentionally does not try to replicate.
 from django.core import signing
 
 from accounts.models import Account
+from core.tenancy import get_current_salon_id
 
 _SALT = "accounts.account-verification"
 
@@ -56,13 +57,50 @@ def generate_email_change_token(account: Account, new_email: str) -> str:
     email)"). Its own salt, so it is never accepted as a verification token
     and vice versa. ``old_email`` is the account's email at issue time; the
     confirm step rejects the token once ``account.email`` differs from it,
-    which also makes it single-use. The new address lives only here until
-    confirmed.
+    which also makes it single-use. ``salon_id`` is a second tenant guard,
+    checked before any lookup (§ "Cycle 2 additions"). The new address lives
+    only here until confirmed.
     """
     signer = signing.TimestampSigner(salt=_EMAIL_CHANGE_SALT)
     return signer.sign_object(
-        {"account_id": account.id, "old_email": account.email, "new_email": new_email}
+        {
+            "account_id": account.id,
+            "salon_id": account.salon_id,
+            "old_email": account.email,
+            "new_email": new_email,
+        }
     )
+
+
+def read_email_change_token(token: str) -> tuple[Account, str]:
+    """
+    Returns the row-locked ``Account`` and the new email, or raises
+    ``signing.BadSignature`` / ``signing.SignatureExpired`` if the token is
+    invalid, older than ``EMAIL_CHANGE_TOKEN_MAX_AGE``, issued for another
+    salon, names no account in the bound salon, or was issued for an email
+    the account no longer has (which also makes it single-use).
+
+    The payload's ``salon_id`` is compared with the bound salon before any
+    lookup, a guard independent of the tenant-scoped manager, because this
+    token changes the login email (docs/DECISIONS.md § "Item 8 decisions
+    (change email)", "Cycle 2 additions"). Must be called inside
+    ``transaction.atomic()`` with tenant context bound (``select_for_update``).
+    """
+    signer = signing.TimestampSigner(salt=_EMAIL_CHANGE_SALT)
+    payload = signer.unsign_object(token, max_age=EMAIL_CHANGE_TOKEN_MAX_AGE)
+
+    if payload.get("salon_id") != get_current_salon_id():
+        raise signing.BadSignature("Token was issued for another salon.")
+
+    try:
+        account = Account.objects.select_for_update().get(pk=payload.get("account_id"))
+    except Account.DoesNotExist as exc:
+        raise signing.BadSignature("No such account in this salon.") from exc
+
+    if account.email != payload.get("old_email"):
+        raise signing.BadSignature("Token was issued for a different email address.")
+
+    return account, payload["new_email"]
 
 
 def read_account_verification_token(token: str) -> int:

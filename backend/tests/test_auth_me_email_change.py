@@ -266,6 +266,7 @@ def test_token_carries_account_and_both_emails_and_is_not_a_verification_token(
     )
     assert payload == {
         "account_id": customer_account.id,
+        "salon_id": salon.id,
         "old_email": "alice-account@example.com",
         "new_email": NEW_EMAIL,
     }

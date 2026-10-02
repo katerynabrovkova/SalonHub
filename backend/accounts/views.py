@@ -44,7 +44,7 @@ import datetime as dt
 
 from django.contrib.auth.tokens import default_token_generator
 from django.core import signing
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.middleware.csrf import get_token as get_csrf_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -87,8 +87,9 @@ from accounts.tokens import (
     generate_account_verification_token,
     generate_email_change_token,
     read_account_verification_token,
+    read_email_change_token,
 )
-from core.exceptions import InvalidOrExpiredTokenError
+from core.exceptions import EmailUnavailableError, InvalidOrExpiredTokenError
 from core.i18n import resolve_translation
 from core.tenancy import get_current_salon_id
 from core.urls import build_salon_frontend_url
@@ -481,6 +482,50 @@ class MeEmailChangeView(APIView):
         send_email_change_notice_email.delay(account.email, new_email, salon_name)
 
         return Response(status=status.HTTP_202_ACCEPTED)
+
+
+class EmailChangeConfirmView(PublicEndpointMixin, APIView):
+    """
+    ``POST auth/email-change/confirm/`` (body: ``token``): confirm an email
+    change from the emailed link (docs/DECISIONS.md § "Item 8 decisions
+    (change email)", including "Cycle 2 additions"). Public, like
+    `VerifyEmailView`, so a stale access cookie cannot turn it into a 401.
+
+    One transaction with the Account row locked: every token failure
+    collapses to `InvalidOrExpiredTokenError`; the address is re-checked
+    with `is_email_taken`; then `Account.email`, `email_verified_at` and the
+    linked Customer's email change together. The saves run in an inner
+    atomic block, so a unique-constraint race at save becomes
+    `EmailUnavailableError` with nothing changed. Sessions are not ended.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        # One clock read per request, same discipline as VerifyEmailView.
+        now = timezone.now()
+        with transaction.atomic():
+            try:
+                account, new_email = read_email_change_token(request.data.get("token", ""))
+            except (signing.SignatureExpired, signing.BadSignature) as exc:
+                raise InvalidOrExpiredTokenError() from exc
+
+            if is_email_taken(account=account, email=new_email):
+                raise EmailUnavailableError()
+
+            try:
+                with transaction.atomic():
+                    account.email = new_email
+                    account.email_verified_at = now
+                    account.save(update_fields=["email", "email_verified_at", "updated_at"])
+                    if account.customer_id is not None:
+                        customer = Customer.objects.get(pk=account.customer_id)
+                        customer.email = new_email
+                        customer.save(update_fields=["email", "updated_at"])
+            except IntegrityError as exc:
+                raise EmailUnavailableError() from exc
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class LogoutView(APIView):

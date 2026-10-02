@@ -68,6 +68,19 @@ class SameEmailError(DomainError):
     default_message = "This is already your email address."
 
 
+class EmailUnavailableError(DomainError):
+    """
+    docs/DECISIONS.md § "Item 8 decisions (change email)": at confirmation
+    the new address belongs to another Account or Customer in the salon,
+    found by the re-check or by a unique-constraint violation at save.
+    Nothing changes.
+    """
+
+    code = "email_unavailable"
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_message = "This email address cannot be used."
+
+
 class InvalidStateTransitionError(DomainError):
     code = "invalid_state_transition"
     status_code = status.HTTP_409_CONFLICT

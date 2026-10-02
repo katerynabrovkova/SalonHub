@@ -19,6 +19,11 @@ urlpatterns = [
     path("auth/register/", views.RegisterView.as_view(), name="register"),
     path("auth/verify-email/", views.VerifyEmailView.as_view(), name="verify-email"),
     path(
+        "auth/email-change/confirm/",
+        views.EmailChangeConfirmView.as_view(),
+        name="email-change-confirm",
+    ),
+    path(
         "auth/password-reset/",
         views.PasswordResetRequestView.as_view(),
         name="password-reset",
