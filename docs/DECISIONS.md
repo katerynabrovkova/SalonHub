@@ -4631,9 +4631,10 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      here the password was already accepted. Other resend errors use the
      request page texts (connection, 401, generic). An `invalid_password`
      on resend (the password changed in between) shows "Неправильний
-     пароль." and returns to the form. A "Вказали не ту адресу? Змінити"
-     link returns to the form with the new address filled in and the
-     password cleared, like registration (`register/page.tsx:133`). Each
+     пароль." and returns to the form like "Змінити", with the new
+     address filled in and the password cleared. A "Вказали не ту адресу?
+     Змінити" link returns to the form with the new address filled in and
+     the password cleared, like registration (`register/page.tsx:133`). Each
      send issues a new token; once one is confirmed the others stop
      working, because their `old_email` no longer matches.
    - **Checks.** The new code adds no lint or tsc errors and uses no
