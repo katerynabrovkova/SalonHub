@@ -86,6 +86,12 @@ on booking step 3 (see its known-issue entry).
   at write time plus a data migration that checks for case collisions
   first. Not part of item 8, which works around it with a case-insensitive
   "taken" check (see "Item 8 decisions (change email)").
+- Recorded 02.10.2026: the registration verification token
+  (`backend/accounts/tokens.py`) carries no `salon_id` and relies only on
+  the tenant-scoped `Account` lookup, like the JWT, which has no salon
+  claim either. The email-change token got a second guard, a `salon_id`
+  compared with the current salon (see "Item 8 decisions (change email)",
+  cycle 2 additions); consider the same guard for these later.
 
 ## Open questions
 
@@ -4556,3 +4562,19 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      raised by DRF's field validation before `validate()`, so it comes
      before the password check. The wrong-password 400 still precedes the
      same-email check, the taken lookup and any mail.
+
+   Cycle 2 additions, decided 02.10.2026
+   - **Salon in the token.** The email-change token payload also carries
+     `salon_id`. The confirm view compares it with the current salon
+     before looking up the Account; a mismatch raises the same
+     `InvalidOrExpiredTokenError` as any invalid token. Reason: a second
+     guard independent of the tenant-scoped manager, because this token
+     changes the login email. Cycle 1's `generate_email_change_token` and
+     its payload test change accordingly.
+   - **Public endpoint.** The confirm view uses `PublicEndpointMixin`,
+     like `VerifyEmailView`, so a stale access cookie cannot turn it into
+     a 401.
+   - **Race at save.** If saving the new email hits a unique-constraint
+     `IntegrityError` (the address was taken between the check and the
+     save), the response is the same 400 `email_unavailable` and nothing
+     changes.
