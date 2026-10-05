@@ -4643,6 +4643,17 @@ Decided 30.09.2026, in discussion, before item 8 starts.
    - **Stale comment.** The comment in `client/profile/page.tsx:10-12`
      saying the email route 404s is updated when the page lands.
 
+   Frontend implemented, 02.10.2026
+   - **Pages.** `ChangeEmailForm` at `/client/profile/email` and
+     `ConfirmEmailChangeStatus` at `/confirm-email-change`.
+   - **Reading the hash.** The confirm page reads the hash with
+     `useSyncExternalStore`, so "no token" is derived during render and
+     no set-state-in-effect lint error is added.
+   - **Reload after success.** Reloading after a successful confirmation
+     shows the invalid-link text, because the used token stays in the
+     hash. Kept on purpose: clearing it would break "Оновіть сторінку"
+     after a server error, which needs the token still there.
+
 ### Malformed body on token endpoints (verify-email, email-change confirm)
 
 Decided 02.10.2026, in discussion.
