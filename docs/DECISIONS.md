@@ -4654,6 +4654,11 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      hash. Kept on purpose: clearing it would break "Оновіть сторінку"
      after a server error, which needs the token still there.
 
+   Browser-checked by Katya on 05.10.2026 (wrong password, same email,
+   request with both letters, resend 429, confirm, profile refresh, reload
+   after success, login with old and new email, database state); item 8
+   closed.
+
 ### Malformed body on token endpoints (verify-email, email-change confirm)
 
 Decided 02.10.2026, in discussion.
