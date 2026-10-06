@@ -181,6 +181,9 @@ REST_FRAMEWORK = {
         # docs/DECISIONS.md § "Item 8 decisions (change email)": keyed by the
         # account (authenticated view), wrong-password attempts included.
         "email_change": "3/hour",
+        # docs/DECISIONS.md § "Item 9 decisions (change password): ending
+        # sessions": keyed by the account, every request counts.
+        "password_change": "5/hour",
         "guest_token": "20/min",
     },
     "EXCEPTION_HANDLER": "core.exceptions.exception_handler",

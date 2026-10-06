@@ -70,6 +70,7 @@ from accounts.serializers import (
     AccountTokenRefreshSerializer,
     MeCustomerUpdateSerializer,
     MeEmailChangeSerializer,
+    MePasswordChangeSerializer,
     MeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
@@ -81,6 +82,7 @@ from accounts.tasks import (
     send_email_change_confirmation_email,
     send_email_change_notice_email,
     send_email_change_unavailable_email,
+    send_password_changed_email,
     send_password_reset_email,
     send_verification_email,
 )
@@ -90,7 +92,11 @@ from accounts.tokens import (
     read_account_verification_token,
     read_email_change_token,
 )
-from core.exceptions import EmailUnavailableError, InvalidOrExpiredTokenError
+from core.exceptions import (
+    EmailUnavailableError,
+    InvalidOrExpiredTokenError,
+    InvalidPasswordError,
+)
 from core.i18n import resolve_translation
 from core.tenancy import get_current_salon_id
 from core.urls import build_salon_frontend_url
@@ -501,6 +507,50 @@ class MeEmailChangeView(APIView):
         send_email_change_notice_email.delay(account.email, new_email, salon_name)
 
         return Response(status=status.HTTP_202_ACCEPTED)
+
+
+class MePasswordChangeView(APIView):
+    """
+    ``POST auth/me/password-change/`` (docs/DECISIONS.md § "Item 9 decisions
+    (change password): ending sessions", "Endpoint and page, decided
+    06.10.2026"). Same authentication/permissions as `MeEmailChangeView`
+    (project defaults, CSRF enforced by `AccountJWTCookieAuthentication`);
+    throttled per account at the ``password_change`` scope, every request
+    counted.
+
+    The serializer checks the current password, the same-password case and
+    the strength, in that order. The change itself runs in one transaction
+    on the locked Account row, re-checking the current password there:
+    `set_password`, `save` and the `session_version` increment, which ends
+    every session of the account, this one included. The notice email is
+    queued with `transaction.on_commit`, so a rolled-back change sends
+    nothing. Success is an empty 204 that also clears the session cookies.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_change"
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        account: Account = request.user  # type: ignore[assignment]
+        serializer = MePasswordChangeSerializer(data=request.data, context={"account": account})
+        serializer.is_valid(raise_exception=True)
+
+        salon = get_object_or_404(Salon, pk=get_current_salon_id())
+        salon_name = resolve_translation(salon.name, "uk")
+
+        with transaction.atomic():
+            locked = Account.objects.select_for_update().get(pk=account.pk)
+            if not locked.check_password(serializer.validated_data["current_password"]):
+                raise InvalidPasswordError()
+            locked.set_password(serializer.validated_data["new_password"])
+            locked.save(update_fields=["password"])
+            Account.objects.filter(pk=locked.pk).update(session_version=F("session_version") + 1)
+            recipient = locked.email
+            transaction.on_commit(lambda: send_password_changed_email.delay(recipient, salon_name))
+
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        clear_auth_cookies(response, salon_slug=str(kwargs["slug"]))
+        return response
 
 
 class EmailChangeConfirmView(PublicEndpointMixin, APIView):

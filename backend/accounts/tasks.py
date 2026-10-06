@@ -90,3 +90,23 @@ def send_password_reset_email(recipient_email: str, uid: str, token: str, salon_
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[recipient_email],
     )
+
+
+@shared_task
+def send_password_changed_email(recipient_email: str, salon_name: str) -> None:
+    """Notice after a password change (docs/DECISIONS.md § "Item 9 decisions
+    (change password): ending sessions", "Endpoint and page, decided
+    06.10.2026", point 6)."""
+    send_mail(
+        subject="Пароль змінено",
+        message=(
+            f"Вітаємо!\n\n"
+            f"Пароль до вашого акаунта в салоні {salon_name} щойно змінено. "
+            f"Ви вийшли з акаунта на всіх пристроях.\n\n"
+            f"Якщо ви не змінювали пароль, відновіть доступ через «Забули пароль?» "
+            f"на сторінці входу.\n\n"
+            f"{salon_name}"
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[recipient_email],
+    )

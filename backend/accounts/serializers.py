@@ -26,6 +26,7 @@ see docs/DECISIONS.md § "`/me/` endpoint (Stage 12)".
 from typing import Any
 
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import exceptions, serializers
@@ -40,7 +41,7 @@ from accounts.authentication import (
     SESSION_VERSION_CLAIM,
 )
 from accounts.models import Account, Customer
-from core.exceptions import InvalidPasswordError, SameEmailError
+from core.exceptions import InvalidPasswordError, SameEmailError, SamePasswordError
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -172,6 +173,40 @@ class MeEmailChangeSerializer(serializers.Serializer):
             raise InvalidPasswordError()
         if attrs["new_email"] == account.email:
             raise SameEmailError()
+        return attrs
+
+
+class MePasswordChangeSerializer(serializers.Serializer):
+    """
+    Body of ``POST auth/me/password-change/`` (docs/DECISIONS.md § "Item 9
+    decisions (change password): ending sessions", "Endpoint and page,
+    decided 06.10.2026", point 2). Needs ``context={"account": <Account>}``.
+
+    `validate()` runs the checks in the agreed order: the current password
+    (`InvalidPasswordError`), then a new password equal to it
+    (`SamePasswordError`), then `validate_password(..., user=account)`. The
+    strength check lives here, not as a field validator, because DRF runs
+    field validators before `validate()` and a weak new password would then
+    win over a wrong current one. Its failure is still a field-level 400 on
+    `new_password`.
+    """
+
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        account: Account = self.context["account"]
+        if not account.check_password(attrs["current_password"]):
+            raise InvalidPasswordError()
+        if attrs["new_password"] == attrs["current_password"]:
+            raise SamePasswordError()
+        try:
+            # django-stubs types `user` as AUTH_USER_MODEL (`User`); the
+            # validators only read attributes, so an Account works. Same
+            # known stub friction as get_token() below.
+            validate_password(attrs["new_password"], user=account)  # type: ignore[arg-type]
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": list(exc.messages)}) from exc
         return attrs
 
 

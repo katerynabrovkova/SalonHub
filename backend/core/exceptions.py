@@ -45,15 +45,32 @@ class InvalidOrExpiredTokenError(DomainError):
 
 class InvalidPasswordError(DomainError):
     """
-    docs/DECISIONS.md § "Item 8 decisions (change email)": the current
-    password sent with an email-change request is wrong. Raised from
-    MeEmailChangeSerializer.validate() before any other check, so nothing is
-    sent.
+    The current password sent with an authenticated account change is wrong.
+    Raised before any other check, so nothing is sent or changed:
+    - email-change request (docs/DECISIONS.md § "Item 8 decisions (change
+      email)"), from MeEmailChangeSerializer.validate();
+    - password change (docs/DECISIONS.md § "Item 9 decisions (change
+      password): ending sessions", "Endpoint and page, decided 06.10.2026"),
+      from MePasswordChangeSerializer.validate() and again by
+      MePasswordChangeView on the locked Account row.
     """
 
     code = "invalid_password"
     status_code = status.HTTP_400_BAD_REQUEST
     default_message = "The password is incorrect."
+
+
+class SamePasswordError(DomainError):
+    """
+    docs/DECISIONS.md § "Item 9 decisions (change password): ending
+    sessions", "Endpoint and page, decided 06.10.2026": the new password
+    equals the current one. Raised from MePasswordChangeSerializer.validate()
+    after the current-password check and before the strength check.
+    """
+
+    code = "same_password"
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_message = "The new password must differ from the current one."
 
 
 class SameEmailError(DomainError):
