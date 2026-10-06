@@ -4719,6 +4719,63 @@ Decided 05.10.2026, in discussion.
    - **Still pending.** The change-password endpoint is not built yet, so
      its increment is still to come with it.
 
+   Endpoint and page, decided 06.10.2026. Mockups are on the Stage 15
+   design canvas, row "Item 9".
+
+   Backend
+   1. **Request.** `POST /api/v1/salons/<slug>/auth/me/password-change/`,
+      authenticated with the project defaults (cookie JWT plus CSRF).
+      Body: `current_password`, `new_password`.
+   2. **Check order.** First the current password: a wrong one reuses
+      `invalid_password` (`InvalidPasswordError`, whose docstring is
+      widened beyond item 8). Then a new password equal to the current one:
+      a new coded 400 `same_password`, a `DomainError`. Then
+      `validate_password(new_password, user=account)`, a field-level 400 on
+      `new_password`. The strength check therefore lives in `validate()`,
+      not in a field validator.
+   3. **Transaction.** The Account row is locked with `select_for_update`
+      and the password is re-checked on the locked row. `set_password`,
+      `save` and the `F()` `session_version` increment run in one
+      `transaction.atomic()`, like the reset.
+   4. **Success.** 204 with an empty body; `clear_auth_cookies` clears all
+      three cookies. No blacklisting: `session_version` already ends the
+      token.
+   5. **Throttle.** New scope `password_change`, 5/hour, keyed by the
+      account; every request counts.
+   6. **Notice email.** "Пароль змінено" to the account's current address,
+      sent by a Celery task queued with `transaction.on_commit`, so a
+      rolled-back change sends nothing. The task receives only strings.
+      Body: "Вітаємо!", "Пароль до вашого акаунта в салоні <назва салону>
+      щойно змінено. Ви вийшли з акаунта на всіх пристроях.", "Якщо ви не
+      змінювали пароль, відновіть доступ через «Забули пароль?» на
+      сторінці входу.", then the salon name. No "if it was you" line.
+
+   Frontend (`/client/profile/password`)
+   7. **Fields.** Current password, new password (hint "Пароль має
+      містити щонайменше 8 символів."), confirm new password, all
+      `PasswordField`. The confirmation is checked in the browser only,
+      like registration; a mismatch shows "Паролі не збігаються." and
+      sends no request.
+   8. **Texts.** Above the form: "Після зміни пароля ви вийдете з акаунта
+      на всіх пристроях, і потрібно буде увійти знову." Button "Змінити
+      пароль". Link "Забули поточний пароль?"; its target arrives with
+      item 11.
+   9. **Errors.** Fixed texts, never the server's message:
+      `invalid_password` "Неправильний поточний пароль." (the current
+      password field is cleared, the others kept); `same_password` "Новий
+      пароль має відрізнятися від поточного."; any 400 on `new_password`
+      "Цей пароль занадто простий. Оберіть інший." (generic until the
+      Stage 18-21 i18n pass, accepted); 429 "Забагато спроб. Спробуйте
+      пізніше."; 401 "Сесія завершилась. Увійдіть знову."; `TypeError` or
+      `RenewalUnsureError` "Не вдалося з'єднатися. Перевірте інтернет і
+      спробуйте ще раз."; anything else "Не вдалося змінити пароль.
+      Спробуйте ще раз."
+   10. **After 204.** The local session ends the same way a deliberate
+       logout ends it (no return path saved), then the page goes to
+       `/login?notice=password_changed`. The login page shows "Пароль
+       змінено. Увійдіть з новим паролем." only for that exact value. The
+       email field is not prefilled.
+
 ### Known issue: `OutstandingToken.user` holds the wrong row
 
 Recorded 05.10.2026, from the item 9 recon.
