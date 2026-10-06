@@ -4776,6 +4776,18 @@ Decided 05.10.2026, in discussion.
        змінено. Увійдіть з новим паролем." only for that exact value. The
        email field is not prefilled.
 
+   Backend implemented, 06.10.2026
+   - **In place.** Points 1-6: `MePasswordChangeView`,
+     `MePasswordChangeSerializer`, `SamePasswordError`,
+     `send_password_changed_email`, and the throttle scope
+     `password_change` at 5/hour. This closes the "Still pending" line of
+     cycle S1: a password change now increments `session_version` too.
+   - **Untested re-check.** The re-check of the current password on the
+     locked Account row has no test: a sequential test cannot produce the
+     race it guards against. Like item 8's inner atomic block, it stays
+     without a test.
+   - **Frontend.** Points 7-10 are not built yet.
+
 ### Known issue: `OutstandingToken.user` holds the wrong row
 
 Recorded 05.10.2026, from the item 9 recon.
