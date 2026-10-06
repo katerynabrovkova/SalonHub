@@ -45,6 +45,7 @@ import datetime as dt
 from django.contrib.auth.tokens import default_token_generator
 from django.core import signing
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.middleware.csrf import get_token as get_csrf_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -290,6 +291,9 @@ class PasswordResetConfirmView(PublicEndpointMixin, APIView):
         with transaction.atomic():
             account.set_password(serializer.validated_data["new_password"])
             account.save(update_fields=["password"])
+            # Ends every session of the account (docs/DECISIONS.md § "Item 9
+            # decisions (change password): ending sessions").
+            Account.objects.filter(pk=account.pk).update(session_version=F("session_version") + 1)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 

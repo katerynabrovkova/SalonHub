@@ -162,6 +162,7 @@ def test_authenticated_endpoint_accepts_the_access_cookie_with_no_auth_header(sa
     token = AccessToken()
     token["user_id"] = str(account.pk)
     token["identity_model"] = "account"
+    token["session_version"] = account.session_version
 
     request = factory.get("/")
     request.COOKIES[ACCESS_COOKIE] = str(token)

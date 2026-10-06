@@ -27,13 +27,18 @@ from typing import Any
 
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from rest_framework import exceptions, serializers
-from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.serializers import TokenObtainSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from accounts.authentication import ACCOUNT_IDENTITY_MODEL, IDENTITY_MODEL_CLAIM
+from accounts.authentication import (
+    ACCOUNT_IDENTITY_MODEL,
+    IDENTITY_MODEL_CLAIM,
+    SESSION_VERSION_CLAIM,
+)
 from accounts.models import Account, Customer
 from core.exceptions import InvalidPasswordError, SameEmailError
 
@@ -266,6 +271,8 @@ class AccountTokenObtainPairSerializer(TokenObtainSerializer):
         token = cls.token_class()
         token[api_settings.USER_ID_CLAIM] = user_id
         token[IDENTITY_MODEL_CLAIM] = ACCOUNT_IDENTITY_MODEL
+        # Copied onto the access token by `RefreshToken.access_token`.
+        token[SESSION_VERSION_CLAIM] = user.session_version
         return token
 
 
@@ -317,6 +324,12 @@ class AccountTokenRefreshSerializer(TokenRefreshSerializer):
             raise exceptions.AuthenticationFailed(
                 self.error_messages["no_active_account"], "no_active_account"
             )
+
+        # RefreshView turns a TokenError into the same 401 as a forged refresh
+        # token. A token that passes carries the account's current value, which
+        # the new access token and the rotated refresh token keep.
+        if refresh.get(SESSION_VERSION_CLAIM) != account.session_version:
+            raise TokenError(_("Token is invalid"))
 
         data = {"access": str(refresh.access_token)}
 

@@ -18,6 +18,7 @@ authentication layer itself, so no unrelated authenticated principal
 existed) ever reaches a permission check in the first place.
 """
 
+from django.utils.translation import gettext as _
 from rest_framework.request import Request
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import AuthenticationFailed, InvalidToken
@@ -31,6 +32,9 @@ from core.tenancy import get_current_salon_id
 
 IDENTITY_MODEL_CLAIM = "identity_model"
 ACCOUNT_IDENTITY_MODEL = "account"
+# Must equal Account.session_version (docs/DECISIONS.md § "Item 9 decisions
+# (change password): ending sessions").
+SESSION_VERSION_CLAIM = "session_version"
 
 
 class AccountJWTAuthentication(JWTAuthentication):
@@ -62,6 +66,11 @@ class AccountJWTAuthentication(JWTAuthentication):
             account = Account.objects.get(pk=user_id)
         except Account.DoesNotExist as exc:
             raise AuthenticationFailed("Account not found.", code="user_not_found") from exc
+
+        # A missing or stale claim gets the same message as a forged token,
+        # the one get_validated_token() raises, so the 401 body is identical.
+        if validated_token.get(SESSION_VERSION_CLAIM) != account.session_version:
+            raise InvalidToken(_("Given token not valid for any token type"))
 
         if api_settings.CHECK_USER_IS_ACTIVE and not account.is_active:
             raise AuthenticationFailed("Account is inactive.", code="user_inactive")

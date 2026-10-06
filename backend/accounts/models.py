@@ -169,6 +169,10 @@ class Account(AbstractBaseUser, TenantScopedModel, TimeStamped):
     role = models.CharField(max_length=32, choices=AccountRole.choices, default=AccountRole.CLIENT)
     is_active = models.BooleanField(default=True)
     email_verified_at = models.DateTimeField(null=True, blank=True)
+    # Carried as a claim in every token; incrementing it ends every session
+    # (docs/DECISIONS.md § "Item 9 decisions (change password): ending
+    # sessions").
+    session_version = models.PositiveIntegerField(default=0)
     customer = models.OneToOneField(
         Customer, null=True, blank=True, on_delete=models.SET_NULL, related_name="account"
     )

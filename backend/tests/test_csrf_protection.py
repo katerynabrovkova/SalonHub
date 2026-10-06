@@ -93,6 +93,7 @@ def _account_access_token(account) -> str:
     token = AccessToken()
     token["user_id"] = str(account.pk)
     token["identity_model"] = "account"
+    token["session_version"] = account.session_version
     return str(token)
 
 
@@ -100,6 +101,7 @@ def _account_refresh_token(account) -> str:
     token = RefreshToken()
     token["user_id"] = str(account.pk)
     token["identity_model"] = "account"
+    token["session_version"] = account.session_version
     return str(token)
 
 

@@ -81,6 +81,7 @@ def _account_access_token(account: Account) -> str:
     token = AccessToken()
     token["user_id"] = str(account.pk)
     token["identity_model"] = "account"
+    token["session_version"] = account.session_version
     return str(token)
 
 
@@ -98,6 +99,7 @@ def _account_refresh_token(account: Account, *, remaining: dt.timedelta | None =
     token = RefreshToken()
     token["user_id"] = str(account.pk)
     token["identity_model"] = "account"
+    token["session_version"] = account.session_version
     if remaining is not None:
         token.set_exp(from_time=timezone.now(), lifetime=remaining)
     return str(token)
