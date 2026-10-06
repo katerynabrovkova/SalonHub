@@ -4677,3 +4677,44 @@ Decided 02.10.2026, in discussion.
 Implemented 02.10.2026 as `_token_from_body` in `backend/accounts/views.py`,
 used by both views; form-encoded bodies still work because `QueryDict` is a
 `dict` subclass.
+
+### Item 9 decisions (change password): ending sessions
+
+Decided 05.10.2026, in discussion.
+
+1. **Scope.** Changing the password (item 9) and resetting it
+   (`PasswordResetConfirmView`) end every session of the account on every
+   device, including the current one; the user logs in again with the new
+   password. Changing the email does not (item 8 stays as decided).
+2. **Mechanism.** `Account.session_version`, an integer defaulting to 0
+   (migration). `get_token` puts it as a claim in every access and refresh
+   token. `AccountJWTAuthentication` and the refresh serializer reject a
+   token whose claim is missing or differs from the account's value, with
+   the same 401 as any invalid token. A password change or reset
+   increments it with an `F()` update in the same transaction as
+   `set_password`, so the access token stops working on the next request,
+   not after 15 minutes.
+3. **One-time logout on ship.** Tokens issued before this change have no
+   claim, so everyone is logged out once when it ships. Accepted: there
+   are no real users yet, and a "missing means 0" branch would add code to
+   the most sensitive path.
+4. **Why not the blacklist.** `OutstandingToken.user` is a foreign key to
+   `settings.AUTH_USER_MODEL` (`accounts.User`), not `Account`
+   (`rest_framework_simplejwt/token_blacklist/models.py:8`, SimpleJWT
+   5.5.1), so there is no per-account list of refresh tokens to blacklist.
+5. **Build order.** Cycle S1: the `session_version` mechanism plus the
+   reset increment (backend only). Then the item 9 endpoint, then the
+   item 9 page. The endpoint's path, errors, throttle and texts are
+   decided after S1.
+
+### Known issue: `OutstandingToken.user` holds the wrong row
+
+Recorded 05.10.2026, from the item 9 recon.
+
+- SimpleJWT's `outstand()` looks up `User` by the Account pk
+  (`rest_framework_simplejwt/tokens.py:316-321`, SimpleJWT 5.5.1: it reads
+  the token's user id claim and calls `User.objects.get(...)` on
+  `get_user_model()`). So `OutstandingToken` rows get `user=None`, or an
+  unrelated `User` that happens to share that pk.
+- No security effect: blacklisting checks the token's `jti`, not the
+  `user` column. But the column is wrong.
