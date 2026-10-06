@@ -30,13 +30,15 @@ export default function ClientLayout({ children }: { children: ReactNode }) {
   const { me, loading, loggedOutDeliberately } = useAuth();
 
   useEffect(() => {
-    if (!loading && me === null) {
-      // docs/DECISIONS.md § "Session renewal and session lifetime", "S3
-      // design details", item 5: only a lost session remembers where the
-      // user was. The URL stays plain "/login" either way.
-      if (!loggedOutDeliberately) {
-        saveReturnPath(window.location.pathname + window.location.search);
-      }
+    // docs/DECISIONS.md § "Item 9 decisions (change password): ending
+    // sessions", "Frontend details, decided 06.10.2026", point 2: a
+    // deliberate logout is not redirected here, because whoever ended the
+    // session owns the navigation (ClientAvatarMenu, the profile page's
+    // logout button, the change-password form). Only a lost session
+    // remembers where the user was and goes to plain "/login" (§ "Session
+    // renewal and session lifetime", "S3 design details", item 5).
+    if (!loading && me === null && !loggedOutDeliberately) {
+      saveReturnPath(window.location.pathname + window.location.search);
       router.replace("/login");
     }
   }, [loading, me, loggedOutDeliberately, router]);

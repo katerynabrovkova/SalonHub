@@ -128,7 +128,10 @@ describe("ClientLayout return path", () => {
     expect(replaceMock).toHaveBeenCalledWith("/login");
   });
 
-  it("test_deliberate_logout_saves_nothing_and_redirects_to_plain_login", () => {
+  // docs/DECISIONS.md § "Item 9 decisions (change password): ending
+  // sessions", "Frontend details, decided 06.10.2026", point 2: whoever ends
+  // the session deliberately owns the navigation.
+  it("test_deliberate_logout_saves_nothing_and_does_not_redirect", () => {
     window.history.pushState({}, "", "/client/profile?tab=x");
     mockedUseAuth.mockReturnValue({
       me: null,
@@ -145,7 +148,7 @@ describe("ClientLayout return path", () => {
     );
 
     expect(sessionStorage.getItem("salonhub:return-path")).toBeNull();
-    expect(replaceMock).toHaveBeenCalledWith("/login");
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 
   it("test_while_loading_saves_nothing_and_does_not_redirect", () => {
