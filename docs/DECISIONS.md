@@ -4788,6 +4788,43 @@ Decided 05.10.2026, in discussion.
      without a test.
    - **Frontend.** Points 7-10 are not built yet.
 
+   Frontend details, decided 06.10.2026
+   1. **Ending the session.** After the 204 the form calls
+      `AuthContext.logout()` unchanged, then
+      `router.replace("/login?notice=password_changed")`. The redundant
+      `POST /auth/logout/` this makes is accepted, to reuse `logout()`'s
+      tested ordering.
+   2. **Redirect race.** Found in the recon: `ClientLayout`'s
+      `router.replace("/login")` runs after the form's navigation and would
+      drop the notice. `ClientLayout` therefore no longer redirects when
+      `loggedOutDeliberately` is true; whoever ends the session
+      deliberately owns the navigation. This changes § "S3 design details",
+      point 5, where the layout redirected in both cases. Both
+      deliberate-logout callers already navigate themselves:
+      `ClientAvatarMenu` and the logout button on
+      `app/client/profile/page.tsx`. A test for each keeps it landing on
+      `/login`. `app/client/layout.test.tsx:148` changes, because the
+      required behaviour changed (not to make code pass): it must assert
+      that with `loggedOutDeliberately` true the layout neither redirects
+      nor saves a return path. This overrides § "S3 design details",
+      point 8's "keep passing unchanged" for that one test.
+   3. **Login page notice.** The login page reads `notice` from
+      `window.location.search` with `useSyncExternalStore` (precedent:
+      `/confirm-email-change` reading its hash) and shows "Пароль змінено.
+      Увійдіть з новим паролем." with `role="status"` above the form, only
+      for the exact value `password_changed`. The login page stays a
+      client component. Its existing English texts are out of scope (a
+      Ukrainian pass is queued after Stage 15).
+   4. **Page.** Title "Змінити пароль", a "← Профіль" back link, labels
+      "Поточний пароль", "Новий пароль", "Підтвердіть новий пароль";
+      `autoComplete` `current-password`, `new-password`, `new-password`.
+      After `same_password` or a weak-password error all fields keep their
+      values.
+   5. **No "Забули поточний пароль?" link yet.** Item 11 adds it together
+      with its target page. This replaces the link in point 8 above.
+   6. **Manual browser check.** The redirect race must be checked by hand
+      in a real browser; unit tests with a mocked router cannot show it.
+
 ### Known issue: `OutstandingToken.user` holds the wrong row
 
 Recorded 05.10.2026, from the item 9 recon.
