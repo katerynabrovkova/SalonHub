@@ -4707,6 +4707,18 @@ Decided 05.10.2026, in discussion.
    item 9 page. The endpoint's path, errors, throttle and texts are
    decided after S1.
 
+   Cycle S1 implemented, 06.10.2026
+   - **Mechanism.** `Account.session_version` (migration
+     `accounts/0008_account_session_version`), the `session_version` claim
+     in `get_token`, and the check in `AccountJWTAuthentication.get_user`
+     and `AccountTokenRefreshSerializer` are in place, as decided in
+     point 2.
+   - **Reset.** `PasswordResetConfirmView` increments `session_version`
+     with an `F()` update inside its `transaction.atomic()`, after
+     `set_password`. A failed validation changes nothing.
+   - **Still pending.** The change-password endpoint is not built yet, so
+     its increment is still to come with it.
+
 ### Known issue: `OutstandingToken.user` holds the wrong row
 
 Recorded 05.10.2026, from the item 9 recon.
