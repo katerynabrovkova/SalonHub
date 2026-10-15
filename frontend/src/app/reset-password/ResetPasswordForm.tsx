@@ -12,6 +12,15 @@
  * history. Later renders see an empty hash but keep the stored link, so
  * removing the hash never turns the page into the invalid-link state.
  *
+ * A stored complete link is then checked once ("Early link check, decided
+ * 15.10.2026", point 3), so a dead link is reported before the person types
+ * a new password. `checkFiredRef` keeps it to one request per page load,
+ * including React strict-mode's mount -> cleanup -> mount, like
+ * confirm-email-change; state is set only after the request settles. Only
+ * `invalid_or_expired_token` shows the invalid-link state. Any other
+ * failure shows the form anyway: the hash is already gone, so a reload
+ * could not retry, and confirm validates the link on submit.
+ *
  * The confirmation is checked in the browser only, like registration, and
  * is never sent. A 204 ends the local session through `logout()`, then
  * navigates, like item 9. Errors map to fixed texts, never the server's
@@ -21,7 +30,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 
 import { useAuth } from "@/app/AuthContext";
 import PasswordField from "@/app/PasswordField";
@@ -85,6 +94,8 @@ export default function ResetPasswordForm({ slug }: ResetPasswordFormProps) {
   // undefined: the hash has not been read yet; null: no usable link.
   const [link, setLink] = useState<ResetLink | null | undefined>(undefined);
   const [linkRejected, setLinkRejected] = useState(false);
+  const [linkChecked, setLinkChecked] = useState(false);
+  const checkFiredRef = useRef(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +115,27 @@ export default function ResetPasswordForm({ slug }: ResetPasswordFormProps) {
     const { pathname, search } = window.location;
     window.history.replaceState(window.history.state, "", `${pathname}${search}`);
   }, [link]);
+
+  useEffect(() => {
+    if (link === undefined || link === null || checkFiredRef.current) {
+      return;
+    }
+    checkFiredRef.current = true;
+
+    void (async () => {
+      let rejected = false;
+      try {
+        await apiRequest<void>(slug, "/auth/password-reset/check/", {
+          method: "POST",
+          body: JSON.stringify({ uid: link.uid, token: link.token }),
+        });
+      } catch (err) {
+        rejected = isInvalidLink(err);
+      }
+      setLinkRejected(rejected);
+      setLinkChecked(true);
+    })();
+  }, [link, slug]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>, resetLink: ResetLink) {
     event.preventDefault();
@@ -153,6 +185,8 @@ export default function ResetPasswordForm({ slug }: ResetPasswordFormProps) {
             Надіслати новий лист
           </Link>
         </div>
+      ) : !linkChecked ? (
+        <p>Перевіряємо посилання...</p>
       ) : (
         <form
           onSubmit={(event) => void handleSubmit(event, link)}

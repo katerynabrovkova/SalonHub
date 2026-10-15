@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// docs/DECISIONS.md § "Item 11 decisions (forgot password)", points 10-12.
+// docs/DECISIONS.md § "Item 11 decisions (forgot password)", points 10-12,
+// and "Early link check, decided 15.10.2026", point 3.
 
 const logoutMock = vi.fn();
 vi.mock("@/app/AuthContext", () => ({
@@ -47,8 +49,42 @@ const MISMATCH_MESSAGE = "Паролі не збігаються.";
 const WEAK_PASSWORD_MESSAGE = "Цей пароль занадто простий. Оберіть інший.";
 const CONNECTION_MESSAGE = "Не вдалося з'єднатися. Перевірте інтернет і спробуйте ще раз.";
 const GENERIC_MESSAGE = "Не вдалося змінити пароль. Спробуйте ще раз.";
+const CHECKING_MESSAGE = "Перевіряємо посилання...";
+
+const CHECK_PATH = "/auth/password-reset/check/";
+const CONFIRM_PATH = "/auth/password-reset/confirm/";
 
 let originalUrl: string;
+
+// apiRequest is routed by path, so the early check and the confirm are set
+// up independently. The check answers 204 unless a test says otherwise;
+// each confirm takes the next queued response.
+let checkResponse: () => Promise<unknown>;
+let confirmResponses: (() => Promise<unknown>)[];
+
+function mockCheck(response: () => Promise<unknown>) {
+  checkResponse = response;
+}
+
+function mockConfirm(response: () => Promise<unknown>) {
+  confirmResponses.push(response);
+}
+
+function callsTo(path: string) {
+  return mockedApiRequest.mock.calls.filter(([, calledPath]) => calledPath === path);
+}
+
+/** A promise the test settles by hand; never reported as unhandled. */
+function deferred() {
+  let resolve: (value: unknown) => void = () => {};
+  let reject: (reason: unknown) => void = () => {};
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  promise.catch(() => {});
+  return { promise, resolve, reject };
+}
 
 /** Puts `hash` in the address bar without firing hashchange. */
 function setUrl(hash: string) {
@@ -67,14 +103,16 @@ async function fillAndSubmit(confirmation: string = NEW_PASSWORD) {
   const user = userEvent.setup();
   setUrl(VALID_HASH);
   renderForm();
-  await user.type(screen.getByLabelText(NEW_LABEL), NEW_PASSWORD);
+  // The form appears once the early check has answered.
+  await user.type(await screen.findByLabelText(NEW_LABEL), NEW_PASSWORD);
   await user.type(screen.getByLabelText(CONFIRM_LABEL), confirmation);
   await user.click(screen.getByRole("button", { name: SUBMIT_BUTTON }));
   return user;
 }
 
+/** Asserts the `callIndex`-th confirm request (not counting the check). */
 function expectRequest(callIndex: number) {
-  const [slug, path, options] = mockedApiRequest.mock.calls[callIndex] as [
+  const [slug, path, options] = callsTo(CONFIRM_PATH)[callIndex] as [
     string,
     string,
     RequestInit,
@@ -100,6 +138,16 @@ function expectInvalidLinkState() {
   expect(screen.queryByRole("button", { name: SUBMIT_BUTTON })).not.toBeInTheDocument();
 }
 
+function expectCheckRequest() {
+  const calls = callsTo(CHECK_PATH);
+  expect(calls).toHaveLength(1);
+  const [slug, , options] = calls[0] as [string, string, RequestInit];
+  expect(slug).toBe(SLUG);
+  expect(options.method).toBe("POST");
+  // toEqual on the parsed body: exactly the link, nothing else.
+  expect(JSON.parse(options.body as string)).toEqual({ uid: UID, token: TOKEN });
+}
+
 function expectNoSessionEndOrNavigation() {
   expect(logoutMock).not.toHaveBeenCalled();
   expect(replaceMock).not.toHaveBeenCalled();
@@ -113,6 +161,16 @@ beforeEach(() => {
   replaceMock.mockReset();
   pushMock.mockReset();
   mockedApiRequest.mockReset();
+  checkResponse = () => Promise.resolve(undefined);
+  confirmResponses = [];
+  mockedApiRequest.mockImplementation((...args) => {
+    const [, path] = args as [string, string];
+    if (path === CHECK_PATH) {
+      return checkResponse();
+    }
+    const next = path === CONFIRM_PATH ? confirmResponses.shift() : undefined;
+    return next ? next() : Promise.reject(new Error(`unexpected apiRequest call: ${path}`));
+  });
 });
 
 afterEach(() => {
@@ -121,13 +179,13 @@ afterEach(() => {
 });
 
 describe("ResetPasswordForm", () => {
-  it("test_renders_title_fields_hint_and_button_for_a_valid_link", () => {
+  it("test_renders_title_fields_hint_and_button_for_a_valid_link", async () => {
     setUrl(VALID_HASH);
     renderForm();
 
+    const newPassword = await screen.findByLabelText(NEW_LABEL);
     expect(screen.getByRole("heading", { name: TITLE })).toBeInTheDocument();
 
-    const newPassword = screen.getByLabelText(NEW_LABEL);
     const confirm = screen.getByLabelText(CONFIRM_LABEL);
     expect(newPassword).toHaveAttribute("type", "password");
     expect(confirm).toHaveAttribute("type", "password");
@@ -143,7 +201,7 @@ describe("ResetPasswordForm", () => {
   it("test_removes_the_hash_and_keeps_the_form_and_the_original_link", async () => {
     setUrl(VALID_HASH);
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
-    mockedApiRequest.mockResolvedValueOnce(undefined);
+    mockConfirm(() => Promise.resolve(undefined));
     const user = userEvent.setup();
 
     renderForm();
@@ -155,13 +213,13 @@ describe("ResetPasswordForm", () => {
 
     // Typing re-renders the form after the hash is gone: it must not turn
     // into the invalid-link state.
-    await user.type(screen.getByLabelText(NEW_LABEL), NEW_PASSWORD);
+    await user.type(await screen.findByLabelText(NEW_LABEL), NEW_PASSWORD);
     await user.type(screen.getByLabelText(CONFIRM_LABEL), NEW_PASSWORD);
     expect(screen.queryByText(INVALID_LINK_MESSAGE)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: SUBMIT_BUTTON }));
 
-    await waitFor(() => expect(mockedApiRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(callsTo(CONFIRM_PATH)).toHaveLength(1));
     expectRequest(0);
   });
 
@@ -183,16 +241,16 @@ describe("ResetPasswordForm", () => {
     await fillAndSubmit(`${NEW_PASSWORD}-typo`);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(MISMATCH_MESSAGE);
-    expect(mockedApiRequest).not.toHaveBeenCalled();
+    expect(callsTo(CONFIRM_PATH)).toHaveLength(0);
     expectNoSessionEndOrNavigation();
   });
 
   it("test_submit_posts_uid_token_and_new_password_once", async () => {
-    mockedApiRequest.mockResolvedValueOnce(undefined);
+    mockConfirm(() => Promise.resolve(undefined));
 
     await fillAndSubmit();
 
-    await waitFor(() => expect(mockedApiRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(callsTo(CONFIRM_PATH)).toHaveLength(1));
     expectRequest(0);
     await waitFor(() => expect(replaceMock).toHaveBeenCalled());
   });
@@ -202,14 +260,14 @@ describe("ResetPasswordForm", () => {
     const pendingPost = new Promise((resolve) => {
       resolvePost = resolve;
     });
-    mockedApiRequest.mockReturnValueOnce(pendingPost);
+    mockConfirm(() => pendingPost);
 
     const user = await fillAndSubmit();
     const button = screen.getByRole("button", { name: SUBMIT_BUTTON });
     await waitFor(() => expect(button).toBeDisabled());
     await user.click(button);
 
-    expect(mockedApiRequest).toHaveBeenCalledTimes(1);
+    expect(callsTo(CONFIRM_PATH)).toHaveLength(1);
 
     resolvePost(undefined);
     await waitFor(() => expect(replaceMock).toHaveBeenCalled());
@@ -222,7 +280,7 @@ describe("ResetPasswordForm", () => {
         resolveLogout = resolve;
       }),
     );
-    mockedApiRequest.mockResolvedValueOnce(undefined);
+    mockConfirm(() => Promise.resolve(undefined));
 
     await fillAndSubmit();
 
@@ -239,8 +297,8 @@ describe("ResetPasswordForm", () => {
   });
 
   it("test_invalid_or_expired_token_shows_invalid_link_state", async () => {
-    mockedApiRequest.mockRejectedValueOnce(
-      new ApiError(400, "invalid_or_expired_token", "Invalid or expired token."),
+    mockConfirm(() =>
+      Promise.reject(new ApiError(400, "invalid_or_expired_token", "Invalid or expired token.")),
     );
 
     await fillAndSubmit();
@@ -252,10 +310,12 @@ describe("ResetPasswordForm", () => {
   });
 
   it("test_400_on_new_password_shows_weak_password_message_and_keeps_all_values", async () => {
-    mockedApiRequest.mockRejectedValueOnce(
-      new ApiError(400, "invalid", "Request failed.", {
-        new_password: ["This password is too common."],
-      }),
+    mockConfirm(() =>
+      Promise.reject(
+        new ApiError(400, "invalid", "Request failed.", {
+          new_password: ["This password is too common."],
+        }),
+      ),
     );
 
     await fillAndSubmit();
@@ -284,7 +344,7 @@ describe("ResetPasswordForm", () => {
       message: GENERIC_MESSAGE,
     },
   ])("test_error_shows_its_fixed_message_($name)", async ({ error, serverText, message }) => {
-    mockedApiRequest.mockRejectedValueOnce(error);
+    mockConfirm(() => Promise.reject(error));
 
     await fillAndSubmit();
 
@@ -293,5 +353,109 @@ describe("ResetPasswordForm", () => {
     expect(alert).not.toHaveTextContent(serverText);
     expect(screen.getByRole("button", { name: SUBMIT_BUTTON })).toBeInTheDocument();
     expectNoSessionEndOrNavigation();
+  });
+});
+
+describe("ResetPasswordForm early link check", () => {
+  // docs/DECISIONS.md § "Item 11 decisions (forgot password)", "Early link
+  // check, decided 15.10.2026", point 3. An incomplete hash sending no check
+  // is covered by test_unusable_link_shows_invalid_link_state_and_sends_nothing_
+  // above, which asserts no apiRequest call at all.
+
+  it("test_shows_checking_message_and_no_form_while_the_check_is_pending", async () => {
+    const check = deferred();
+    mockCheck(() => check.promise);
+    setUrl(VALID_HASH);
+
+    renderForm();
+
+    expect(await screen.findByText(CHECKING_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByLabelText(NEW_LABEL)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: SUBMIT_BUTTON })).not.toBeInTheDocument();
+    expect(screen.queryByText(INVALID_LINK_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { name: "plain", strict: false },
+    { name: "StrictMode", strict: true },
+  ])("test_check_posts_uid_and_token_once_($name)", async ({ strict }) => {
+    setUrl(VALID_HASH);
+
+    render(
+      strict ? (
+        <StrictMode>
+          <ResetPasswordForm slug={SLUG} />
+        </StrictMode>
+      ) : (
+        <ResetPasswordForm slug={SLUG} />
+      ),
+    );
+
+    await waitFor(() => expect(callsTo(CHECK_PATH)).toHaveLength(1));
+    await screen.findByLabelText(NEW_LABEL);
+    expectCheckRequest();
+    expect(callsTo(CONFIRM_PATH)).toHaveLength(0);
+  });
+
+  it("test_check_204_shows_the_form", async () => {
+    const check = deferred();
+    mockCheck(() => check.promise);
+    setUrl(VALID_HASH);
+    renderForm();
+    await waitFor(() => expect(callsTo(CHECK_PATH)).toHaveLength(1));
+    expect(screen.queryByLabelText(NEW_LABEL)).not.toBeInTheDocument();
+
+    check.resolve(undefined);
+
+    expect(await screen.findByLabelText(NEW_LABEL)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: SUBMIT_BUTTON })).toBeInTheDocument();
+    expect(screen.queryByText(CHECKING_MESSAGE)).not.toBeInTheDocument();
+    expect(screen.queryByText(INVALID_LINK_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it("test_check_invalid_or_expired_token_shows_invalid_link_state", async () => {
+    mockCheck(() =>
+      Promise.reject(new ApiError(400, "invalid_or_expired_token", "Invalid or expired token.")),
+    );
+    setUrl(VALID_HASH);
+
+    renderForm();
+
+    expect(await screen.findByText(INVALID_LINK_MESSAGE)).toBeInTheDocument();
+    expectInvalidLinkState();
+    expect(screen.queryByText(CHECKING_MESSAGE)).not.toBeInTheDocument();
+    expect(screen.queryByText("Invalid or expired token.")).not.toBeInTheDocument();
+    expect(callsTo(CONFIRM_PATH)).toHaveLength(0);
+  });
+
+  it.each([
+    { name: "TypeError", error: new TypeError("Failed to fetch") },
+    { name: "500", error: new ApiError(500, "internal_error", "An unexpected error occurred.") },
+  ])("test_check_failure_still_shows_the_form_($name)", async ({ error }) => {
+    const check = deferred();
+    mockCheck(() => check.promise);
+    setUrl(VALID_HASH);
+    renderForm();
+    await waitFor(() => expect(callsTo(CHECK_PATH)).toHaveLength(1));
+    expect(screen.queryByLabelText(NEW_LABEL)).not.toBeInTheDocument();
+
+    check.reject(error);
+
+    expect(await screen.findByLabelText(NEW_LABEL)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: SUBMIT_BUTTON })).toBeInTheDocument();
+    expect(screen.queryByText(INVALID_LINK_MESSAGE)).not.toBeInTheDocument();
+    expect(screen.queryByText(CHECKING_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it("test_check_sends_the_original_link_after_the_hash_is_removed", async () => {
+    const check = deferred();
+    mockCheck(() => check.promise);
+    setUrl(VALID_HASH);
+
+    renderForm();
+
+    await waitFor(() => expect(window.location.hash).toBe(""));
+    await waitFor(() => expect(callsTo(CHECK_PATH)).toHaveLength(1));
+    expectCheckRequest();
   });
 });
