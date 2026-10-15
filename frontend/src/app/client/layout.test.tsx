@@ -129,9 +129,10 @@ describe("ClientLayout return path", () => {
   });
 
   // docs/DECISIONS.md § "Item 9 decisions (change password): ending
-  // sessions", "Frontend details, decided 06.10.2026", point 2: whoever ends
-  // the session deliberately owns the navigation.
-  it("test_deliberate_logout_saves_nothing_and_does_not_redirect", () => {
+  // sessions", "Frontend details, decided 06.10.2026", point 2, refined
+  // 15.10.2026: mounting with no account after a deliberate logout (Back, a
+  // typed URL) redirects to plain "/login" and saves nothing.
+  it("test_deliberate_logout_on_fresh_mount_saves_nothing_and_redirects_to_plain_login", () => {
     window.history.pushState({}, "", "/client/profile?tab=x");
     mockedUseAuth.mockReturnValue({
       me: null,
@@ -148,7 +149,86 @@ describe("ClientLayout return path", () => {
     );
 
     expect(sessionStorage.getItem("salonhub:return-path")).toBeNull();
+    expect(replaceMock).toHaveBeenCalledTimes(1);
+    expect(replaceMock).toHaveBeenCalledWith("/login");
+  });
+
+  // Same point 2 refinement: a deliberate logout while the layout is
+  // mounted is navigated by whoever started it, so the layout stays out.
+  it("test_deliberate_logout_while_mounted_saves_nothing_and_does_not_redirect", () => {
+    window.history.pushState({}, "", "/client/profile?tab=x");
+    mockedUseAuth.mockReturnValue({
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: true,
+      },
+      loading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      loggedOutDeliberately: false,
+    });
+
+    const { rerender } = render(
+      <ClientLayout>
+        <Children />
+      </ClientLayout>,
+    );
+    expect(screen.getByText("protected content")).toBeInTheDocument();
+
+    mockedUseAuth.mockReturnValue({
+      me: null,
+      loading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      loggedOutDeliberately: true,
+    });
+    rerender(
+      <ClientLayout>
+        <Children />
+      </ClientLayout>,
+    );
+
+    expect(screen.queryByText("protected content")).not.toBeInTheDocument();
+    expect(sessionStorage.getItem("salonhub:return-path")).toBeNull();
     expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("test_deliberate_logout_mounted_while_loading_redirects_once_loading_settles", () => {
+    window.history.pushState({}, "", "/client/profile?tab=x");
+    mockedUseAuth.mockReturnValue({
+      me: null,
+      loading: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+      loggedOutDeliberately: true,
+    });
+
+    const { rerender } = render(
+      <ClientLayout>
+        <Children />
+      </ClientLayout>,
+    );
+    expect(replaceMock).not.toHaveBeenCalled();
+
+    mockedUseAuth.mockReturnValue({
+      me: null,
+      loading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      loggedOutDeliberately: true,
+    });
+    rerender(
+      <ClientLayout>
+        <Children />
+      </ClientLayout>,
+    );
+
+    expect(sessionStorage.getItem("salonhub:return-path")).toBeNull();
+    expect(replaceMock).toHaveBeenCalledTimes(1);
+    expect(replaceMock).toHaveBeenCalledWith("/login");
   });
 
   it("test_while_loading_saves_nothing_and_does_not_redirect", () => {

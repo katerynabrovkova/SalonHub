@@ -20,7 +20,7 @@
  */
 
 import { useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import { useAuth } from "@/app/AuthContext";
 import { saveReturnPath } from "@/lib/auth/returnPath";
@@ -28,19 +28,36 @@ import { saveReturnPath } from "@/lib/auth/returnPath";
 export default function ClientLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { me, loading, loggedOutDeliberately } = useAuth();
+  // Whether this mount has seen an account. Tells a logout started while
+  // the layout was mounted from arriving here already logged out.
+  const hadAccountRef = useRef(false);
 
   useEffect(() => {
-    // docs/DECISIONS.md § "Item 9 decisions (change password): ending
-    // sessions", "Frontend details, decided 06.10.2026", point 2: a
-    // deliberate logout is not redirected here, because whoever ended the
-    // session owns the navigation (ClientAvatarMenu, the profile page's
-    // logout button, the change-password form). Only a lost session
-    // remembers where the user was and goes to plain "/login" (§ "Session
-    // renewal and session lifetime", "S3 design details", item 5).
-    if (!loading && me === null && !loggedOutDeliberately) {
-      saveReturnPath(window.location.pathname + window.location.search);
-      router.replace("/login");
+    if (me !== null) {
+      hadAccountRef.current = true;
     }
+    if (loading || me !== null) {
+      return;
+    }
+    // docs/DECISIONS.md § "Item 9 decisions (change password): ending
+    // sessions", "Frontend details, decided 06.10.2026", point 2, refined
+    // 15.10.2026. A deliberate logout started while the layout was mounted
+    // is navigated by whoever started it (ClientAvatarMenu, the profile
+    // page's logout button, the change-password form), so the layout stays
+    // out. Arriving with no account after a deliberate logout (Back, a
+    // typed URL) goes to plain "/login" and saves nothing.
+    if (loggedOutDeliberately) {
+      if (hadAccountRef.current) {
+        return;
+      }
+      router.replace("/login");
+      return;
+    }
+    // Only a lost session remembers where the user was and goes to plain
+    // "/login" (§ "Session renewal and session lifetime", "S3 design
+    // details", item 5).
+    saveReturnPath(window.location.pathname + window.location.search);
+    router.replace("/login");
   }, [loading, me, loggedOutDeliberately, router]);
 
   if (loading || me === null) {
