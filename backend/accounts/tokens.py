@@ -19,12 +19,17 @@ slug.
 
 Password reset uses Django's built-in ``PasswordResetTokenGenerator``
 (3-R.D.5) — self-invalidating on password change, a property this stateless
-signer intentionally does not try to replicate.
+signer intentionally does not try to replicate. ``read_password_reset_link``
+is the one place its ``uid`` + ``token`` link is validated.
 """
 
+from django.contrib.auth.tokens import default_token_generator
 from django.core import signing
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 
 from accounts.models import Account
+from core.exceptions import InvalidOrExpiredTokenError
 from core.tenancy import get_current_salon_id
 
 _SALT = "accounts.account-verification"
@@ -127,3 +132,35 @@ def read_account_verification_token(token: str) -> int:
         raise signing.BadSignature("Token was issued for a different email address.")
 
     return account_id
+
+
+def read_password_reset_link(data: object) -> Account:
+    """
+    Returns the ``Account`` a password-reset link names, or raises
+    ``InvalidOrExpiredTokenError`` (docs/DECISIONS.md § "Item 11 decisions
+    (forgot password)", "Early link check", point 2). Shared by the check
+    and confirm endpoints so they cannot drift apart.
+
+    ``data`` is the link's ``{uid, token}``: a request body, or confirm's
+    validated attrs. A body that is not an object, or a ``uid``/``token``
+    that is missing or not a string, is the same failure as a bad token.
+    Every other failure collapses to it too: ``uid`` that is not base64 or
+    names no account in the bound salon (the tenant-scoped
+    ``Account.objects``), or a tampered or expired token. Must be called
+    with tenant context bound.
+    """
+    if not isinstance(data, dict):
+        raise InvalidOrExpiredTokenError()
+    uid = data.get("uid")
+    token = data.get("token")
+    if not isinstance(uid, str) or not isinstance(token, str):
+        raise InvalidOrExpiredTokenError()
+
+    try:
+        account_pk = force_str(urlsafe_base64_decode(uid))
+        account = Account.objects.get(pk=account_pk)
+    except (TypeError, ValueError, OverflowError, Account.DoesNotExist) as exc:
+        raise InvalidOrExpiredTokenError() from exc
+    if not default_token_generator.check_token(account, token):
+        raise InvalidOrExpiredTokenError()
+    return account

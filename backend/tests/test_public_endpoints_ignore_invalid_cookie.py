@@ -5,12 +5,12 @@ RED phase. Today these views inherit the project-default authentication
 classes, so ``AccountJWTCookieAuthentication`` validates the cookie during
 ``initial()`` — before permissions are consulted — and a stale or garbage
 cookie turns a public request into ``401 token_not_valid``. The planned fix
-(green phase) opts exactly these six views out of authentication.
+(green phase) opts exactly these seven views out of authentication.
 
-Tests 1-6: for each public view, a request carrying a garbage cookie must get
+Tests 1-7: for each public view, a request carrying a garbage cookie must get
 exactly the status and error code the same request gets with no cookie, and
-never ``token_not_valid``. Test 7 guards against over-fixing: ``MeView`` must keep
-rejecting an invalid cookie with 401. Test 8 pins the new logout contract
+never ``token_not_valid``. Test 8 guards against over-fixing: ``MeView`` must keep
+rejecting an invalid cookie with 401. Test 9 pins the new logout contract
 (docs/DECISIONS.md, Session renewal and session lifetime, decided 21.09.2026):
 ``LogoutView`` no longer authenticates, so an invalid cookie still logs out (205).
 """
@@ -109,6 +109,15 @@ def test_password_reset_request_ignores_invalid_access_cookie(salon) -> None:
 def test_password_reset_confirm_ignores_invalid_access_cookie(salon) -> None:
     # Missing fields -> serializer 400, no password changed.
     baseline, garbage = _post_pair(salon.slug, "password-reset/confirm", {})
+
+    assert baseline.status_code == 400
+    _assert_same_as_no_cookie(baseline, garbage)
+
+
+def test_password_reset_check_ignores_invalid_access_cookie(salon) -> None:
+    # Missing fields -> neutral 400, nothing changed (docs/DECISIONS.md §
+    # "Item 11 decisions (forgot password)", "Early link check").
+    baseline, garbage = _post_pair(salon.slug, "password-reset/check", {})
 
     assert baseline.status_code == 400
     _assert_same_as_no_cookie(baseline, garbage)

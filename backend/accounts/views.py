@@ -91,6 +91,7 @@ from accounts.tokens import (
     generate_email_change_token,
     read_account_verification_token,
     read_email_change_token,
+    read_password_reset_link,
 )
 from core.exceptions import (
     EmailUnavailableError,
@@ -310,6 +311,31 @@ class PasswordResetConfirmView(PublicEndpointMixin, APIView):
         response = Response(status=status.HTTP_204_NO_CONTENT)
         clear_auth_cookies(response, salon_slug=str(kwargs["slug"]))
         return response
+
+
+class PasswordResetCheckView(PublicEndpointMixin, APIView):
+    """
+    Check a password-reset link without using it (docs/DECISIONS.md § "Item
+    11 decisions (forgot password)", "Early link check, decided
+    15.10.2026"), so `/reset-password` can report a dead link before the
+    person types a new password. Public (AllowAny), no throttle, like
+    confirm.
+
+    Body ``{uid, token}``. An empty ``204`` when the link is valid;
+    otherwise the same neutral ``InvalidOrExpiredTokenError`` (400) as
+    confirm, a malformed body included. Validation is
+    ``read_password_reset_link``, shared with confirm. It changes nothing:
+    no password, ``last_login`` or ``session_version``, and no cookies. POST,
+    not GET, so the token never appears in a URL or a server log. Confirm
+    still validates the link itself; this is a convenience, not a security
+    layer.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request: Request, *args: object, **kwargs: object) -> Response:
+        read_password_reset_link(request.data)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ResendVerificationView(PublicEndpointMixin, APIView):

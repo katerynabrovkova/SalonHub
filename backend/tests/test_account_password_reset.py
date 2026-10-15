@@ -29,12 +29,15 @@ The contract under test (docs/DECISIONS.md § Stage 3-R.D.5):
   password untouched.
 """
 
+import datetime as dt
+
 import pytest
 from django.conf import settings
-from django.contrib.auth.tokens import default_token_generator
+from django.contrib.auth.tokens import PasswordResetTokenGenerator, default_token_generator
 from django.core import mail
 from django.middleware.csrf import get_token
 from django.test import RequestFactory
+from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework.test import APIClient
@@ -549,3 +552,163 @@ def test_successful_confirm_clears_the_access_refresh_and_session_hint_cookies(
     _assert_cleared(response, ACCESS_COOKIE, "/")
     _assert_cleared(response, REFRESH_COOKIE, _refresh_url(salon.slug))
     _assert_cleared(response, SESSION_HINT_COOKIE, "/")
+
+
+# --- reset-check: POST auth/password-reset/check/ (docs/DECISIONS.md §
+# "Item 11 decisions (forgot password)", "Early link check, decided
+# 15.10.2026", points 1, 2 and 4) ----------------------------------------
+
+
+def _reset_check_url(slug: str) -> str:
+    return f"/api/v1/salons/{slug}/auth/password-reset/check/"
+
+
+def _tampered(token: str) -> str:
+    return token[:-1] + ("a" if token[-1] != "a" else "b")
+
+
+def _assert_invalid_or_expired(response) -> None:
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "invalid_or_expired_token"
+
+
+def test_check_with_a_valid_link_returns_empty_204_and_changes_nothing(client, salon) -> None:
+    account = _make_account(salon)
+    # A real last_login, so "unchanged" is not just None staying None. The
+    # token is minted after it, since the token covers last_login.
+    Account.unscoped_objects.filter(pk=account.pk).update(last_login=timezone.now())
+    before = Account.unscoped_objects.get(pk=account.pk)
+    uid = _encode_uid(before.pk)
+    token = _make_reset_token(before)
+
+    response = client.post(
+        _reset_check_url(salon.slug), {"uid": uid, "token": token}, format="json"
+    )
+
+    assert response.status_code == 204
+    assert response.data is None
+    assert response.content == b""
+
+    after = Account.unscoped_objects.get(pk=account.pk)
+    assert after.password == before.password
+    assert after.last_login == before.last_login
+    assert after.session_version == before.session_version
+
+    # The checked link is not used up.
+    confirm = client.post(
+        _reset_confirm_url(salon.slug),
+        {"uid": uid, "token": token, "new_password": NEW_PASSWORD},
+        format="json",
+    )
+    assert confirm.status_code == 204
+
+
+@pytest.mark.parametrize("failure", ["tampered_token", "unknown_uid", "malformed_uid"])
+def test_check_with_a_bad_link_returns_neutral_400(client, salon, failure) -> None:
+    account = _make_account(salon)
+    uid = _encode_uid(account.pk)
+    token = _make_reset_token(account)
+    if failure == "tampered_token":
+        token = _tampered(token)
+    elif failure == "unknown_uid":
+        uid = _encode_uid(999_999)
+    else:
+        uid = "!!!!not-base64!!!!"
+
+    response = client.post(
+        _reset_check_url(salon.slug), {"uid": uid, "token": token}, format="json"
+    )
+
+    _assert_invalid_or_expired(response)
+
+
+def test_check_with_an_expired_link_returns_neutral_400(
+    client, salon, settings, monkeypatch
+) -> None:
+    # Django's token generator reads its clock through `_now()` (naive
+    # datetime.now(), not timezone.now()), so that is what is frozen.
+    minted_at = dt.datetime(2026, 10, 15, 12, 0)
+    monkeypatch.setattr(PasswordResetTokenGenerator, "_now", lambda self: minted_at)
+    account = _make_account(salon)
+    uid = _encode_uid(account.pk)
+    token = _make_reset_token(account)
+    timeout = dt.timedelta(seconds=settings.PASSWORD_RESET_TIMEOUT)
+
+    # Still inside the window: valid. Proves the 400 below is the expiry.
+    last_valid = minted_at + timeout
+    monkeypatch.setattr(PasswordResetTokenGenerator, "_now", lambda self: last_valid)
+    inside = client.post(_reset_check_url(salon.slug), {"uid": uid, "token": token}, format="json")
+    assert inside.status_code == 204
+
+    expired_at = last_valid + dt.timedelta(seconds=1)
+    monkeypatch.setattr(PasswordResetTokenGenerator, "_now", lambda self: expired_at)
+    response = client.post(
+        _reset_check_url(salon.slug), {"uid": uid, "token": token}, format="json"
+    )
+
+    _assert_invalid_or_expired(response)
+
+
+def test_check_with_a_link_already_used_on_confirm_returns_neutral_400(client, salon) -> None:
+    account = _make_account(salon)
+    uid = _encode_uid(account.pk)
+    token = _make_reset_token(account)
+    confirm = client.post(
+        _reset_confirm_url(salon.slug),
+        {"uid": uid, "token": token, "new_password": NEW_PASSWORD},
+        format="json",
+    )
+    assert confirm.status_code == 204
+
+    response = client.post(
+        _reset_check_url(salon.slug), {"uid": uid, "token": token}, format="json"
+    )
+
+    _assert_invalid_or_expired(response)
+
+
+@pytest.mark.parametrize(
+    "body_kind",
+    ["json_array", "non_string_uid", "non_string_token", "missing_uid", "missing_token", "empty"],
+)
+def test_check_with_a_malformed_body_returns_the_same_400_as_a_bad_token(
+    client, salon, body_kind
+) -> None:
+    account = _make_account(salon)
+    uid = _encode_uid(account.pk)
+    token = _make_reset_token(account)
+    bodies: dict[str, object] = {
+        "json_array": [uid, token],
+        "non_string_uid": {"uid": account.pk, "token": token},
+        "non_string_token": {"uid": uid, "token": 12345},
+        "missing_uid": {"token": token},
+        "missing_token": {"uid": uid},
+        "empty": {},
+    }
+    bad_token = client.post(
+        _reset_check_url(salon.slug), {"uid": uid, "token": _tampered(token)}, format="json"
+    )
+    _assert_invalid_or_expired(bad_token)
+
+    response = client.post(_reset_check_url(salon.slug), bodies[body_kind], format="json")
+
+    _assert_invalid_or_expired(response)
+    assert response.data == bad_token.data
+
+
+def test_check_with_uid_and_token_minted_in_another_salon_returns_neutral_400(
+    client, salon, other_salon
+) -> None:
+    account = _make_account(salon, email="cross-check@example.com")
+    uid = _encode_uid(account.pk)
+    token = _make_reset_token(account)
+
+    # Valid on its own salon's URL.
+    own = client.post(_reset_check_url(salon.slug), {"uid": uid, "token": token}, format="json")
+    assert own.status_code == 204
+
+    response = client.post(
+        _reset_check_url(other_salon.slug), {"uid": uid, "token": token}, format="json"
+    )
+
+    _assert_invalid_or_expired(response)
