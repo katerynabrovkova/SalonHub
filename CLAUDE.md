@@ -171,6 +171,10 @@ salons without rework.
   passes vacuously. Return a promise from another V8 context instead
   (`runInNewContext("Promise.reject(...)")` from `node:vm`); see
   `app/login/page.test.tsx`'s unhandled-rejection test.
+- **In a Vitest `it.each` title, `$name_suffix` is read as the property
+  `name_suffix`**, not `name` followed by `_suffix`, so it renders as
+  `undefined`. Put the variable at the end in parentheses instead, e.g.
+  `"test_error_shows_fixed_message_($name)"`. Found twice on 15.10.2026.
 
 ## Coding conventions
 
