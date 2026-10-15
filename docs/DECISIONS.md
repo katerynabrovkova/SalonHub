@@ -4968,6 +4968,38 @@ Backend implemented, 15.10.2026
   9, it stays without a test.
 - **Frontend.** F1 and F2 are not built yet.
 
+Early link check, decided 15.10.2026
+
+Katya's browser check found that `/reset-password` shows the form for a
+dead link and reports it only after the person has typed a new password
+twice.
+
+1. **Endpoint.** New public endpoint
+   `POST /api/v1/salons/<slug>/auth/password-reset/check/` with body
+   `{uid, token}` (`PublicEndpointMixin`, no throttle, like confirm). 204
+   if the link is valid, otherwise the same 400 `invalid_or_expired_token`
+   as confirm, including for a malformed body. It changes nothing: no
+   password, no `last_login`, no `session_version`. POST, not GET, so the
+   token never appears in a URL or server log.
+2. **One validation function.** Check and confirm call one shared
+   link-validation function (uid decode, tenant-scoped account lookup,
+   token check), so they cannot drift apart. Confirm still validates the
+   link itself; the check is a convenience, not a security layer.
+3. **Page.** After reading `uid` and `token`, `/reset-password` sends one
+   check request (one request even under StrictMode) and shows
+   "Перевіряємо посилання..." meanwhile. 204: the form.
+   `invalid_or_expired_token`: the invalid-link state with "Надіслати
+   новий лист". A network error or any other failure of the check: the
+   form anyway, because the hash is already removed and a reload would
+   show a false invalid-link state; confirm will validate the link on
+   submit.
+4. **Tests.** They include a cross-salon case: a salon A link checked on
+   salon B's URL gets 400.
+
+Build order: B3 the check endpoint; F3 the page change; then repeat the
+browser check of reopening an already-used reset link: the page must show
+the invalid-link state before any password is typed.
+
 ### Known issue: password-reset request is not timing-identical
 
 Recorded 15.10.2026, from the item 11 recon.
