@@ -264,6 +264,16 @@ describe("LoginPage", () => {
     const registerLink = screen.getByRole("link", { name: /зареєструватися/i });
     expect(registerLink).toHaveAttribute("href", "/register");
   });
+
+  test("test_renders_forgot_password_link", async () => {
+    // docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 13.
+    mockApiRoutes();
+
+    renderLoginPage();
+
+    const forgotLink = screen.getByRole("link", { name: "Забули пароль?" });
+    expect(forgotLink).toHaveAttribute("href", "/forgot-password");
+  });
 });
 
 describe("LoginPage return path", () => {

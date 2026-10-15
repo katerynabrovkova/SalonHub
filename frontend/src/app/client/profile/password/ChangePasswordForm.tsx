@@ -32,6 +32,7 @@ const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "salonhub.com
 
 const PROFILE_PATH = "/client/profile";
 const SUCCESS_PATH = "/login?notice=password_changed";
+const FORGOT_PASSWORD_PATH = "/forgot-password";
 
 function changeErrorMessage(err: unknown): string {
   // Same connectivity reading as item 10's EditProfileField.
@@ -155,6 +156,11 @@ export default function ChangePasswordForm() {
           Змінити пароль
         </button>
       </form>
+
+      {/* docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 13. */}
+      <Link href={FORGOT_PASSWORD_PATH} className="text-sm text-blue-600 underline">
+        Забули поточний пароль?
+      </Link>
     </main>
   );
 }

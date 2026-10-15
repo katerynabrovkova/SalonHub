@@ -149,6 +149,13 @@ export default function LoginPage() {
         </button>
       </form>
 
+      {/* docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 13. */}
+      <p className="mt-4 text-center text-sm">
+        <Link href="/forgot-password" className="text-blue-600 underline">
+          Забули пароль?
+        </Link>
+      </p>
+
       <p className="mt-4 text-center text-sm">
         Немає акаунту?{" "}
         <Link href="/register" className="text-blue-600 underline">

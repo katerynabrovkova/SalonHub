@@ -132,8 +132,9 @@ describe("ChangePasswordForm", () => {
 
     expect(screen.getByRole("button", { name: SUBMIT_BUTTON })).toBeInTheDocument();
 
-    // Item 11 adds the link together with its target page.
-    expect(screen.queryByText(/Забули поточний пароль/)).not.toBeInTheDocument();
+    // docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 13.
+    const forgotLink = screen.getByRole("link", { name: "Забули поточний пароль?" });
+    expect(forgotLink).toHaveAttribute("href", "/forgot-password");
   });
 
   it("test_mismatched_confirmation_shows_message_and_sends_no_request", async () => {
