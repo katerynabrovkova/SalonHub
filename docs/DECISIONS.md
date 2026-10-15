@@ -4818,7 +4818,10 @@ Decided 05.10.2026, in discussion.
       navigates). When the layout mounts with no account and the logout was
       deliberate (Back, a typed URL), it redirects to `/login` and saves no
       return path. A lost session is unchanged: it saves the return path
-      and redirects to `/login`.
+      and redirects to `/login`. The test
+      `test_deliberate_logout_saves_nothing_and_does_not_redirect` in
+      `app/client/layout.test.tsx` changes again to match the refined rule;
+      this supersedes the 06.10 sentence about that test above.
    3. **Login page notice.** The login page reads `notice` from
       `window.location.search` with `useSyncExternalStore` (precedent:
       `/confirm-email-change` reading its hash) and shows "Пароль змінено.
