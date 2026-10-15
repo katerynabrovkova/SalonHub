@@ -4786,7 +4786,8 @@ Decided 05.10.2026, in discussion.
      locked Account row has no test: a sequential test cannot produce the
      race it guards against. Like item 8's inner atomic block, it stays
      without a test.
-   - **Frontend.** Points 7-10 are not built yet.
+   - **Frontend.** Points 7-10: see "Frontend implemented, 15.10.2026"
+     below.
 
    Frontend details, decided 06.10.2026
    1. **Ending the session.** After the 204 the form calls
@@ -4848,6 +4849,16 @@ Decided 05.10.2026, in discussion.
       refinement. Katya considered one generic error message instead of
       the separate texts of point 9 above and chose to keep the separate
       texts.
+
+   Frontend implemented, 15.10.2026
+   - **In place.** Cycle F1: `ClientLayout` leaves navigation to a
+     deliberate logout. Cycle F2: the login page notice. Cycle F3: the
+     change-password page. Cycle F4: no blank page on Back, the refined
+     rule of point 2.
+   - **Browser check.** Katya's browser check on 15.10.2026 passed,
+     including Back after a password change and after an avatar-menu
+     logout.
+   - **Item 9 is complete.**
 
 ### Known issue: `OutstandingToken.user` holds the wrong row
 
