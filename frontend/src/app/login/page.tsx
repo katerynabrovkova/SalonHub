@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { useAuth } from "@/app/AuthContext";
 import PasswordField from "@/app/PasswordField";
@@ -19,6 +19,24 @@ const GENERIC_ERROR = "Something went wrong. Please try again.";
 // (docs/DECISIONS.md § "Frontend routing: subdomain-based").
 const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "salonhub.com";
 
+// Shown after a password change ends the session (docs/DECISIONS.md § "Item
+// 9 decisions (change password): ending sessions", "Frontend details,
+// decided 06.10.2026", point 3).
+const PASSWORD_CHANGED_NOTICE = "Пароль змінено. Увійдіть з новим паролем.";
+
+function subscribeToSearch(onChange: () => void): () => void {
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+}
+
+function readSearch(): string | null {
+  return window.location.search;
+}
+
+function readServerSearch(): string | null {
+  return null;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
@@ -26,6 +44,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const search = useSyncExternalStore(subscribeToSearch, readSearch, readServerSearch);
+  const showPasswordChanged =
+    search !== null && new URLSearchParams(search).get("notice") === "password_changed";
 
   // Guarded: this is a "use client" component but Next.js still renders it
   // once on the server for the initial HTML, where `window` doesn't exist.
@@ -88,6 +109,12 @@ export default function LoginPage() {
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center p-8">
+      {showPasswordChanged ? (
+        <p role="status" className="mb-4 w-full max-w-sm">
+          {PASSWORD_CHANGED_NOTICE}
+        </p>
+      ) : null}
+
       <form
         onSubmit={handleSubmit}
         className="flex w-full max-w-sm flex-col gap-4"

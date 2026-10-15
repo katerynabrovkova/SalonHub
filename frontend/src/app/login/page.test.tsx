@@ -448,3 +448,69 @@ describe("LoginPage csrf priming", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 });
+
+describe("LoginPage notice", () => {
+  // docs/DECISIONS.md § "Item 9 decisions (change password): ending
+  // sessions", "Frontend details, decided 06.10.2026", point 3.
+
+  const NOTICE_TEXT = "Пароль змінено. Увійдіть з новим паролем.";
+  let originalUrl: string;
+
+  beforeEach(() => {
+    originalUrl = window.location.href;
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, "", originalUrl);
+  });
+
+  function setSearch(search: string) {
+    window.history.replaceState(null, "", `/login${search}`);
+  }
+
+  test("test_password_changed_notice_is_a_status_before_the_form", async () => {
+    setSearch("?notice=password_changed");
+    mockApiRoutes();
+
+    renderLoginPage();
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent(NOTICE_TEXT);
+    const form = screen.getByRole("button", { name: /log in/i }).closest("form");
+    expect(form).not.toBeNull();
+    expect(status.compareDocumentPosition(form!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("test_no_notice_param_shows_no_notice", async () => {
+    setSearch("");
+    mockApiRoutes();
+
+    renderLoginPage();
+    await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
+
+    expect(screen.queryByText(NOTICE_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  test.each(["?notice=slot_taken", "?notice=password_changed_x"])(
+    "test_other_notice_value_shows_no_notice_(%s)",
+    async (search) => {
+      setSearch(search);
+      mockApiRoutes();
+
+      renderLoginPage();
+      await waitFor(() => expect(findCall("/auth/csrf/")).toBeDefined());
+
+      expect(screen.queryByText(NOTICE_TEXT)).not.toBeInTheDocument();
+    },
+  );
+
+  test("test_notice_after_another_param_is_shown", async () => {
+    setSearch("?foo=1&notice=password_changed");
+    mockApiRoutes();
+
+    renderLoginPage();
+
+    expect(await screen.findByText(NOTICE_TEXT)).toBeInTheDocument();
+  });
+});
