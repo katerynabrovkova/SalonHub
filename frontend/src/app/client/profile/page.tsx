@@ -8,8 +8,7 @@
  * does no auth checking of its own.
  *
  * The Email row leads to /client/profile/email (item 8). The Password row
- * leads to /client/profile/password, which is not built yet (item 9) and
- * 404s until then.
+ * leads to /client/profile/password (item 9).
  *
  * Ім'я/Телефон rows are rendered ONLY when `me.name`/`me.phone` are
  * non-null (backend/accounts/serializers.py's MeSerializer: null means "no
