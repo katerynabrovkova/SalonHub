@@ -418,6 +418,11 @@ describes the mechanisms; the numbers live here, stated once.
   exists.** Identical response either way, and a Celery task is enqueued
   either way so timing doesn't diverge. Duplicate registration → an "you
   already have an account" email instead of a second row.
+
+  **Correction, recorded 15.10.2026:** for password-reset-request this is
+  not what the code does. `PasswordResetRequestView` queues the reset task
+  only when the account exists, so that step is not timing-identical. See
+  § "Known issue: password-reset request is not timing-identical".
 - **DRF throttling needs a shared cache.** `LocMemCache` is per-process, so
   behind N workers the limit silently becomes `rate × N`. Uses
   `RedisCache` on Redis **DB 2** (broker DB 0, result backend DB 1) so
@@ -3818,6 +3823,11 @@ Scope, in build order:
     change-password screen (item 9) for users who don't remember their
     current password. Both backend views already exist and are
     unauthenticated by design; only the frontend is missing.
+
+    **Correction, recorded 15.10.2026:** not only the frontend is missing.
+    The item 11 recon of 15.10.2026 found backend gaps (the reset email,
+    the confirm step's check order, row lock and cookies). See § "Item 11
+    decisions (forgot password)".
 12. **Frontend: route protection for `/client` and its subtree.**
     Nothing today stops an unauthenticated visitor from navigating
     directly to `/client`, `/client/profile`, or any of its sub-pages.
@@ -4871,3 +4881,90 @@ Recorded 05.10.2026, from the item 9 recon.
   unrelated `User` that happens to share that pk.
 - No security effect: blacklisting checks the token's `jti`, not the
   `user` column. But the column is wrong.
+
+### Item 11 decisions (forgot password)
+
+Decided 15.10.2026, in discussion, after the item 11 recon of the same day.
+
+Backend
+1. **Reset email.** In Ukrainian, with the salon name; the task receives
+   only strings. Subject "Відновлення пароля". Body: "Вітаємо!", "Щоб
+   задати новий пароль до акаунта в салоні <назва салону>, перейдіть за
+   посиланням: <link>", "Посилання діє 1 годину.", "Якщо ви не просили
+   змінити пароль, просто проігноруйте цей лист.", then the salon name.
+   The link stays `/reset-password#uid=...&token=...`.
+2. **Confirm check order.** `uid` and `token` first, then
+   `validate_password(new_password, user=account)` as a field-level 400
+   on `new_password`. A bad link always reports
+   `invalid_or_expired_token`, even with a weak password.
+3. **Row lock.** Confirm locks the Account row with `select_for_update`
+   and re-checks the token on the locked row. `set_password`, `save` and
+   the `session_version` increment stay in one transaction.
+4. **Cookies.** A successful confirm (204) clears the three auth cookies
+   with `clear_auth_cookies`, like item 9.
+5. **No notice email after a reset.** Only someone with access to the
+   inbox can reset, and the notice would go to that same inbox, so it
+   tells the owner nothing new and an attacker can delete it. Item 9
+   differs because a change goes through an open session, not the inbox.
+6. **Request timing.** The request step queues the reset task only when
+   the account exists, so it is not timing-identical, contrary to § Stage
+   3 decisions (corrected there). Recorded as a known issue, not a fix:
+   see § "Known issue: password-reset request is not timing-identical".
+7. **Logging in invalidates a pending reset link.** Django's token covers
+   `last_login`, which login updates. Accepted; the invalid-link text of
+   point 11 covers it.
+
+Frontend
+8. **`/forgot-password`** (public). Back link "← Вхід"; title
+   "Відновлення пароля"; text "Вкажіть адресу пошти, з якою ви входите.
+   Ми надішлемо посилання, щоб задати новий пароль."; field "Email";
+   button "Надіслати посилання". Errors: a 400 on `email` "Перевірте
+   адресу пошти."; 429 "Забагато спроб. Спробуйте пізніше." (the limit is
+   per IP and reveals nothing about accounts); `TypeError` "Не вдалося
+   з'єднатися. Перевірте інтернет і спробуйте ще раз."; anything else
+   "Не вдалося надіслати. Спробуйте ще раз."
+9. **Sent screen.** "Якщо ця адреса зареєстрована, ми надіслали на неї
+   лист із посиланням. Посилання діє 1 годину." with "Надіслати ще раз"
+   (success text "Лист надіслано ще раз.", same errors as point 8) and
+   "Вказали не ту адресу? Змінити" (back to the form, address kept), like
+   registration and item 8.
+10. **`/reset-password`** (public). Reads `uid` and `token` from the hash
+    once, keeps them in memory, then removes the hash from the address
+    bar with `history.replaceState` so the link does not stay in browser
+    history. Removing the hash must not turn the page into the
+    invalid-link state. Title "Новий пароль"; fields "Новий пароль" (hint
+    "Пароль має містити щонайменше 8 символів.") and "Підтвердіть новий
+    пароль"; button "Зберегти пароль". A mismatch shows "Паролі не
+    збігаються." and sends no request.
+11. **Reset errors.** A missing or partial hash (no request sent) and
+    `invalid_or_expired_token` both show "Посилання недійсне або
+    застаріле." with a link "Надіслати новий лист" to `/forgot-password`.
+    A weak password "Цей пароль занадто простий. Оберіть інший.";
+    `TypeError` the connection text of point 8; anything else "Не вдалося
+    змінити пароль. Спробуйте ще раз."
+12. **After 204.** `await logout()`, then
+    `router.replace("/login?notice=password_changed")`, reusing the item 9
+    notice text.
+13. **Links.** "Забули пароль?" on the login page and "Забули поточний
+    пароль?" on `/client/profile/password`, both to `/forgot-password`.
+    The login link is needed because a person who forgot the password
+    cannot reach the profile; the item 9 notice email also points there.
+    The item 9 test asserting there is no link changes, because the
+    requirement changed.
+
+Build order: B1 the email (point 1); B2 the confirm step (points 2-4);
+F1 `/forgot-password` and both links; F2 `/reset-password`; then a browser
+check.
+
+### Known issue: password-reset request is not timing-identical
+
+Recorded 15.10.2026, from the item 11 recon.
+
+- `PasswordResetRequestView` queues the reset task only when an account
+  with the address exists in the salon, so a request for a registered
+  address takes one queue write longer than one for an unknown address.
+  This contradicts § Stage 3 decisions' "a Celery task is enqueued either
+  way" (corrected there).
+- The difference is one queue write, about a millisecond, far below
+  network jitter. Katya accepted it as a known minor issue given the
+  threat model; it is not scheduled for a fix.
