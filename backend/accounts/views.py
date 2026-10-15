@@ -256,7 +256,8 @@ class PasswordResetRequestView(PublicEndpointMixin, APIView):
         if account is not None:
             uid = urlsafe_base64_encode(force_bytes(account.pk))
             token = default_token_generator.make_token(account)
-            send_password_reset_email.delay(account.email, uid, token, salon.slug)
+            salon_name = resolve_translation(salon.name, "uk")
+            send_password_reset_email.delay(account.email, uid, token, salon.slug, salon_name)
 
         return Response(status=status.HTTP_202_ACCEPTED)
 

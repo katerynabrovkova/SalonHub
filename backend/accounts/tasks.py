@@ -82,11 +82,22 @@ def send_email_change_notice_email(recipient_email: str, new_email: str, salon_n
 
 
 @shared_task
-def send_password_reset_email(recipient_email: str, uid: str, token: str, salon_slug: str) -> None:
+def send_password_reset_email(
+    recipient_email: str, uid: str, token: str, salon_slug: str, salon_name: str
+) -> None:
+    """Reset link (docs/DECISIONS.md § "Item 11 decisions (forgot password)",
+    point 1). The view resolves ``salon_name``."""
     link = build_salon_frontend_url(salon_slug, "/reset-password") + f"#uid={uid}&token={token}"
     send_mail(
-        subject="Reset your password",
-        message=f"Reset your password by visiting: {link}\n\nThis link expires in 1 hour.",
+        subject="Відновлення пароля",
+        message=(
+            f"Вітаємо!\n\n"
+            f"Щоб задати новий пароль до акаунта в салоні {salon_name}, "
+            f"перейдіть за посиланням: {link}\n\n"
+            f"Посилання діє 1 годину.\n\n"
+            f"Якщо ви не просили змінити пароль, просто проігноруйте цей лист.\n\n"
+            f"{salon_name}"
+        ),
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[recipient_email],
     )

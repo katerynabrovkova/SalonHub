@@ -38,6 +38,7 @@ from django.utils.http import urlsafe_base64_encode
 from rest_framework.test import APIClient
 
 from accounts.models import Account
+from core.i18n import resolve_translation
 from core.tenancy import tenant_context
 
 pytestmark = pytest.mark.django_db
@@ -45,6 +46,13 @@ pytestmark = pytest.mark.django_db
 STRONG_PASSWORD = "a-strong-passw0rd!"
 NEW_PASSWORD = "an-even-str0nger-passphrase!"
 OTHER_NEW_PASSWORD = "y3t-another-genu1ne-secret!"
+
+# docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 1.
+SUBJECT_RESET = "Відновлення пароля"
+GREETING = "Вітаємо!"
+LINK_TEXT = "Щоб задати новий пароль до акаунта в салоні {salon}, перейдіть за посиланням: {link}"
+VALIDITY_TEXT = "Посилання діє 1 годину."
+NOT_YOU_TEXT = "Якщо ви не просили змінити пароль, просто проігноруйте цей лист."
 
 
 @pytest.fixture
@@ -80,6 +88,17 @@ def _encode_uid(pk: int) -> str:
 
 def _make_reset_token(account: Account) -> str:
     return default_token_generator.make_token(account)
+
+
+def _salon_name(salon) -> str:
+    return resolve_translation(salon.name, "uk")
+
+
+def _link_from(body: str) -> tuple[str, str]:
+    """The uid and token of the reset link in an email body."""
+    after = body.partition("#uid=")[2]
+    uid_value, _, token_tail = after.partition("&token=")
+    return uid_value, token_tail.split()[0]
 
 
 def _assert_empty_202(response) -> None:
@@ -161,6 +180,59 @@ def test_reset_request_is_throttled_after_the_configured_rate(client, salon) -> 
         format="json",
     )
     assert response.status_code == 429
+
+
+# --- reset email (docs/DECISIONS.md § "Item 11 decisions (forgot password)",
+# point 1) ---------------------------------------------------------------
+
+
+def test_reset_email_is_ukrainian_with_the_salon_name_and_the_link_in_the_agreed_order(
+    client, salon
+) -> None:
+    account = _make_account(salon)
+
+    response = client.post(_reset_request_url(salon.slug), {"email": account.email}, format="json")
+
+    _assert_empty_202(response)
+    assert len(mail.outbox) == 1
+    letter = mail.outbox[0]
+    assert letter.to == [account.email]
+    assert letter.subject == SUBJECT_RESET
+
+    salon_name = _salon_name(salon)
+    body = letter.body
+    # The token is per-request, so the sentence is matched up to "&token=".
+    link_start = (
+        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/reset-password"
+        f"#uid={_encode_uid(account.pk)}&token="
+    )
+    link_text = LINK_TEXT.format(salon=salon_name, link=link_start)
+    assert GREETING in body
+    assert link_text in body
+    assert VALIDITY_TEXT in body
+    assert NOT_YOU_TEXT in body
+    assert (
+        body.index(GREETING)
+        < body.index(link_text)
+        < body.index(VALIDITY_TEXT)
+        < body.index(NOT_YOU_TEXT)
+    )
+    assert body.rstrip().endswith(salon_name)
+
+
+def test_reset_email_link_completes_a_reset_on_confirm(client, salon) -> None:
+    account = _make_account(salon)
+    client.post(_reset_request_url(salon.slug), {"email": account.email}, format="json")
+    uid_value, token_value = _link_from(mail.outbox[0].body)
+
+    response = client.post(
+        _reset_confirm_url(salon.slug),
+        {"uid": uid_value, "token": token_value, "new_password": NEW_PASSWORD},
+        format="json",
+    )
+
+    assert response.status_code == 204
+    assert Account.unscoped_objects.get(pk=account.pk).check_password(NEW_PASSWORD)
 
 
 # --- reset-confirm: POST auth/password-reset/confirm/ ------------------
