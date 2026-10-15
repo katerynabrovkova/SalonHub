@@ -4956,6 +4956,18 @@ Build order: B1 the email (point 1); B2 the confirm step (points 2-4);
 F1 `/forgot-password` and both links; F2 `/reset-password`; then a browser
 check.
 
+Backend implemented, 15.10.2026
+- **In place.** B1: the reset email in Ukrainian with the salon name
+  (point 1). B2: points 2-4, the link checked first, `user=account` in
+  `validate_password`, the row lock with the token re-checked on the
+  locked row, and the cookies cleared on 204.
+- **Deleted account.** The locked lookup uses `filter().first()`, so an
+  account deleted in between gives `invalid_or_expired_token`, not a 500.
+- **Untested re-check.** The token re-check on the locked row has no test:
+  a sequential test cannot produce the race it guards against. Like item
+  9, it stays without a test.
+- **Frontend.** F1 and F2 are not built yet.
+
 ### Known issue: password-reset request is not timing-identical
 
 Recorded 15.10.2026, from the item 11 recon.
