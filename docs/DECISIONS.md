@@ -4966,7 +4966,7 @@ Backend implemented, 15.10.2026
 - **Untested re-check.** The token re-check on the locked row has no test:
   a sequential test cannot produce the race it guards against. Like item
   9, it stays without a test.
-- **Frontend.** F1 and F2 are not built yet.
+- **Frontend.** See "Implemented, 15.10.2026" below.
 
 Early link check, decided 15.10.2026
 
@@ -4999,6 +4999,16 @@ twice.
 Build order: B3 the check endpoint; F3 the page change; then repeat the
 browser check of reopening an already-used reset link: the page must show
 the invalid-link state before any password is typed.
+
+Implemented, 15.10.2026
+- **Backend.** B3: `POST auth/password-reset/check/`, which shares
+  `read_password_reset_link` with confirm.
+- **Frontend.** F1: `/forgot-password` and both links. F2:
+  `/reset-password`. F3: the early link check.
+- **Browser check.** Katya's browser checks on 15.10.2026 passed,
+  including reopening an already-used link, which now shows the
+  invalid-link state before any password is typed.
+- **Item 11 is complete.**
 
 ### Known issue: password-reset request is not timing-identical
 
