@@ -49,8 +49,8 @@ from django.db.models import F
 from django.middleware.csrf import get_token as get_csrf_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.utils.encoding import force_bytes, force_str
-from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.exceptions import NotAuthenticated, NotFound
 from rest_framework.permissions import AllowAny
@@ -275,9 +275,15 @@ class PasswordResetConfirmView(PublicEndpointMixin, APIView):
     Every uid/token failure — malformed base64, a pk naming no account in
     this salon, a tampered or expired token — collapses to one neutral
     ``InvalidOrExpiredTokenError`` (400), the same posture as
-    ``VerifyEmailView``. A weak ``new_password`` is a separate field-level
-    ``400`` raised by the serializer, never this collapse. Success is
-    ``204 No Content`` — the account is not logged in here (login is 3-R.E).
+    ``VerifyEmailView``. The serializer checks the link before the strength
+    of ``new_password``, so a bad link wins over a weak password
+    (docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 2).
+
+    The change runs in one transaction on the locked Account row,
+    re-checking the token there (point 3), like `MePasswordChangeView`:
+    `set_password`, `save` and the `session_version` increment. Success is
+    an empty ``204`` that also clears the session cookies (point 4); the
+    account is not logged in here.
     """
 
     permission_classes = [AllowAny]
@@ -285,24 +291,25 @@ class PasswordResetConfirmView(PublicEndpointMixin, APIView):
     def post(self, request: Request, *args: object, **kwargs: object) -> Response:
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        try:
-            account_pk = force_str(urlsafe_base64_decode(serializer.validated_data["uid"]))
-            account = Account.objects.get(pk=account_pk)
-        except (TypeError, ValueError, OverflowError, Account.DoesNotExist) as exc:
-            raise InvalidOrExpiredTokenError() from exc
-
-        if not default_token_generator.check_token(account, serializer.validated_data["token"]):
-            raise InvalidOrExpiredTokenError()
+        account: Account = serializer.validated_data["account"]
 
         with transaction.atomic():
-            account.set_password(serializer.validated_data["new_password"])
-            account.save(update_fields=["password"])
+            # A concurrent confirm with the same link waits here, then sees
+            # the new password hash, which invalidates the token.
+            locked = Account.objects.select_for_update().filter(pk=account.pk).first()
+            if locked is None or not default_token_generator.check_token(
+                locked, serializer.validated_data["token"]
+            ):
+                raise InvalidOrExpiredTokenError()
+            locked.set_password(serializer.validated_data["new_password"])
+            locked.save(update_fields=["password"])
             # Ends every session of the account (docs/DECISIONS.md § "Item 9
             # decisions (change password): ending sessions").
-            Account.objects.filter(pk=account.pk).update(session_version=F("session_version") + 1)
+            Account.objects.filter(pk=locked.pk).update(session_version=F("session_version") + 1)
 
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        clear_auth_cookies(response, salon_slug=str(kwargs["slug"]))
+        return response
 
 
 class ResendVerificationView(PublicEndpointMixin, APIView):

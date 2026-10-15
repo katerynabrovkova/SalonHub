@@ -33,6 +33,8 @@ import pytest
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
+from django.middleware.csrf import get_token
+from django.test import RequestFactory
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework.test import APIClient
@@ -46,6 +48,12 @@ pytestmark = pytest.mark.django_db
 STRONG_PASSWORD = "a-strong-passw0rd!"
 NEW_PASSWORD = "an-even-str0nger-passphrase!"
 OTHER_NEW_PASSWORD = "y3t-another-genu1ne-secret!"
+WEAK_PASSWORD = "123"
+
+ACCESS_COOKIE = "access_token"
+REFRESH_COOKIE = "refresh_token"
+SESSION_HINT_COOKIE = "session_hint"
+CSRF_COOKIE = "csrftoken"
 
 # docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 1.
 SUBJECT_RESET = "Відновлення пароля"
@@ -403,3 +411,141 @@ def test_confirm_get_is_405(client, salon) -> None:
     response = client.get(_reset_confirm_url(salon.slug))
 
     assert response.status_code == 405
+
+
+# --- reset-confirm: check order, user-aware validation, cookies
+# (docs/DECISIONS.md § "Item 11 decisions (forgot password)", points 2-4).
+# The row lock of point 3 is not observable from a sequential test, like
+# item 9's; it is not tested here.
+
+
+def _login_url(slug: str) -> str:
+    return f"/api/v1/salons/{slug}/auth/login/"
+
+
+def _refresh_url(slug: str) -> str:
+    return f"/api/v1/salons/{slug}/auth/refresh/"
+
+
+def _login(client: APIClient, salon, account: Account) -> None:
+    """Real cookie login with a valid CSRF pair, so the client holds the auth cookies."""
+    csrf = get_token(RequestFactory().get("/"))
+    client.cookies[CSRF_COOKIE] = csrf
+    response = client.post(
+        _login_url(salon.slug),
+        {"email": account.email, "password": STRONG_PASSWORD},
+        format="json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert response.status_code == 200
+
+
+def _assert_cleared(response, name: str, path: str) -> None:
+    cookie = response.cookies.get(name)
+    assert cookie is not None, f"{name} must be deleted by the response"
+    assert cookie.value == ""
+    assert int(cookie["max-age"]) == 0
+    assert cookie["path"] == path
+
+
+@pytest.mark.parametrize("failure", ["tampered", "expired"])
+def test_bad_link_with_weak_password_reports_invalid_or_expired_token_not_a_field_error(
+    client, salon, settings, failure
+) -> None:
+    account = _make_account(salon)
+    uid = _encode_uid(account.pk)
+    token = _make_reset_token(account)
+    if failure == "tampered":
+        token = token[:-1] + ("a" if token[-1] != "a" else "b")
+    else:
+        settings.PASSWORD_RESET_TIMEOUT = -1
+
+    response = client.post(
+        _reset_confirm_url(salon.slug),
+        {"uid": uid, "token": token, "new_password": WEAK_PASSWORD},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "invalid_or_expired_token"
+    assert "new_password" not in (response.data["error"].get("details") or {})
+    assert Account.unscoped_objects.get(pk=account.pk).check_password(STRONG_PASSWORD)
+
+
+def test_valid_link_with_password_similar_to_the_account_email_is_a_400_on_new_password(
+    client, salon
+) -> None:
+    # Long enough, not common, not numeric: only UserAttributeSimilarityValidator
+    # rejects it, and only when validate_password() gets user=account.
+    account = _make_account(salon)
+
+    response = client.post(
+        _reset_confirm_url(salon.slug),
+        {
+            "uid": _encode_uid(account.pk),
+            "token": _make_reset_token(account),
+            "new_password": f"{account.email}1",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "new_password" in response.data["error"]["details"]
+    assert Account.unscoped_objects.get(pk=account.pk).check_password(STRONG_PASSWORD)
+
+
+def test_valid_link_with_weak_password_changes_nothing_and_the_link_still_works(
+    client, salon
+) -> None:
+    account = _make_account(salon)
+    uid = _encode_uid(account.pk)
+    token = _make_reset_token(account)
+
+    weak = client.post(
+        _reset_confirm_url(salon.slug),
+        {"uid": uid, "token": token, "new_password": WEAK_PASSWORD},
+        format="json",
+    )
+
+    assert weak.status_code == 400
+    assert "new_password" in weak.data["error"]["details"]
+    row = Account.unscoped_objects.get(pk=account.pk)
+    assert row.check_password(STRONG_PASSWORD)
+    assert row.session_version == account.session_version
+
+    strong = client.post(
+        _reset_confirm_url(salon.slug),
+        {"uid": uid, "token": token, "new_password": NEW_PASSWORD},
+        format="json",
+    )
+
+    assert strong.status_code == 204
+    assert Account.unscoped_objects.get(pk=account.pk).check_password(NEW_PASSWORD)
+
+
+def test_successful_confirm_clears_the_access_refresh_and_session_hint_cookies(
+    client, salon
+) -> None:
+    account = _make_account(salon)
+    _login(client, salon, account)
+    assert ACCESS_COOKIE in client.cookies
+    assert REFRESH_COOKIE in client.cookies
+    assert SESSION_HINT_COOKIE in client.cookies
+    # Minted after login: login updates last_login, which the token covers
+    # (Item 11 decisions, point 7).
+    account = Account.unscoped_objects.get(pk=account.pk)
+
+    response = client.post(
+        _reset_confirm_url(salon.slug),
+        {
+            "uid": _encode_uid(account.pk),
+            "token": _make_reset_token(account),
+            "new_password": NEW_PASSWORD,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 204
+    _assert_cleared(response, ACCESS_COOKIE, "/")
+    _assert_cleared(response, REFRESH_COOKIE, _refresh_url(salon.slug))
+    _assert_cleared(response, SESSION_HINT_COOKIE, "/")
