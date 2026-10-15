@@ -4808,6 +4808,17 @@ Decided 05.10.2026, in discussion.
       that with `loggedOutDeliberately` true the layout neither redirects
       nor saves a return path. This overrides § "S3 design details",
       point 8's "keep passing unchanged" for that one test.
+
+      Refined 15.10.2026. The manual browser check (point 6) found that
+      after a deliberate logout, pressing Back to a `/client` page showed a
+      blank page forever, because the layout skipped the redirect whenever
+      `loggedOutDeliberately` was true. Refined rule: `ClientLayout` skips
+      the redirect only when `me` goes from an account to `null` while the
+      layout is mounted (the logout its own page started, whose caller
+      navigates). When the layout mounts with no account and the logout was
+      deliberate (Back, a typed URL), it redirects to `/login` and saves no
+      return path. A lost session is unchanged: it saves the return path
+      and redirects to `/login`.
    3. **Login page notice.** The login page reads `notice` from
       `window.location.search` with `useSyncExternalStore` (precedent:
       `/confirm-email-change` reading its hash) and shows "Пароль змінено.
@@ -4824,6 +4835,16 @@ Decided 05.10.2026, in discussion.
       with its target page. This replaces the link in point 8 above.
    6. **Manual browser check.** The redirect race must be checked by hand
       in a real browser; unit tests with a mocked router cannot show it.
+
+      Results, 15.10.2026. The notice on `/login?notice=password_changed`
+      appears after a real change (the `useSyncExternalStore`/`popstate`
+      concern did not show up). The other device's session ends. The old
+      password is rejected and the new one accepted; login lands on
+      `/client`. The notice email arrives once, with the agreed text. The
+      check also found the blank page on Back described in point 2's
+      refinement. Katya considered one generic error message instead of
+      the separate texts of point 9 above and chose to keep the separate
+      texts.
 
 ### Known issue: `OutstandingToken.user` holds the wrong row
 
