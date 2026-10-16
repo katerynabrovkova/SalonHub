@@ -1,3 +1,8 @@
+import datetime as dt
+from collections.abc import Callable
+from typing import Any
+from zoneinfo import ZoneInfo
+
 from rest_framework import serializers
 
 from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus
@@ -20,8 +25,51 @@ _AMOUNT_DUE_ELIGIBLE_STATUSES = frozenset(
 )
 
 
+class SalonLocalDateTimeField(serializers.Field):
+    """
+    A read-only appointment time as ISO 8601 in the appointment's own salon
+    time zone, e.g. "2026-09-21T12:15:00+03:00", never UTC "Z"
+    (docs/DECISIONS.md § "Appointment times in the salon's time zone",
+    point 1). The one field every appointment serializer uses for its
+    display times, so they cannot drift apart. Each value is converted on
+    its own, so a start before a DST switch and an end after it carry
+    different offsets. Only the representation changes: the string parses
+    back to the stored instant.
+
+    The zone comes from `instance.salon`, the row's own salon, never the
+    request's. A list view must `select_related("salon")` so this costs no
+    query per row. `value_from`, when given, computes the datetime from the
+    instance instead of reading `source` (for refund_deadline, which is not
+    a model field); a `None` result renders as null.
+    """
+
+    def __init__(
+        self,
+        value_from: Callable[[Appointment], dt.datetime | None] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        kwargs["read_only"] = True
+        self._value_from = value_from
+        super().__init__(**kwargs)
+
+    def get_attribute(self, instance: Appointment) -> dt.datetime | None:
+        if self._value_from is not None:
+            value: dt.datetime | None = self._value_from(instance)
+        else:
+            value = super().get_attribute(instance)
+        if value is None:
+            return None
+        return value.astimezone(ZoneInfo(instance.salon.timezone))
+
+    def to_representation(self, value: dt.datetime) -> str:
+        return value.isoformat()
+
+
 class AppointmentGuestSerializer(serializers.ModelSerializer):
     """Read-only representation for the guest view/cancel endpoints (booking/views.py)."""
+
+    start_datetime = SalonLocalDateTimeField()
+    end_datetime = SalonLocalDateTimeField()
 
     class Meta:
         model = Appointment
@@ -79,6 +127,33 @@ class AppointmentServiceSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         requested_lang = request.query_params.get("lang") if request is not None else None
         return resolve_translation(obj.name, requested_lang)
+
+
+def _refund_deadline_or_none(appointment: Appointment) -> dt.datetime | None:
+    """
+    When a customer cancellation stops being refund-eligible
+    (docs/DECISIONS.md § Stage 15 planning, item 14 design details), for
+    AppointmentAccountSerializer's `refund_deadline`. A deadline, not a
+    boolean: the dashboard compares it with the clock at click time, so a
+    page left open across the boundary still words its confirm dialog
+    correctly. Derived from `booking.services.refund_deadline`, the same rule
+    `cancel_appointment` evaluates at cancel time, which remains the final
+    decision.
+
+    None whenever a customer cancellation could refund nothing: no SUCCEEDED
+    payment, or an appointment that can no longer be cancelled (anything
+    outside ACTIVE_APPOINTMENT_STATUSES, e.g. CANCELLED with the deposit
+    withheld). Rendered through SalonLocalDateTimeField, like
+    `start_datetime`, so it carries the salon's offset too.
+    """
+    payment: Payment | None = getattr(appointment, "payment", None)
+    if (
+        appointment.status not in ACTIVE_APPOINTMENT_STATUSES
+        or payment is None
+        or payment.status != PaymentStatus.SUCCEEDED
+    ):
+        return None
+    return refund_deadline(appointment.start_datetime)
 
 
 class AppointmentAccountSerializer(serializers.ModelSerializer):
@@ -139,7 +214,7 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     planning, item 4). Reading `.name` on each traverses the FK, so
     `AccountAppointmentListView.get_queryset()` also adds
     `select_related("specialist", "service")` alongside `"payment"`, for the
-    same N+1 reason.
+    same N+1 reason, and `"salon"` for SalonLocalDateTimeField's time zone.
     """
 
     specialist = AppointmentSpecialistSerializer()
@@ -147,7 +222,9 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     payment_status = serializers.SerializerMethodField()
     payment_amount = serializers.SerializerMethodField()
     amount_due_at_visit = serializers.SerializerMethodField()
-    refund_deadline = serializers.SerializerMethodField()
+    start_datetime = SalonLocalDateTimeField()
+    end_datetime = SalonLocalDateTimeField()
+    refund_deadline = SalonLocalDateTimeField(value_from=_refund_deadline_or_none)
 
     class Meta:
         model = Appointment
@@ -190,33 +267,6 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
         ):
             return None
         return str(appointment.service_price_at_booking - payment.amount)
-
-    def get_refund_deadline(self, appointment: Appointment) -> str | None:
-        """
-        When a customer cancellation stops being refund-eligible
-        (docs/DECISIONS.md § Stage 15 planning, item 14 design details). A
-        deadline, not a boolean: the dashboard compares it with the clock at
-        click time, so a page left open across the boundary still words its
-        confirm dialog correctly. Derived from `booking.services.refund_deadline`,
-        the same rule `cancel_appointment` evaluates at cancel time, which
-        remains the final decision.
-
-        Null whenever a customer cancellation could refund nothing: no
-        SUCCEEDED payment, or an appointment that can no longer be cancelled
-        (anything outside ACTIVE_APPOINTMENT_STATUSES, e.g. CANCELLED with the
-        deposit withheld). Rendered through DateTimeField so its format
-        matches `start_datetime`'s.
-        """
-        payment = self._payment(appointment)
-        if (
-            appointment.status not in ACTIVE_APPOINTMENT_STATUSES
-            or payment is None
-            or payment.status != PaymentStatus.SUCCEEDED
-        ):
-            return None
-        return serializers.DateTimeField().to_representation(
-            refund_deadline(appointment.start_datetime)
-        )
 
 
 class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):
@@ -319,6 +369,9 @@ class AppointmentCreatedSerializer(serializers.ModelSerializer):
     response envelope"). Deliberately narrow — price/deposit snapshots are
     Stage 8.
     """
+
+    start_datetime = SalonLocalDateTimeField()
+    end_datetime = SalonLocalDateTimeField()
 
     class Meta:
         model = Appointment
