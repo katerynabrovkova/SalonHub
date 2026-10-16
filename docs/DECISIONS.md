@@ -5064,8 +5064,12 @@ Frontend
    banner does this; `AuthContext` does not change.
 6. **`/verify-email`.** After a successful verification the page calls
    `refresh()`, like `/confirm-email-change`. Its link goes to `/client`
-   when the visitor is logged in, otherwise to `/login` as now. Its texts
-   stay as they are.
+   for a client and `/admin` for an admin (decided 16.10.2026, mirroring
+   the login page's redirect), otherwise to `/login`. Refined 16.10.2026,
+   because "Увійти" read wrongly for someone already logged in: the link
+   reads "Увійти" only when nobody is logged in; for a logged-in client or
+   admin it reads "Продовжити" (to `/client` and `/admin`). The page's
+   other texts stay as they are.
 7. **Booking step 4.** A logged-in client with `email_verified` false sees
    "Підтвердіть пошту, щоб бронювати з акаунта." above the guest form.
 8. **Registration resend text.** "Якщо у нас є ваша адреса, ми щойно
