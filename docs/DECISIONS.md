@@ -92,6 +92,12 @@ on booking step 3 (see its known-issue entry).
   claim either. The email-change token got a second guard, a `salon_id`
   compared with the current salon (see "Item 8 decisions (change email)",
   cycle 2 additions); consider the same guard for these later.
+- Recorded 16.10.2026: the verification banner (see "Item 13 decisions
+  (verification reminder)") currently renders above each `/client` page's
+  own header (title, avatar, back links) at full width, because there is
+  no shared header yet. In the design pass it goes below the shared
+  header, with the width and type size from the design system, as on the
+  Item 13 mockups. Found in Katya's browser check of 16.10.2026.
 
 ## Open questions
 
@@ -5090,3 +5096,14 @@ Frontend
 
 Build order: B1 the email (point 1); F1 the banner (points 3-5); F2 points
 6-9; then a browser check.
+
+Implemented, 16.10.2026: B1 (Ukrainian verification email), F1 (banner,
+points 3-5) and F2 (points 6-9, plus the "Продовжити"/"Увійти" link
+labels) are in place, and `VerifyEmailStatus` no longer has the
+set-state-in-effect lint error (2 known lint errors remain). Katya's
+browser check on 16.10.2026 passed: registration resend text, banner on
+dashboard and profile, resend from the banner, step 4 line, verification
+in a second tab with the banner disappearing on return, and "Лист
+надіслано." on the change-email and forgot-password screens. The banner
+layout is deferred (see the deferred list under "Agreed stage order").
+Item 13 is complete.
