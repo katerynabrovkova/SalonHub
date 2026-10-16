@@ -4646,7 +4646,9 @@ Decided 30.09.2026, in discussion, before item 8 starts.
      Змінити" link returns to the form with the new address filled in and
      the password cleared, like registration (`register/page.tsx:133`). Each
      send issues a new token; once one is confirmed the others stop
-     working, because their `old_email` no longer matches.
+     working, because their `old_email` no longer matches. Changed
+     16.10.2026: the resend success text is now "Лист надіслано.", see §
+     "Item 13 decisions (verification reminder)", point 9.
    - **Checks.** The new code adds no lint or tsc errors and uses no
      `eslint-disable` comments. `VerifyEmailStatus` is not changed in
      item 8.
@@ -4927,7 +4929,9 @@ Frontend
    лист із посиланням. Посилання діє 1 годину." with "Надіслати ще раз"
    (success text "Лист надіслано ще раз.", same errors as point 8) and
    "Вказали не ту адресу? Змінити" (back to the form, address kept), like
-   registration and item 8.
+   registration and item 8. Changed 16.10.2026: the resend success text is
+   now "Лист надіслано.", see § "Item 13 decisions (verification
+   reminder)", point 9.
 10. **`/reset-password`** (public). Reads `uid` and `token` from the hash
     once, keeps them in memory, then removes the hash from the address
     bar with `history.replaceState` so the link does not stay in browser
@@ -5022,3 +5026,63 @@ Recorded 15.10.2026, from the item 11 recon.
 - The difference is one queue write, about a millisecond, far below
   network jitter. Katya accepted it as a known minor issue given the
   threat model; it is not scheduled for a fix.
+
+### Item 13 decisions (verification reminder)
+
+Decided 16.10.2026, in discussion, after the item 13 recon of the same day.
+Mockups are on the Stage 15 design canvas, row "Item 13" (dashboard with
+the banner, profile with the banner, banner states, booking step 4).
+
+Backend
+1. **Verification email.** In Ukrainian, with the salon name, like item
+   11's reset email; the task receives only strings. Subject
+   "Підтвердження пошти". Body: "Вітаємо!", "Щоб підтвердити пошту для
+   акаунта в салоні <назва салону>, перейдіть за посиланням: <link>",
+   "Посилання діє 48 годин.", "Якщо ви не реєструвалися, просто
+   проігноруйте цей лист.", then the salon name. The link stays
+   `/verify-email#token=...`.
+2. **No new endpoint.** The banner calls the existing public
+   `POST auth/resend-verification/` with the account's own email. Its
+   constant 202 is safe here because the page shows the same text for
+   every outcome.
+
+Frontend
+3. **Banner.** In `app/client/layout.tsx`, on every `/client` page, for a
+   client whose `email_verified` is false. Not dismissible; it disappears
+   once the email is verified. Title "Підтвердіть пошту"; text "Ми
+   надіслали лист на <email>. Після підтвердження тут з'являться ваші
+   записи, і ви зможете бронювати з акаунта."; button "Надіслати лист ще
+   раз".
+4. **Resend states.** While sending, the button reads "Надсилаємо..." and
+   is disabled. 202: "Лист надіслано на <email>."; 429: "Забагато спроб.
+   Спробуйте пізніше."; `TypeError`: "Не вдалося з'єднатися. Перевірте
+   інтернет і спробуйте ще раз."; anything else: "Не вдалося надіслати.
+   Спробуйте ще раз." The server's message is never shown.
+5. **Verified in another tab.** While the banner is shown, it calls
+   `refresh()` from `AuthContext` when the tab becomes visible again
+   (`visibilitychange`), so it disappears without a reload. Only the
+   banner does this; `AuthContext` does not change.
+6. **`/verify-email`.** After a successful verification the page calls
+   `refresh()`, like `/confirm-email-change`. Its link goes to `/client`
+   when the visitor is logged in, otherwise to `/login` as now. Its texts
+   stay as they are.
+7. **Booking step 4.** A logged-in client with `email_verified` false sees
+   "Підтвердіть пошту, щоб бронювати з акаунта." above the guest form.
+8. **Registration resend text.** "Якщо у нас є ваша адреса, ми щойно
+   надіслали новий лист." becomes "Лист надіслано." The registration
+   screen already tells the person to check their email, so the short
+   text does not repeat it. Katya found the old text confusing (manual
+   check of 21.09.2026). A constant text reveals nothing, and a person who
+   typed a wrong address will not get the letter and can use "Вказали не
+   ту адресу? Змінити email".
+9. **One answer on the three resend screens.** For the same reason, the
+   resend success text "Лист надіслано ще раз." on the item 8 change-email
+   screen and the item 11 forgot-password screen becomes "Лист надіслано."
+   too, so the resend buttons on the registration, item 8 change-email and
+   item 11 forgot-password screens answer the same way. The banner keeps
+   "Лист надіслано на <email>." from point 4, because the banner's text
+   names the address itself. The item 8 and item 11 entries carry a note
+   pointing here.
+
+Build order: B1 the email (point 1); F1 the banner (points 3-5); F2 points
+6-9; then a browser check.
