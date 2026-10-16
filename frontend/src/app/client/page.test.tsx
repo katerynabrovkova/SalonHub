@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, RenewalUnsureError } from "@/lib/api/errors";
 import type { MyAppointment } from "@/lib/booking/getMyAppointments";
@@ -58,8 +58,22 @@ function renderDashboard() {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const FUTURE = new Date(Date.now() + 3 * DAY_MS).toISOString();
-const PAST = new Date(Date.now() - 3 * DAY_MS).toISOString();
+
+/**
+ * `ms` as the API now sends appointment times: ISO 8601 with the salon's
+ * offset, whole seconds, e.g. "2026-09-21T12:15:00+03:00" (docs/DECISIONS.md
+ * § "Appointment times in the salon's time zone", point 1). Kyiv's summer
+ * offset is enough here: these fixtures only need the API's shape and the
+ * right instant (to the second), not a particular wall time.
+ */
+function salonIso(ms: number, offsetHours = 3): string {
+  const wallClock = new Date(ms + offsetHours * 60 * 60 * 1000).toISOString().slice(0, 19);
+  const sign = offsetHours < 0 ? "-" : "+";
+  return `${wallClock}${sign}${String(Math.abs(offsetHours)).padStart(2, "0")}:00`;
+}
+
+const FUTURE = salonIso(Date.now() + 3 * DAY_MS);
+const PAST = salonIso(Date.now() - 3 * DAY_MS);
 
 let nextId = 1;
 
@@ -493,7 +507,7 @@ describe("ClientDashboardPage", () => {
       return buildAppointment({
         status: "confirmed",
         payment_status: "succeeded",
-        start_datetime: new Date(DEADLINE + DAY_MS).toISOString(),
+        start_datetime: salonIso(DEADLINE + DAY_MS),
         refund_deadline: new Date(DEADLINE).toISOString(),
       });
     }
@@ -827,6 +841,58 @@ describe("ClientDashboardPage", () => {
     );
     expect(within(secondCard).queryByText(PAYMENT_SERVICE_DOWN)).not.toBeInTheDocument();
     expect(screen.getAllByText(PAYMENT_SERVICE_DOWN)).toHaveLength(1);
+  });
+
+  // --- 5b. Appointment time in the salon's wall time -----------------------
+  // docs/DECISIONS.md § "Appointment times in the salon's time zone", points
+  // 2 and 3: the card shows the wall time carried in the API string, whatever
+  // the zone the browser (here, the test runner) is in. The runner zone is
+  // switched by assigning process.env.TZ, which Node applies at once to
+  // Date's local getters and Intl's default zone; vitest's default forks pool
+  // keeps it inside this file's process, and it is restored after the block.
+  // The guard test proves the switch took effect.
+
+  describe.each([
+    { zone: "Asia/Tbilisi", localHourOf0915Utc: 13 },
+    { zone: "America/New_York", localHourOf0915Utc: 5 },
+  ])("under runner zone ($zone)", ({ zone, localHourOf0915Utc }) => {
+    let previousTz: string | undefined;
+
+    beforeAll(() => {
+      previousTz = process.env.TZ;
+      process.env.TZ = zone;
+    });
+
+    afterAll(() => {
+      if (previousTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = previousTz;
+      }
+    });
+
+    it("test_runner_zone_switch_took_effect", () => {
+      expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(zone);
+      expect(new Date("2026-07-15T09:15:00Z").getHours()).toBe(localHourOf0915Utc);
+    });
+
+    it("test_card_shows_the_salon_wall_time_from_the_api_string", async () => {
+      mockApiRoutes({
+        list: () =>
+          pageOf([
+            buildAppointment({
+              status: "confirmed",
+              start_datetime: "2026-07-15T12:15:00+03:00",
+              end_datetime: "2026-07-15T13:15:00+03:00",
+            }),
+          ]),
+      });
+
+      renderDashboard();
+      const card = await findCard("Manicure");
+
+      expect(within(card).getByText("15 лип. 2026 р., 12:15")).toBeInTheDocument();
+    });
   });
 
   // --- 6. Empty state --------------------------------------------------

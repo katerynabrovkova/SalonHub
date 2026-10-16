@@ -45,6 +45,7 @@ import { apiRequest } from "@/lib/api/client";
 import { ApiError, RenewalUnsureError } from "@/lib/api/errors";
 import { getMyAppointments, type MyAppointment } from "@/lib/booking/getMyAppointments";
 import { payForAppointment } from "@/lib/booking/payForAppointment";
+import { formatSalonDateTime } from "@/lib/datetime/formatSalonDateTime";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 
 import ClientAvatarMenu from "./ClientAvatarMenu";
@@ -172,13 +173,6 @@ function cancelConfirmText(appointment: MyAppointment, nowMs: number): string {
     : "Скасувати бронювання? До візиту менше 24 годин, тому передоплата не повертається.";
 }
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("uk-UA", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
 interface AppointmentCardProps {
   appointment: MyAppointment;
   onCancel: (appointment: MyAppointment) => void;
@@ -212,7 +206,7 @@ function AppointmentCard({
       </div>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">{appointment.specialist.name}</p>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        {formatDateTime(appointment.start_datetime)}
+        {formatSalonDateTime(appointment.start_datetime)}
       </p>
       {line !== null ? <p className="text-sm">{line}</p> : null}
       {awaitingConfirmation ? <p className="text-sm">{AWAITING_CONFIRMATION_TEXT}</p> : null}
