@@ -3707,7 +3707,8 @@ Scope, in build order:
    - Known issue, not fixed here: `client/page.tsx`'s `formatDateTime`
      uses `new Date(iso).toLocaleString` in the browser's timezone, so a
      client outside the salon's timezone sees a different wall time than
-     the salon's.
+     the salon's. Being fixed by § "Appointment times in the salon's time
+     zone" (decided 16.10.2026).
 
    Recon checks done before writing this cycle:
    - `ServiceDetailView.get_queryset()` (`backend/catalog/views.py:155-156`)
@@ -5107,3 +5108,48 @@ in a second tab with the banner disappearing on return, and "Лист
 надіслано." on the change-email and forgot-password screens. The banner
 layout is deferred (see the deferred list under "Agreed stage order").
 Item 13 is complete.
+
+### Appointment times in the salon's time zone
+
+Decided 16.10.2026, in discussion, after the recon of the same day. Nothing
+here is implemented yet.
+
+Found in Katya's manual check of 21.09.2026: an appointment at 12:15 salon
+time showed as 13:15 on `/client` in a browser at +4, while the email showed
+12:15. `appointments/mine/` sends UTC (`Z`), and the dashboard's
+`formatDateTime` formats it with `toLocaleString` in the browser's zone. The
+emails were right because `format_datetime_for_salon` converts to
+`salon.timezone` explicitly. This entry fixes the known issue recorded in §
+Stage 15 planning, item 5, Cycle D ("`client/page.tsx`'s `formatDateTime`
+uses `new Date(iso).toLocaleString`...").
+
+1. **Rule.** Every API time meant for display carries the salon's offset,
+   as availability slots already do (`scheduling/views.py`). The appointment
+   serializers (account list `AppointmentAccountSerializer`, guest
+   `AppointmentGuestSerializer`, created `AppointmentCreatedSerializer`)
+   render `start_datetime`, `end_datetime` and `refund_deadline` (where the
+   serializer has it) as ISO 8601 in `salon.timezone`, for example
+   `2026-09-21T12:15:00+03:00`. They do it through one shared field, so the
+   serializers cannot drift apart.
+2. **Frontend.** The frontend reads the salon's wall time from the string,
+   like `formatSlotForSummary`, and never formats these times with `Date`'s
+   local getters or with `toLocaleString` without a `timeZone`. The
+   dashboard keeps the year in its format. Comparisons with "now"
+   (`isUpcoming`, the refund deadline in the cancel wording) stay
+   instant-based and do not change.
+3. **Tests.** Backend: the list returns the salon offset, not `Z`, including
+   for a salon in a different zone and on both sides of a DST change.
+   Frontend: the dashboard shows the salon's wall time whatever the test
+   runner's time zone.
+4. **Known issues, recorded and not fixed here.**
+   - Review dates (`ReviewsList`) are formatted with `Intl.DateTimeFormat`
+     without a `timeZone`, so they can shift by a day near midnight.
+   - Booking step 3's default "today" is the UTC date
+     (`booking/page.tsx`, `todayIsoDate`), not the salon's. For a salon
+     ahead of UTC, in the first hours after the salon's midnight (00:00 to
+     03:00 in Kyiv in summer) the UTC date is still the previous day, so
+     the default window starts a day early.
+
+Build order: T1 the shared backend field and the serializers; T2 the
+dashboard formatting; then a browser check with the browser set to another
+time zone.
