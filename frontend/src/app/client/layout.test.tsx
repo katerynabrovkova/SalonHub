@@ -105,6 +105,56 @@ describe("ClientLayout", () => {
   });
 });
 
+describe("ClientLayout verification banner", () => {
+  // docs/DECISIONS.md § "Item 13 decisions (verification reminder)", point 3.
+
+  function mockClient(emailVerified: boolean) {
+    mockedUseAuth.mockReturnValue({
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: null,
+        phone: null,
+        email_verified: emailVerified,
+      },
+      loading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      loggedOutDeliberately: false,
+    });
+  }
+
+  it("test_unverified_client_sees_the_banner_above_the_page_content", () => {
+    mockClient(false);
+
+    render(
+      <ClientLayout>
+        <Children />
+      </ClientLayout>,
+    );
+
+    const banner = screen.getByRole("region", { name: "Підтвердження пошти" });
+    const content = screen.getByText("protected content");
+    expect(banner).toHaveTextContent("Підтвердіть пошту");
+    expect(banner.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("test_verified_client_sees_no_banner", () => {
+    mockClient(true);
+
+    render(
+      <ClientLayout>
+        <Children />
+      </ClientLayout>,
+    );
+
+    expect(screen.getByText("protected content")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Підтвердження пошти" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Підтвердіть пошту")).not.toBeInTheDocument();
+  });
+});
+
 describe("ClientLayout return path", () => {
   // docs/DECISIONS.md, "S3 design details", item 5.
 

@@ -25,6 +25,8 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { useAuth } from "@/app/AuthContext";
 import { saveReturnPath } from "@/lib/auth/returnPath";
 
+import VerificationBanner from "./VerificationBanner";
+
 export default function ClientLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { me, loading, loggedOutDeliberately } = useAuth();
@@ -64,5 +66,10 @@ export default function ClientLayout({ children }: { children: ReactNode }) {
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <VerificationBanner />
+      {children}
+    </>
+  );
 }
