@@ -172,7 +172,8 @@ class RegisterView(PublicEndpointMixin, APIView):
                 password=serializer.validated_data["password"],
             )
             token = generate_account_verification_token(account)
-            send_verification_email.delay(account.email, token, salon.slug)
+            salon_name = resolve_translation(salon.name, "uk")
+            send_verification_email.delay(account.email, token, salon.slug, salon_name)
 
         return Response(status=status.HTTP_202_ACCEPTED)
 
@@ -362,7 +363,8 @@ class ResendVerificationView(PublicEndpointMixin, APIView):
         account = Account.objects.filter(email=serializer.validated_data["email"]).first()
         if account is not None and account.email_verified_at is None:
             token = generate_account_verification_token(account)
-            send_verification_email.delay(account.email, token, salon.slug)
+            salon_name = resolve_translation(salon.name, "uk")
+            send_verification_email.delay(account.email, token, salon.slug, salon_name)
 
         return Response(status=status.HTTP_202_ACCEPTED)
 

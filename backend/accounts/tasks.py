@@ -8,8 +8,8 @@ the view layer, never called directly — an SMTP timeout must not become a
 failed HTTP response.
 
 Each task takes plain primitives (recipient address, the pre-built token /
-uid, salon slug; the email-change letters take the pre-built link and the
-already-resolved salon name instead): the view mints the credential while tenant context is
+uid, salon slug, the already-resolved salon name; the email-change letters
+take the pre-built link instead of a token): the view mints the credential while tenant context is
 bound and passes what it already holds, so the worker never re-derives it
 through ``unscoped_objects`` and imports no model.
 """
@@ -22,11 +22,22 @@ from core.urls import build_salon_frontend_url
 
 
 @shared_task
-def send_verification_email(recipient_email: str, token: str, salon_slug: str) -> None:
+def send_verification_email(
+    recipient_email: str, token: str, salon_slug: str, salon_name: str
+) -> None:
+    """Verification link (docs/DECISIONS.md § "Item 13 decisions
+    (verification reminder)", point 1). The view resolves ``salon_name``."""
     link = build_salon_frontend_url(salon_slug, "/verify-email") + f"#token={token}"
     send_mail(
-        subject="Confirm your email",
-        message=f"Confirm your email by visiting: {link}\n\nThis link expires in 48 hours.",
+        subject="Підтвердження пошти",
+        message=(
+            f"Вітаємо!\n\n"
+            f"Щоб підтвердити пошту для акаунта в салоні {salon_name}, "
+            f"перейдіть за посиланням: {link}\n\n"
+            f"Посилання діє 48 годин.\n\n"
+            f"Якщо ви не реєструвалися, просто проігноруйте цей лист.\n\n"
+            f"{salon_name}"
+        ),
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[recipient_email],
     )
