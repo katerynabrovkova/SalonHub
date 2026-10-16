@@ -3707,8 +3707,8 @@ Scope, in build order:
    - Known issue, not fixed here: `client/page.tsx`'s `formatDateTime`
      uses `new Date(iso).toLocaleString` in the browser's timezone, so a
      client outside the salon's timezone sees a different wall time than
-     the salon's. Being fixed by § "Appointment times in the salon's time
-     zone" (decided 16.10.2026).
+     the salon's. Fixed by § "Appointment times in the salon's time zone"
+     (16.10.2026).
 
    Recon checks done before writing this cycle:
    - `ServiceDetailView.get_queryset()` (`backend/catalog/views.py:155-156`)
@@ -5153,3 +5153,16 @@ uses `new Date(iso).toLocaleString`...").
 Build order: T1 the shared backend field and the serializers; T2 the
 dashboard formatting; then a browser check with the browser set to another
 time zone.
+
+Implemented, 16.10.2026
+- **T1.** `SalonLocalDateTimeField` renders the appointment times on the
+  guest, account-list and created serializers, `refund_deadline` included.
+  The list selects the salon with `select_related`, so the zone costs no
+  query per row. A two-salon test catches a zone taken from the wrong salon.
+- **T2.** `formatSalonDateTime` reads the date and the time from the string.
+  The dashboard tests run under Asia/Tbilisi and America/New_York.
+- **Browser check.** Katya's browser check on 16.10.2026 passed: an 11:30
+  booking shows 11:30 on `/client` in Katya's own browser in Batumi
+  (Asia/Tbilisi) and with the zone overridden to Asia/Tokyo, matching the
+  email.
+- The known issue about the dashboard time zone is fixed.
