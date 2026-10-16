@@ -38,7 +38,8 @@ const PASSWORD = "correct-horse-battery";
 const HINT =
   "Ми надішлемо лист із підтвердженням на нову адресу. Поточна адреса лишається робочою для входу, доки ви її не підтвердите.";
 const SENT_MESSAGE = `Ми надіслали лист на ${NEW_EMAIL}. Перейдіть за посиланням у листі, щоб підтвердити нову адресу.`;
-const RESENT_MESSAGE = "Лист надіслано ще раз.";
+// docs/DECISIONS.md § "Item 13 decisions (verification reminder)", point 9.
+const RESENT_MESSAGE = "Лист надіслано.";
 const INVALID_PASSWORD_MESSAGE = "Неправильний пароль.";
 const SAME_EMAIL_MESSAGE = "Це вже ваша адреса.";
 const BAD_EMAIL_MESSAGE = "Перевірте адресу пошти.";

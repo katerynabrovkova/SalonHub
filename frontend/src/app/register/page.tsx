@@ -16,7 +16,8 @@ const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "salonhub.com
 
 const CHECK_EMAIL_MESSAGE =
   "Якщо ви реєструєтесь уперше, лист із посиланням для підтвердження вже у вашій поштовій скриньці.";
-const RESEND_MESSAGE = "Якщо у нас є ваша адреса, ми щойно надіслали новий лист.";
+// docs/DECISIONS.md § "Item 13 decisions (verification reminder)", point 8.
+const RESEND_MESSAGE = "Лист надіслано.";
 
 /**
  * `RegisterSerializer`'s `password` field runs Django's `validate_password`

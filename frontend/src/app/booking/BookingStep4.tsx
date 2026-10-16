@@ -12,6 +12,9 @@
  * me.email_verified`) renders `AccountBookingForm`, with `linked` derived
  * via `hasLinkedCustomer(me)`. Every other state -- no session, `"admin"`,
  * an unverified `"client"` -- renders the existing guest form unchanged.
+ * An unverified `"client"` also sees a line above it asking to verify the
+ * email (docs/DECISIONS.md § "Item 13 decisions (verification reminder)",
+ * point 7); an admin does not.
  */
 import { useAuth } from "@/app/AuthContext";
 import { hasLinkedCustomer } from "@/lib/auth/hasLinkedCustomer";
@@ -61,13 +64,18 @@ export default function BookingStep4({
           linked={hasLinkedCustomer(me)}
         />
       ) : (
-        <ContactInfoForm
-          slug={slug}
-          entry={entry}
-          service={service}
-          specialist={specialist}
-          startDatetime={startDatetime}
-        />
+        <>
+          {me !== null && me.role === "client" && !me.email_verified ? (
+            <p>Підтвердіть пошту, щоб бронювати з акаунта.</p>
+          ) : null}
+          <ContactInfoForm
+            slug={slug}
+            entry={entry}
+            service={service}
+            specialist={specialist}
+            startDatetime={startDatetime}
+          />
+        </>
       )}
     </>
   );

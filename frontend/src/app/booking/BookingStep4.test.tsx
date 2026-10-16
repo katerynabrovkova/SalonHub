@@ -166,3 +166,75 @@ describe("BookingStep4", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("BookingStep4 verification line (item 13, point 7)", () => {
+  const VERIFY_LINE = "Підтвердіть пошту, щоб бронювати з акаунта.";
+
+  function mockClient(emailVerified: boolean) {
+    mockedUseAuth.mockReturnValue({
+      me: {
+        email: "alice@example.com",
+        role: "client",
+        name: "Alice",
+        phone: "+10000000000",
+        email_verified: emailVerified,
+      },
+      loading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+  }
+
+  it("test_unverified_client_sees_the_verify_line_above_the_guest_form", () => {
+    mockClient(false);
+
+    renderStep4();
+
+    const line = screen.getByText(VERIFY_LINE);
+    const guestNameInput = screen.getByLabelText("Ім'я");
+    expect(line.compareDocumentPosition(guestNameInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByLabelText("Email")).not.toHaveAttribute("readonly");
+  });
+
+  it("test_verified_client_sees_no_verify_line", () => {
+    mockClient(true);
+
+    renderStep4();
+
+    expect(
+      screen.getByText("Запис на ім'я вашого облікового запису: alice@example.com"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(VERIFY_LINE)).not.toBeInTheDocument();
+  });
+
+  // The line is for clients only.
+  it("test_unverified_admin_sees_no_verify_line", () => {
+    mockedUseAuth.mockReturnValue({
+      me: {
+        email: "admin@example.com",
+        role: "admin",
+        name: null,
+        phone: null,
+        email_verified: false,
+      },
+      loading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+
+    renderStep4();
+
+    expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
+    expect(screen.queryByText(VERIFY_LINE)).not.toBeInTheDocument();
+  });
+
+  it("test_visitor_not_logged_in_sees_no_verify_line", () => {
+    mockedUseAuth.mockReturnValue({ me: null, loading: false, login: vi.fn(), logout: vi.fn() });
+
+    renderStep4();
+
+    expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
+    expect(screen.queryByText(VERIFY_LINE)).not.toBeInTheDocument();
+  });
+});

@@ -121,9 +121,9 @@ describe("RegisterPage", () => {
     await user.click(screen.getByRole("button", { name: /надіслати ще раз/i }));
 
     await waitFor(() => expect(findCall("/auth/resend-verification/")).toBeDefined());
-    expect(
-      screen.getByText(/якщо у нас є ваша адреса, ми щойно надіслали новий лист/i),
-    ).toBeInTheDocument();
+    // docs/DECISIONS.md § "Item 13 decisions (verification reminder)", point 8.
+    expect(await screen.findByText("Лист надіслано.")).toBeInTheDocument();
+    expect(screen.queryByText(/щойно надіслали новий лист/i)).not.toBeInTheDocument();
   });
 
   test("test_resend_shows_the_same_neutral_outcome_on_error", async () => {
@@ -140,9 +140,7 @@ describe("RegisterPage", () => {
     await waitFor(() => expect(findCall("/auth/resend-verification/")).toBeDefined());
     // Identical copy to the success case -- no enumeration leak from an
     // error outcome either.
-    expect(
-      screen.getByText(/якщо у нас є ваша адреса, ми щойно надіслали новий лист/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Лист надіслано.")).toBeInTheDocument();
   });
 
   test("test_change_email_link_resets_back_to_the_registration_form", async () => {

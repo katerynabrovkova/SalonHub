@@ -24,7 +24,8 @@ const INTRO =
   "Вкажіть адресу пошти, з якою ви входите. Ми надішлемо посилання, щоб задати новий пароль.";
 const SENT_MESSAGE =
   "Якщо ця адреса зареєстрована, ми надіслали на неї лист із посиланням. Посилання діє 1 годину.";
-const RESENT_MESSAGE = "Лист надіслано ще раз.";
+// docs/DECISIONS.md § "Item 13 decisions (verification reminder)", point 9.
+const RESENT_MESSAGE = "Лист надіслано.";
 const BAD_EMAIL_MESSAGE = "Перевірте адресу пошти.";
 const THROTTLED_MESSAGE = "Забагато спроб. Спробуйте пізніше.";
 const CONNECTION_MESSAGE = "Не вдалося з'єднатися. Перевірте інтернет і спробуйте ще раз.";

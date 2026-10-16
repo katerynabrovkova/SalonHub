@@ -162,7 +162,7 @@ export default function ChangeEmailForm() {
             Надіслати ще раз
           </button>
 
-          {resent ? <p role="status">Лист надіслано ще раз.</p> : null}
+          {resent ? <p role="status">Лист надіслано.</p> : null}
           {error !== null ? <p role="alert">{error}</p> : null}
 
           <button
