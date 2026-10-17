@@ -5175,25 +5175,40 @@ Decided 17.10.2026, in discussion, after the recon of the same day. Closes
 the Stage 15 item 4 refinement "Shows price/deposit amount per
 appointment", which the dashboard did not do: it showed no full price, no
 prepayment before payment, and a hardcoded `₴` instead of the salon's
-currency. Nothing here is implemented yet.
+currency. Implemented so far: `deposit_amount` and `currency` (point 1).
+The rest is not implemented yet.
+
+Depends on "Persisted refund decision (`Payment.refund_due`)":
+`deposit_outcome` (point 1) reads `Payment.refund_due`, so that entry is
+implemented first.
 
 1. **Backend.** `appointments/mine/` (`AppointmentAccountSerializer`) gains
-   two read-only fields:
+   three read-only fields:
    - `deposit_amount`: `Payment.amount` when a Payment exists; otherwise
      computed from `service_price_at_booking` and
      `deposit_percentage_at_booking` by the same helper `initiate_payment`
-     uses. `_compute_deposit_amount` in `payments/services.py` becomes a
-     public function for this; the rounding logic is not duplicated. This
-     reverses the serializer docstring's earlier stance that the helper
-     stays module-private. `null` whenever the deposit is 0, whether the
-     percentage is 0 or rounding to whole units gives 0 (e.g. 20% of
-     2.00); `null` means no "Передоплата" line.
+     uses. `_compute_deposit_amount` in `payments/services.py` is made
+     public as `compute_deposit_amount` for this; the rounding logic is not
+     duplicated. This reverses the serializer docstring's earlier stance
+     that the helper stays module-private. `null` whenever the deposit is
+     0, whether the percentage is 0 or rounding to whole units gives 0
+     (e.g. 20% of 2.00); `null` means no "Передоплата" line.
    - `currency`: `Payment.currency` when a Payment exists, otherwise the
      salon's `Salon.currency`. A historic payment keeps the currency it was
      actually paid in, even if the salon changes its currency later.
+   - `deposit_outcome`: what happened to a paid deposit, stated
+     explicitly so the frontend never infers it from `payment_status`:
+     - `"refunded"`: the Payment is `REFUNDED`;
+     - `"refund_processing"`: the Payment is `REFUND_PENDING`, or
+       `SUCCEEDED` with `refund_due`;
+     - `"withheld"`: the Payment is `SUCCEEDED`, not `refund_due`, and the
+       appointment is `CANCELLED`;
+     - `null` otherwise (no Payment, or any other combination).
+     The frontend reads only this field for the cancelled and expired
+     money lines (point 4), never `payment_status`.
    Checked before deciding: `amount_due_at_visit` is
    `service_price_at_booking - Payment.amount`, and `Payment.amount` is
-   written only by `initiate_payment` from `_compute_deposit_amount`, so
+   written only by `initiate_payment` from `compute_deposit_amount`, so
    `deposit_amount + amount_due_at_visit` always equals the price.
 2. **Frontend never computes money.** It only formats backend amounts with
    the existing `formatPrice(price, currency)`. The hardcoded `₴` in
@@ -5201,29 +5216,32 @@ currency. Nothing here is implemented yet.
 3. **Full price in the title row.** The full price
    (`service_price_at_booking`) appears next to the service name, before
    the status badge ("Манікюр  120 $"), if and only if the card has a
-   money line under the date (point 4). Completed and expired cards
-   therefore show no price and no money line.
+   money line under the date (point 4). Completed cards therefore show no
+   price and no money line.
 4. **Money line under the date**, per status:
    - pending payment: "Передоплата: 24 $", in bold;
    - confirmed: "Оплата при візиті: 96 $";
-   - cancelled late (deposit withheld, today's `payment_status`
-     `succeeded` branch): "Передоплату утримано: 24 $";
-   - cancelled in time (today's `refunded` branch): "Повернено: 24 $";
-   - cancelled, refund pending: "Повернення обробляється: 24 $";
-   - cancelled with no succeeded, refunded or refund-pending payment:
-     none;
-   - completed, expired: none.
+   - cancelled and expired alike, by `deposit_outcome` (point 1):
+     - `refund_processing`: "Повернення обробляється: 24 $";
+     - `refunded`: "Повернено: 24 $";
+     - `withheld`: "Передоплату утримано: 24 $";
+     - `null`: none.
+     The amount on these lines is `deposit_amount` (point 1); a `null`
+     `deposit_amount` means no line. "Передоплату утримано" is never shown
+     when a refund is owed;
+   - completed: none.
 5. **Wording.** "Передоплата" replaces "Депозит" in these texts. Ukrainian
    only.
 6. **Tenant isolation.** The currency and the amounts come only from the
    appointment's own salon and payment. The two-salon test covers salons
    with different currencies.
 7. **Mockup.** Stage 15 design canvas, board "Ціна поруч з послугою (в)",
-   with the price removed on completed and expired cards.
+   with the price removed on completed cards and on any card without a
+   money line.
 
 Left as they are:
 
-- **`no_show`:** not changed here (today no badge and no line). By the
+- **`no_show`:** not changed here (today no badge and no line). By
   point 3 it shows no price and no line.
 - **0% deposit booking flow: not decided here.** Today a 0% booking still
   goes through `PENDING_PAYMENT` and a 0.00 payment (`create_appointment`
@@ -5246,4 +5264,74 @@ cards".
   before the change is written.
 - Also unknown: what WayForPay does with a 0.00 amount. That can happen
   today when a small price rounds the deposit to 0, since
-  `initiate_payment` sends whatever `_compute_deposit_amount` returns.
+  `initiate_payment` sends whatever `compute_deposit_amount` returns.
+
+### Persisted refund decision (`Payment.refund_due`)
+
+Decided 17.10.2026, in discussion, after the recon of the same day. Nothing
+here is implemented yet.
+
+1. **Field.** `Payment` gains `refund_due` (boolean, default `False`).
+2. **When it is set.** It is set to `True` in the same transaction in which
+   the backend decides a refund is owed:
+   - the payment webhook's late-payment path: the Payment becomes
+     `SUCCEEDED` while the appointment is already `EXPIRED` or `CANCELLED`
+     (`PaymentWebhookView`, today a local `should_initiate_refund`);
+   - the cancel path, when the cancellation is refund-eligible
+     (`cancel_appointment`, today a local `is_eligible`).
+   It is never recomputed later from the rules.
+   Implementation constraints:
+   - `cancel_appointment` decides refund eligibility and sets `refund_due`
+     inside the same transaction that cancels the appointment, not after
+     the commit as today (`booking/services.py`, the `_is_refund_eligible`
+     call after the `atomic()` block). Otherwise a crash between the two
+     leaves the decision unrecorded.
+   - Both the cancel path and the webhook set `refund_due` while holding a
+     row lock on the appointment (`select_for_update`), so a concurrent
+     cancel and payment-success webhook cannot overwrite each other's
+     decision. Checked 17.10.2026: `cancel_appointment` already takes that
+     lock as the first statement of its transaction; the webhook takes it
+     too, after locking the Payment row.
+   - Lock order: every code path that locks both an Appointment and its
+     Payment takes the Appointment lock first, then the Payment lock
+     (parent before child). The cancel path already locks the Appointment
+     first; today it does not lock the Payment in that transaction at all,
+     and when it starts to (for `refund_due`), it locks it second. The
+     payment webhook changes to: read the Payment without a lock to find
+     its appointment, lock the Appointment, then lock the Payment and
+     re-check its status after locking. Reason: opposite lock orders
+     between a concurrent cancel and payment-success webhook can deadlock;
+     PostgreSQL would abort one of them with an error. At the start of
+     implementation, recon every path that locks both rows (including
+     `initiate_payment`, `initiate_refund` and the sweeps) and report its
+     current lock order before changing anything.
+3. **Why.** The decision cannot be reconstructed from stored fields. A
+   customer can cancel a still-unpaid booking less than 24 hours before the
+   visit, and the provider can confirm the payment afterwards; the webhook
+   then refunds in full. That row looks exactly like a late cancellation of
+   a paid booking, where the deposit is withheld: `CANCELLED`, `SUCCEEDED`,
+   the same `cancelled_by` and `cancelled_at`. Replaying the rule would also
+   rewrite history whenever the rule changes. Same principle as the
+   `*_at_booking` snapshots on `Appointment`.
+4. **Existing rows** keep `False`. There is no production data, so no
+   backfill.
+5. **Order.** Implemented before the dashboard card money lines ("Price and
+   prepayment on dashboard cards", `deposit_outcome`) and before the refund
+   retry sweep ("Known issue: an owed refund can stay unrefunded").
+
+### Known issue: an owed refund can stay unrefunded
+
+Recorded 17.10.2026, from the recon for "Price and prepayment on dashboard
+cards". **High priority: fix right after "Persisted refund decision
+(`Payment.refund_due`)".**
+
+- A `SUCCEEDED` payment with a refund owed can stay unrefunded forever if
+  the process dies between the webhook's (or the cancellation's) commit
+  and `initiate_refund`, which moves the Payment to `REFUND_PENDING` in its
+  own transaction afterwards.
+- Nothing picks it up again: the webhook event is already recorded as
+  processed, so a redelivery returns early, and `flag_stuck_refunds` only
+  looks at `REFUND_PENDING` payments.
+- Planned fix: a periodic sweep that finds `SUCCEEDED` payments with
+  `refund_due` and retries `initiate_refund`, which is already idempotent
+  for a payment past `SUCCEEDED`.
