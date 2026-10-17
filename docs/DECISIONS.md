@@ -98,6 +98,8 @@ on booking step 3 (see its known-issue entry).
   no shared header yet. In the design pass it goes below the shared
   header, with the width and type size from the design system, as on the
   Item 13 mockups. Found in Katya's browser check of 16.10.2026.
+- Recorded 17.10.2026: `no_show` cards have no badge and no money line; to
+  decide later.
 
 ## Open questions
 
@@ -5166,3 +5168,82 @@ Implemented, 16.10.2026
   (Asia/Tbilisi) and with the zone overridden to Asia/Tokyo, matching the
   email.
 - The known issue about the dashboard time zone is fixed.
+
+### Price and prepayment on dashboard cards
+
+Decided 17.10.2026, in discussion, after the recon of the same day. Closes
+the Stage 15 item 4 refinement "Shows price/deposit amount per
+appointment", which the dashboard did not do: it showed no full price, no
+prepayment before payment, and a hardcoded `₴` instead of the salon's
+currency. Nothing here is implemented yet.
+
+1. **Backend.** `appointments/mine/` (`AppointmentAccountSerializer`) gains
+   two read-only fields:
+   - `deposit_amount`: `Payment.amount` when a Payment exists; otherwise
+     computed from `service_price_at_booking` and
+     `deposit_percentage_at_booking` by the same helper `initiate_payment`
+     uses. `_compute_deposit_amount` in `payments/services.py` becomes a
+     public function for this; the rounding logic is not duplicated. This
+     reverses the serializer docstring's earlier stance that the helper
+     stays module-private. `null` whenever the deposit is 0, whether the
+     percentage is 0 or rounding to whole units gives 0 (e.g. 20% of
+     2.00); `null` means no "Передоплата" line.
+   - `currency`: `Payment.currency` when a Payment exists, otherwise the
+     salon's `Salon.currency`. A historic payment keeps the currency it was
+     actually paid in, even if the salon changes its currency later.
+   Checked before deciding: `amount_due_at_visit` is
+   `service_price_at_booking - Payment.amount`, and `Payment.amount` is
+   written only by `initiate_payment` from `_compute_deposit_amount`, so
+   `deposit_amount + amount_due_at_visit` always equals the price.
+2. **Frontend never computes money.** It only formats backend amounts with
+   the existing `formatPrice(price, currency)`. The hardcoded `₴` in
+   `client/page.tsx` is removed.
+3. **Full price in the title row.** The full price
+   (`service_price_at_booking`) appears next to the service name, before
+   the status badge ("Манікюр  120 $"), if and only if the card has a
+   money line under the date (point 4). Completed and expired cards
+   therefore show no price and no money line.
+4. **Money line under the date**, per status:
+   - pending payment: "Передоплата: 24 $", in bold;
+   - confirmed: "Оплата при візиті: 96 $";
+   - cancelled late (deposit withheld, today's `payment_status`
+     `succeeded` branch): "Передоплату утримано: 24 $";
+   - cancelled in time (today's `refunded` branch): "Повернено: 24 $";
+   - cancelled, refund pending: "Повернення обробляється: 24 $";
+   - cancelled with no succeeded, refunded or refund-pending payment:
+     none;
+   - completed, expired: none.
+5. **Wording.** "Передоплата" replaces "Депозит" in these texts. Ukrainian
+   only.
+6. **Tenant isolation.** The currency and the amounts come only from the
+   appointment's own salon and payment. The two-salon test covers salons
+   with different currencies.
+7. **Mockup.** Stage 15 design canvas, board "Ціна поруч з послугою (в)",
+   with the price removed on completed and expired cards.
+
+Left as they are:
+
+- **`no_show`:** not changed here (today no badge and no line). By the
+  point 3 it shows no price and no line.
+- **0% deposit booking flow: not decided here.** Today a 0% booking still
+  goes through `PENDING_PAYMENT` and a 0.00 payment (`create_appointment`
+  always sets `PENDING_PAYMENT`; `initiate_payment` has no zero check). A
+  no-prepayment flow is a separate future decision, to be made together
+  with salon settings. See "Known issue: `Salon.deposit_percentage` is
+  unbounded".
+
+### Known issue: `Salon.deposit_percentage` is unbounded
+
+Recorded 17.10.2026, from the recon for "Price and prepayment on dashboard
+cards".
+
+- `Salon.deposit_percentage` (`backend/tenants/models.py`) has no
+  validators and no database constraint, so negative values or values
+  above 100 can be stored. Today only through the admin or the database:
+  no API endpoint writes it.
+- Fix later with a `CheckConstraint` for 0..100, together with the 0%
+  deposit flow decision. A `Meta` change, so it needs its own approval
+  before the change is written.
+- Also unknown: what WayForPay does with a 0.00 amount. That can happen
+  today when a small price rounds the deposit to 0, since
+  `initiate_payment` sends whatever `_compute_deposit_amount` returns.
