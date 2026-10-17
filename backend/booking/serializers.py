@@ -10,6 +10,7 @@ from booking.services import refund_deadline
 from catalog.models import Service
 from core.i18n import resolve_translation
 from payments.models import Payment, PaymentStatus
+from payments.services import compute_deposit_amount
 from scheduling.serializers import _OffsetRequiredDateTimeField
 from specialists.models import Specialist
 
@@ -165,15 +166,15 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     and are free to diverge later.
 
     Carries the raw price/deposit snapshot fields (`service_price_at_booking`,
-    `deposit_percentage_at_booking`), not a computed deposit amount: the
-    rounding logic for that computation
-    (payments/services.py's `_compute_deposit_amount`) is module-private
-    there, deliberately not meant to be imported by another app — its
-    leading underscore is the same "do not reuse this elsewhere" signal as
-    booking/services.py's own private helpers. The two snapshot fields are
-    enough for a dashboard to show "price" and "deposit %" per appointment
-    without duplicating that rounding rule; the actual charged amount, once
-    a payment exists, is already on Payment.amount via a separate endpoint.
+    `deposit_percentage_at_booking`) plus `deposit_amount` and `currency`
+    (docs/DECISIONS.md § "Price and prepayment on dashboard cards", point
+    1). `deposit_amount` is `Payment.amount` when a Payment exists,
+    otherwise `payments.services.compute_deposit_amount` -- the same helper
+    `initiate_payment` charges with, made public for this so the rounding
+    rule exists once -- and `null` whenever the deposit is 0 (a 0%
+    percentage, a deposit that rounds to 0, or a 0.00 Payment). `currency`
+    is `Payment.currency` when a Payment exists, otherwise `Salon.currency`:
+    a historic payment keeps the currency it was actually paid in.
 
     `payment_status`/`payment_amount`/`amount_due_at_visit` read the
     OneToOneField reverse accessor `appointment.payment`
@@ -200,12 +201,12 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     already rounded and stored (`service_price_at_booking`, `Payment.amount`),
     so there's no rounding-drift risk either way, but computing it
     server-side keeps the "what does this client still owe" rule in one
-    place -- the same reasoning that already kept
-    `_compute_deposit_amount`'s rounding logic out of the frontend
-    (payments/services.py), just for a trivial case of it. The queryset this
-    serializer runs against (`AccountAppointmentListView.get_queryset`) adds
-    `select_related("payment")`, so these three fields cost no extra query
-    per row across a list.
+    place -- the same reasoning that keeps `compute_deposit_amount`'s
+    rounding logic out of the frontend (payments/services.py), just for a
+    trivial case of it. The queryset this serializer runs against
+    (`AccountAppointmentListView.get_queryset`) adds
+    `select_related("payment", ..., "salon")`, so these fields and
+    `deposit_amount`/`currency` cost no extra query per row across a list.
 
     `specialist`/`service` are nested `AppointmentSpecialistSerializer`/
     `AppointmentServiceSerializer` (`{id, name}`), not the default
@@ -222,6 +223,8 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     payment_status = serializers.SerializerMethodField()
     payment_amount = serializers.SerializerMethodField()
     amount_due_at_visit = serializers.SerializerMethodField()
+    deposit_amount = serializers.SerializerMethodField()
+    currency = serializers.SerializerMethodField()
     start_datetime = SalonLocalDateTimeField()
     end_datetime = SalonLocalDateTimeField()
     refund_deadline = SalonLocalDateTimeField(value_from=_refund_deadline_or_none)
@@ -243,6 +246,8 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
             "payment_status",
             "payment_amount",
             "amount_due_at_visit",
+            "deposit_amount",
+            "currency",
             "refund_deadline",
         ]
         read_only_fields = fields
@@ -267,6 +272,15 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
         ):
             return None
         return str(appointment.service_price_at_booking - payment.amount)
+
+    def get_deposit_amount(self, appointment: Appointment) -> str | None:
+        payment = self._payment(appointment)
+        amount = payment.amount if payment is not None else compute_deposit_amount(appointment)
+        return str(amount) if amount != 0 else None
+
+    def get_currency(self, appointment: Appointment) -> str:
+        payment = self._payment(appointment)
+        return payment.currency if payment is not None else appointment.salon.currency
 
 
 class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):

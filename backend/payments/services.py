@@ -31,7 +31,7 @@ def _round_half_up_to_whole(amount: Decimal) -> Decimal:
     return amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))
 
 
-def _compute_deposit_amount(appointment: Appointment) -> Decimal:
+def compute_deposit_amount(appointment: Appointment) -> Decimal:
     raw = (
         appointment.service_price_at_booking
         * appointment.deposit_percentage_at_booking
@@ -78,7 +78,7 @@ def initiate_payment(
         if existing_payment is not None and existing_payment.status == PaymentStatus.PENDING:
             return existing_payment, existing_payment.provider_data, False
 
-    deposit_amount = _compute_deposit_amount(appointment)
+    deposit_amount = compute_deposit_amount(appointment)
     try:
         intent = provider.start_payment(
             amount=deposit_amount,
