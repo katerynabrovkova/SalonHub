@@ -3935,6 +3935,44 @@ Explicitly out of scope for Stage 15:
   time, covering the guest→Account linking need without a separate claim
   flow.
 
+### Stage 15 closure checklist
+
+Recorded 19.10.2026. What remains before Stage 15 is marked done, in this
+order.
+
+1. **Price and prepayment on dashboard cards.** Backend and frontend
+   implemented. Browser check pending. The "implemented" note in "Price and
+   prepayment on dashboard cards" pending.
+2. **Item 8 relink.** Decide what `create_account_appointment` does when
+   the Customer it finds is linked to a different Account, add a test, and
+   correct the "bare 500" note. Pending.
+3. **"Нове бронювання" link** on a non-empty client dashboard. Pending.
+4. **Logout target.** Deferred to the design stage; to be recorded in the
+   deferred list under "Agreed stage order". Pending.
+5. **Cleanup.** Pending. Covers:
+   - "Known issue: `tsc --noEmit` does not type-check the project";
+   - "Known issue: ESLint `react-hooks/set-state-in-effect` in the client
+     dashboard";
+   - the two remaining `tsc` errors in test files,
+     `src/app/register/page.test.tsx` and
+     `src/app/specialists/[id]/page.test.tsx`;
+   - `ruff format` for `config/settings/development.py` and
+     `notifications/migrations/0005_notification_booking_link_mode.py`.
+6. **Mark Stage 15 done.** Pending.
+
+Found during Stage 15, fixed:
+
+- "Persisted refund decision (`Payment.refund_due`)".
+- "Refund retry sweep".
+
+Found during Stage 15, deferred:
+
+- "Known issue: `initiate_payment` writes the Payment outside its lock".
+- "Known issue: the `flag_stuck_refunds` race test uses a savepoint".
+- "Known issue: `Salon.deposit_percentage` is unbounded", together with the
+  0% deposit booking flow.
+- `formatPrice` shows currency symbols instead of codes. Design stage.
+
 ### Session renewal and session lifetime, decided 21.09.2026
 
 Agreed in discussion after manual testing with a real backend. Extends
@@ -5437,3 +5475,30 @@ Recorded 19.10.2026, while writing the tests for "Persisted refund decision
 - Fix: make the competing write through a separate connection, as test 19
   in `test_payments_refund_due.py`
   (`test_webhook_rechecks_payment_status_after_locking`) does.
+
+### Known issue: `tsc --noEmit` does not type-check the project
+
+Recorded 19.10.2026, during the frontend GREEN for "Price and prepayment on
+dashboard cards".
+
+- `tsc --noEmit` in `frontend/` stops at syntax errors in the generated
+  `.next/dev/types/routes.d.ts` and never type-checks the source files.
+  Earlier "tsc clean" reports proved nothing.
+- A temporary tsconfig, kept outside the repository, that extends the
+  project's and excludes `.next` and `next-env.d.ts` does check the source.
+  On 19.10.2026 it showed real errors in two test files,
+  `src/app/register/page.test.tsx` and
+  `src/app/specialists/[id]/page.test.tsx`. It also reports `LayoutProps`
+  as missing in `src/app/layout.tsx`, but only because the generated
+  Next.js types are excluded.
+
+### Known issue: ESLint `react-hooks/set-state-in-effect` in the client dashboard
+
+Recorded 19.10.2026, during the frontend GREEN for "Price and prepayment on
+dashboard cards".
+
+- `frontend/src/app/client/page.tsx`: the `useEffect` that calls
+  `loadAppointments()` on mount fails ESLint's
+  `react-hooks/set-state-in-effect`.
+- Pre-existing: the committed version of the file has the same error. The
+  money-line change did not touch that effect.
