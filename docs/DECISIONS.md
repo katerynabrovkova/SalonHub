@@ -5329,7 +5329,7 @@ after a same-salon test was added.
 
 Recorded 17.10.2026, from the recon for "Price and prepayment on dashboard
 cards". **High priority: fix right after "Persisted refund decision
-(`Payment.refund_due`)".**
+(`Payment.refund_due`)".** **Resolved 19.10.2026 by "Refund retry sweep".**
 
 - A `SUCCEEDED` payment with a refund owed can stay unrefunded forever if
   the process dies between the webhook's (or the cancellation's) commit
@@ -5345,7 +5345,16 @@ cards". **High priority: fix right after "Persisted refund decision
 ### Refund retry sweep
 
 Decided 19.10.2026, in discussion, after the recon of the same day. Fixes
-"Known issue: an owed refund can stay unrefunded". Not implemented yet.
+"Known issue: an owed refund can stay unrefunded".
+
+**Implemented, 19.10.2026.** `get_payment_provider()` in
+`payments/providers/__init__.py`, the service `retry_owed_refunds` in
+`payments/services.py`, the task `retry_owed_refund_payments` in
+`payments/tasks.py`, and its beat entry every 1800 s. `PaymentProviderError`
+is caught per row. Mutation testing killed 12 of 12 mutations. M5 (dropping
+the `salon` filter, a second guard behind the tenant-scoped manager) was
+killed only after a test calling the service with a salon other than the
+bound tenant context was added.
 
 1. **What it does.** A periodic task finds `Payment` rows with status
    `SUCCEEDED` and `refund_due` True, across all salons, and calls
