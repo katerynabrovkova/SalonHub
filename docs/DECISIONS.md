@@ -3971,7 +3971,9 @@ Found during Stage 15, deferred:
 - "Known issue: the `flag_stuck_refunds` race test uses a savepoint".
 - "Known issue: `Salon.deposit_percentage` is unbounded", together with the
   0% deposit booking flow.
-- `formatPrice` shows currency symbols instead of codes. Design stage.
+- `formatPrice` shows ISO codes for some currencies ("24,00 USD", "24,00 EUR") 
+ but a symbol for UAH ("₴"), and always ",00" for whole amounts. 
+ Decide symbols and whole-amount format in the design stage.
 
 ### Session renewal and session lifetime, decided 21.09.2026
 
