@@ -5340,7 +5340,68 @@ cards". **High priority: fix right after "Persisted refund decision
   looks at `REFUND_PENDING` payments.
 - Planned fix: a periodic sweep that finds `SUCCEEDED` payments with
   `refund_due` and retries `initiate_refund`, which is already idempotent
-  for a payment past `SUCCEEDED`.
+  for a payment past `SUCCEEDED`. Decided in "Refund retry sweep" below.
+
+### Refund retry sweep
+
+Decided 19.10.2026, in discussion, after the recon of the same day. Fixes
+"Known issue: an owed refund can stay unrefunded". Not implemented yet.
+
+1. **What it does.** A periodic task finds `Payment` rows with status
+   `SUCCEEDED` and `refund_due` True, across all salons, and calls
+   `initiate_refund` for each one inside that payment's own salon tenant
+   context.
+2. **Shape.** Same as the existing sweeps (`flag_stuck_refunds`,
+   `expire_overdue_appointments`, `complete_overdue_appointments`): a
+   service function per salon that finds candidate ids with an unlocked
+   query, plus a Celery task that loops `Salon.objects.all()`, binds
+   `tenant_context(salon.id)` per salon, reads `now` once before the loop,
+   and wraps each salon in its own try/except. Each row gets its own
+   transaction, the one `initiate_refund` already opens.
+3. **Failures.** `PaymentProviderError` is caught per row, logged with the
+   payment id and the salon id, and the sweep continues with the next row.
+   The row is already `REFUND_PENDING` (`initiate_refund` commits that
+   before it calls the provider), so `flag_stuck_refunds` flags it after
+   `STUCK_REFUND_THRESHOLD`. Any other exception is not caught per row: it
+   propagates to the per-salon try/except, as in the other sweeps, and ends
+   that salon's batch for the run. Reason: a provider outage is expected
+   and must not block other rows; an unexpected exception is a bug and
+   must not be swallowed. The per-row catch of `PaymentProviderError` is
+   the one difference from the existing sweeps, which catch only per
+   salon.
+4. **Interval.** 1800 s (30 min), the same as `flag_stuck_refunds`, the
+   closest existing sweep. The recon found no reason to differ: a row only
+   needs this sweep after a crash between a commit and `initiate_refund`,
+   and the delay does not affect stuck-refund detection, whose clock
+   (`refund_initiated_at`) starts when `initiate_refund` runs.
+5. **No grace period.** The sweep may pick up a row while the cancel or
+   webhook after-commit call is still about to refund it. That is safe:
+   `initiate_refund` locks the Payment (`select_for_update`), proceeds only
+   from `SUCCEEDED`, and commits `REFUND_PENDING` before the provider call.
+   A second, concurrent call waits on the lock, then finds
+   `REFUND_PENDING` and returns without calling the provider.
+   `initiate_refund` locks only the Payment, so it cannot deadlock with the
+   Appointment-then-Payment order of the cancel path and the webhook.
+6. **Provider.** A small function `get_payment_provider()` in the
+   `payments` module returns the provider; today it returns
+   `MockPaymentProvider()`. The sweep gets its provider only through this
+   function, and tests patch it. Views keep their `provider_class`
+   attribute for now, because existing tests rely on it. Requirement for
+   the stage that wires a real provider: views and the sweep both switch to
+   `get_payment_provider()`, so payments and sweep refunds never go through
+   different providers.
+7. **Required tests.**
+   - The sweep refunds a stuck payment (`SUCCEEDED`, `refund_due`).
+   - It skips `SUCCEEDED` without `refund_due`, `REFUND_PENDING`, and
+     `REFUNDED`.
+   - Two salons are processed, each in its own tenant context.
+   - One failing row does not block the other salons.
+   - A `PaymentProviderError` on one row still lets the next row in the
+     same salon be refunded.
+   - An unexpected exception on one row ends that salon's batch, but not
+     the other salons'.
+   - A concurrent normal `initiate_refund` still calls the provider only
+     once.
 
 ### Known issue: `initiate_payment` writes the Payment outside its lock
 
