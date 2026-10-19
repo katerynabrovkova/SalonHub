@@ -22,7 +22,11 @@ app.autodiscover_tasks()
 # like the expiry sweep (completion holds no slot and loses no money — a
 # finished visit just shows COMPLETED and becomes review-eligible slightly
 # later), but tighter than the hourly reminder so the review-eligibility
-# point appears soon after a visit ends.
+# point appears soon after a visit ends. Fifth: Stage 15's refund retry
+# sweep (docs/DECISIONS.md § "Refund retry sweep") — 1800s (30 min), the
+# same as the stuck-refund sweep: a row only needs it after a crash between
+# a commit and initiate_refund, and the delay does not move the stuck-refund
+# clock, which starts when initiate_refund runs.
 app.conf.beat_schedule = {
     "expire-pending-payment-appointments": {
         "task": "booking.tasks.expire_pending_payment_appointments",
@@ -39,5 +43,9 @@ app.conf.beat_schedule = {
     "complete-finished-appointments": {
         "task": "booking.tasks.complete_finished_appointments",
         "schedule": 900.0,
+    },
+    "retry-owed-refund-payments": {
+        "task": "payments.tasks.retry_owed_refund_payments",
+        "schedule": 1800.0,
     },
 }

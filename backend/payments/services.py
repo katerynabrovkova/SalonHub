@@ -15,6 +15,7 @@ key. See `payments/providers/base.py`'s `start_payment` docstring.
 """
 
 import datetime as dt
+import logging
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
@@ -25,6 +26,8 @@ from payments.constants import STUCK_REFUND_THRESHOLD
 from payments.models import Payment, PaymentStatus
 from payments.providers.base import PaymentProvider
 from tenants.models import Salon
+
+logger = logging.getLogger(__name__)
 
 
 def _round_half_up_to_whole(amount: Decimal) -> Decimal:
@@ -201,3 +204,45 @@ def flag_stuck_refunds(*, salon: Salon, now: dt.datetime) -> int:
             payment.save(update_fields=["flagged_for_review"])
             flagged_count += 1
     return flagged_count
+
+
+def retry_owed_refunds(*, salon: Salon, provider: PaymentProvider, now: dt.datetime) -> int:
+    """
+    docs/DECISIONS.md § "Refund retry sweep". Requires tenant context to
+    already be bound (core.tenancy.tenant_context) — this function does not
+    bind it itself, same convention as flag_stuck_refunds. Called once per
+    salon by payments.tasks.retry_owed_refund_payments, which owns the
+    cross-salon loop, the tenant-context binding and the provider.
+
+    Candidate ids are found with an unlocked query; each row then goes
+    through initiate_refund, which locks it, rechecks it is still SUCCEEDED
+    and commits REFUND_PENDING in its own transaction before calling the
+    provider. A row already refunded by the cancel or webhook after-commit
+    call in the meantime is a no-op there, so no grace period is needed.
+
+    PaymentProviderError is caught per row, logged and skipped: the row is
+    already REFUND_PENDING, so flag_stuck_refunds covers it, and a provider
+    outage must not block the other rows. Any other exception propagates to
+    the task's per-salon try/except, as in the other sweeps — it is a bug
+    and must not be swallowed.
+
+    Returns the number of rows for which initiate_refund completed.
+    """
+    candidate_ids = Payment.objects.filter(
+        salon=salon, status=PaymentStatus.SUCCEEDED, refund_due=True
+    ).values_list("id", flat=True)
+
+    refunded_count = 0
+    for payment_id in candidate_ids:
+        try:
+            initiate_refund(payment_id=payment_id, salon=salon, provider=provider, now=now)
+        except PaymentProviderError:
+            logger.warning(
+                "retry_owed_refunds: provider refund failed for payment_id=%s salon_id=%s",
+                payment_id,
+                salon.id,
+                exc_info=True,
+            )
+            continue
+        refunded_count += 1
+    return refunded_count
