@@ -100,6 +100,10 @@ on booking step 3 (see its known-issue entry).
   Item 13 mockups. Found in Katya's browser check of 16.10.2026.
 - Recorded 17.10.2026: `no_show` cards have no badge and no money line; to
   decide later.
+- Recorded 19.10.2026, for the stage that wires a real payment provider:
+  in production, refuse to start with `MockPaymentProvider`. Its webhook
+  accepts any signature, so anyone could confirm a booking without paying.
+  Add a startup check.
 
 ## Open questions
 
@@ -3940,9 +3944,8 @@ Explicitly out of scope for Stage 15:
 Recorded 19.10.2026. What remains before Stage 15 is marked done, in this
 order.
 
-1. **Price and prepayment on dashboard cards.** Backend and frontend
-   implemented. Browser check pending. The "implemented" note in "Price and
-   prepayment on dashboard cards" pending.
+1. **Price and prepayment on dashboard cards.** Done 19.10.2026:
+   implemented, browser-checked, "implemented" note added.
 2. **Item 8 relink.** Decide what `create_account_appointment` does when
    the Customer it finds is linked to a different Account, add a test, and
    correct the "bare 500" note. Pending.
@@ -5215,8 +5218,17 @@ Decided 17.10.2026, in discussion, after the recon of the same day. Closes
 the Stage 15 item 4 refinement "Shows price/deposit amount per
 appointment", which the dashboard did not do: it showed no full price, no
 prepayment before payment, and a hardcoded `₴` instead of the salon's
-currency. Implemented so far: `deposit_amount` and `currency` (point 1).
-The rest is not implemented yet.
+currency.
+
+**Implemented, 19.10.2026.** Backend: `deposit_amount`, `currency` and
+`deposit_outcome` on `appointments/mine/`. Frontend: the money line comes
+from one function, the price is shown only with a money line, every amount
+goes through `formatPrice`, and the "Передоплата" line is in a `<strong>`.
+Mutation testing: backend 6 of 6 killed (deposit_amount, currency, 17.10.2026) 
+and 7 of 7 killed (deposit_outcome), frontend 8 of 8 killed.
+Browser-checked on all states, including a real late payment: an expired
+appointment whose Payment reached `refund_due` True and `REFUND_PENDING`
+through the webhook.
 
 Depends on "Persisted refund decision (`Payment.refund_due`)":
 `deposit_outcome` (point 1) reads `Payment.refund_due`, so that entry is
