@@ -77,7 +77,18 @@ const PAST = salonIso(Date.now() - 3 * DAY_MS);
 
 let nextId = 1;
 
-function buildAppointment(overrides: Partial<MyAppointment> = {}): MyAppointment {
+/**
+ * `MyAppointment` plus the three money fields appointments/mine/ now returns
+ * (docs/DECISIONS.md § "Price and prepayment on dashboard cards", point 1).
+ * Declared here until the frontend type gains them.
+ */
+type DashboardAppointment = MyAppointment & {
+  deposit_amount: string | null;
+  currency: string;
+  deposit_outcome: "refunded" | "refund_processing" | "withheld" | null;
+};
+
+function buildAppointment(overrides: Partial<DashboardAppointment> = {}): DashboardAppointment {
   const id = nextId++;
   return {
     id,
@@ -95,6 +106,9 @@ function buildAppointment(overrides: Partial<MyAppointment> = {}): MyAppointment
     payment_amount: null,
     amount_due_at_visit: null,
     refund_deadline: null,
+    deposit_amount: "100.00",
+    currency: "UAH",
+    deposit_outcome: null,
     ...overrides,
   };
 }
@@ -242,27 +256,12 @@ describe("ClientDashboardPage", () => {
   });
 
   // --- 3. Payment-line variants -------------------------------------------
-
-  it("test_payment_line_confirmed_succeeded_shows_amount_due_at_visit", async () => {
-    mockApiRoutes({
-      list: () =>
-        pageOf([
-          buildAppointment({
-            status: "confirmed",
-            start_datetime: FUTURE,
-            payment_status: "succeeded",
-            payment_amount: "100.00",
-            amount_due_at_visit: "400.00",
-          }),
-        ]),
-    });
-
-    renderDashboard();
-
-    await waitFor(() =>
-      expect(screen.getByText("Оплата при візиті: 400.00 ₴")).toBeInTheDocument(),
-    );
-  });
+  // The confirmed, cancelled-withheld, refund-pending and refunded line tests
+  // that used to live here asserted the old wording ("Депозит"), a
+  // hardcoded "₴" and lines derived from payment_status; the spec replaced
+  // all three (docs/DECISIONS.md § "Price and prepayment on dashboard
+  // cards", points 2, 4, 5). Their cases are covered under the current spec
+  // in "price and prepayment" below.
 
   it("test_payment_line_completed_shows_no_line_even_with_a_succeeded_payment", async () => {
     mockApiRoutes({
@@ -285,62 +284,414 @@ describe("ClientDashboardPage", () => {
     expect(screen.queryByText(/₴/)).not.toBeInTheDocument();
   });
 
-  it("test_payment_line_cancelled_succeeded_shows_deposit_withheld", async () => {
-    mockApiRoutes({
-      list: () =>
-        pageOf([
-          buildAppointment({
-            status: "cancelled",
-            start_datetime: PAST,
-            payment_status: "succeeded",
-            payment_amount: "100.00",
-          }),
-        ]),
+  // --- 3a. Price and prepayment (docs/DECISIONS.md § "Price and prepayment on
+  // dashboard cards", points 2-5) ----------------------------------------
+  // Expected amounts are the literal strings formatPrice produces (uk-UA:
+  // "120,00 USD", "24,00 EUR"), matched through looseText because the
+  // separator before the currency is U+00A0 (CLAUDE.md). The "no price"
+  // cards use amounts (777.00 / 155.00 / 622.00) that cannot occur in a
+  // rendered date, so their absence is checked on the card's whole text.
+
+  describe("price and prepayment", () => {
+    function escapeRegExp(text: string): string {
+      return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    /** `text` as a pattern body in which each whitespace run also matches U+00A0. */
+    function loose(text: string): string {
+      return escapeRegExp(text).replace(/\s+/g, "\\s+");
+    }
+
+    /** The card (`<li>`) whose service name starts `serviceName`'s own text node. */
+    async function findMoneyCard(serviceName: string): Promise<HTMLElement> {
+      const nameEl = await screen.findByText(new RegExp(`^${escapeRegExp(serviceName)}`));
+      const card = nameEl.closest("li");
+      expect(card).not.toBeNull();
+      return card as HTMLElement;
+    }
+
+    /** The card's title row (its first child): name, then price, then badge. */
+    function expectPriceInTitleRow(
+      card: HTMLElement,
+      { name, price, badge }: { name: string; price: string; badge: string },
+    ) {
+      const titleRow = card.firstElementChild as HTMLElement;
+      expect(titleRow.textContent).toMatch(
+        new RegExp(`^${escapeRegExp(name)}\\s*${loose(price)}\\s*${escapeRegExp(badge)}$`),
+      );
+    }
+
+    /**
+     * The money line: the innermost element on the card whose whole text is
+     * `text`, outside the title row (it sits under the date).
+     */
+    function expectMoneyLine(card: HTMLElement, text: string) {
+      const line = moneyLineElement(card, text);
+      expect(line, `no element with text "${text}" on the card`).toBeDefined();
+      expect(card.firstElementChild?.contains(line as Element)).toBe(false);
+    }
+
+    /** The innermost element on the card whose whole text is `text`, if any. */
+    function moneyLineElement(card: HTMLElement, text: string): Element | undefined {
+      const pattern = new RegExp(`^${loose(text)}$`);
+      const matches = (el: Element) => pattern.test((el.textContent ?? "").trim());
+      return Array.from(card.querySelectorAll("*")).find(
+        (el) => matches(el) && !Array.from(el.children).some(matches),
+      );
+    }
+
+    const MONEY_TEXT = /Передоплат|Оплата при візиті|Повернено|Повернення обробляється|утримано/;
+
+    /** Nothing about money anywhere on the card: no amount, currency or line. */
+    function expectNoMoney(card: HTMLElement) {
+      const text = card.textContent ?? "";
+      expect(text).not.toMatch(/777|155|622/);
+      expect(text).not.toMatch(/USD|₴/);
+      expect(text).not.toMatch(MONEY_TEXT);
+    }
+
+    /** A card whose every money field is set, so a rendered price or line shows. */
+    const FULL_MONEY = {
+      service_price_at_booking: "777.00",
+      deposit_amount: "155.00",
+      payment_amount: "155.00",
+      amount_due_at_visit: "622.00",
+      currency: "USD",
+    };
+
+    const PRICED = {
+      service_price_at_booking: "120.00",
+      deposit_amount: "24.00",
+      currency: "USD",
+    };
+
+    /**
+     * Positive control for every "no money" test: a pending card, rendered
+     * next to the card under test, that must show its price and prepayment
+     * line. Without it a page that renders no money anywhere would pass.
+     */
+    function controlCard(): DashboardAppointment {
+      return buildAppointment({
+        ...PRICED,
+        status: "pending_payment",
+        service: { id: 299, name: "Контроль" },
+      });
+    }
+
+    async function expectControlCardPriced() {
+      const card = await findMoneyCard("Контроль");
+      expectPriceInTitleRow(card, { name: "Контроль", price: "120,00 USD", badge: "Очікує оплати" });
+      expectMoneyLine(card, "Передоплата: 24,00 USD");
+    }
+
+    it("test_pending_payment_card_shows_price_and_prepayment_line", async () => {
+      mockApiRoutes({
+        list: () =>
+          pageOf([
+            buildAppointment({
+              ...PRICED,
+              status: "pending_payment",
+              service: { id: 201, name: "Манікюр" },
+            }),
+          ]),
+      });
+
+      renderDashboard();
+
+      const card = await findMoneyCard("Манікюр");
+      expectPriceInTitleRow(card, { name: "Манікюр", price: "120,00 USD", badge: "Очікує оплати" });
+      expectMoneyLine(card, "Передоплата: 24,00 USD");
     });
 
-    renderDashboard();
+    it("test_confirmed_card_shows_price_and_amount_due_at_visit", async () => {
+      mockApiRoutes({
+        list: () =>
+          pageOf([
+            buildAppointment({
+              ...PRICED,
+              status: "confirmed",
+              service: { id: 201, name: "Манікюр" },
+              payment_status: "succeeded",
+              payment_amount: "24.00",
+              amount_due_at_visit: "96.00",
+            }),
+          ]),
+      });
 
-    await waitFor(() =>
-      expect(screen.getByText("Депозит утримано: 100.00 ₴")).toBeInTheDocument(),
+      renderDashboard();
+
+      const card = await findMoneyCard("Манікюр");
+      expectPriceInTitleRow(card, { name: "Манікюр", price: "120,00 USD", badge: "Підтверджено" });
+      expectMoneyLine(card, "Оплата при візиті: 96,00 USD");
+    });
+
+    it("test_prepayment_line_is_strong_and_amount_due_line_is_not", async () => {
+      // Point 4: the pending-payment line is bold, the confirmed one is not.
+      mockApiRoutes({
+        list: () =>
+          pageOf([
+            buildAppointment({
+              ...PRICED,
+              status: "pending_payment",
+              service: { id: 201, name: "Манікюр" },
+            }),
+            buildAppointment({
+              ...PRICED,
+              status: "confirmed",
+              service: { id: 202, name: "Педикюр" },
+              payment_status: "succeeded",
+              payment_amount: "24.00",
+              amount_due_at_visit: "96.00",
+            }),
+          ]),
+      });
+
+      renderDashboard();
+
+      const pendingLine = moneyLineElement(
+        await findMoneyCard("Манікюр"),
+        "Передоплата: 24,00 USD",
+      );
+      const confirmedLine = moneyLineElement(
+        await findMoneyCard("Педикюр"),
+        "Оплата при візиті: 96,00 USD",
+      );
+      expect(pendingLine).toBeDefined();
+      expect(confirmedLine).toBeDefined();
+      expect(pendingLine?.closest("strong")).not.toBeNull();
+      expect(confirmedLine?.closest("strong")).toBeNull();
+    });
+
+    // Cancelled and expired cards take their money line only from
+    // deposit_outcome (point 4), never from payment_status, with
+    // deposit_amount as the amount. payment_amount is "31.00" here, so a line
+    // built from it instead of deposit_amount ("24.00") cannot pass.
+    it.each([
+      ["cancelled", "refund_processing", "refund_pending", "Скасовано", "Повернення обробляється: 24,00 USD"],
+      ["expired", "refund_processing", "succeeded", "Термін минув", "Повернення обробляється: 24,00 USD"],
+      ["cancelled", "refunded", "refunded", "Скасовано", "Повернено: 24,00 USD"],
+      ["expired", "refunded", "refunded", "Термін минув", "Повернено: 24,00 USD"],
+      ["cancelled", "withheld", "succeeded", "Скасовано", "Передоплату утримано: 24,00 USD"],
+    ] as const)(
+      "test_%s_card_shows_price_and_line_from_deposit_outcome_(%s_payment_%s)",
+      async (status, outcome, paymentStatus, badge, line) => {
+        mockApiRoutes({
+          list: () =>
+            pageOf([
+              buildAppointment({
+                ...PRICED,
+                status,
+                start_datetime: PAST,
+                service: { id: 201, name: "Манікюр" },
+                payment_status: paymentStatus,
+                payment_amount: "31.00",
+                deposit_outcome: outcome,
+              }),
+            ]),
+        });
+
+        renderDashboard();
+
+        const card = await findMoneyCard("Манікюр");
+        expectPriceInTitleRow(card, { name: "Манікюр", price: "120,00 USD", badge });
+        expectMoneyLine(card, line);
+      },
     );
-  });
 
-  it("test_payment_line_cancelled_refund_pending_shows_processing_message", async () => {
-    mockApiRoutes({
-      list: () =>
-        pageOf([
-          buildAppointment({
-            status: "cancelled",
-            start_datetime: PAST,
-            payment_status: "refund_pending",
-            payment_amount: "100.00",
-          }),
-        ]),
+    it("test_cancelled_succeeded_card_with_refund_processing_is_not_shown_as_withheld", async () => {
+      // payment_status "succeeded" on a cancelled card is exactly what the
+      // old rule turned into "withheld". deposit_outcome says the refund is
+      // owed, and only deposit_outcome decides.
+      mockApiRoutes({
+        list: () =>
+          pageOf([
+            buildAppointment({
+              ...PRICED,
+              status: "cancelled",
+              start_datetime: PAST,
+              service: { id: 201, name: "Манікюр" },
+              payment_status: "succeeded",
+              payment_amount: "24.00",
+              deposit_outcome: "refund_processing",
+            }),
+          ]),
+      });
+
+      renderDashboard();
+
+      const card = await findMoneyCard("Манікюр");
+      expectPriceInTitleRow(card, { name: "Манікюр", price: "120,00 USD", badge: "Скасовано" });
+      expectMoneyLine(card, "Повернення обробляється: 24,00 USD");
+      expect(card.textContent).not.toMatch(/утримано/);
     });
 
-    renderDashboard();
+    it("test_expired_succeeded_card_with_null_outcome_shows_no_price_and_no_line", async () => {
+      // Replaces test_card_shows_no_price_and_no_money_line_(expired): an
+      // expired card does show a line when deposit_outcome has one (above);
+      // with deposit_outcome null it shows nothing, whatever payment_status
+      // says.
+      mockApiRoutes({
+        list: () =>
+          pageOf([
+            buildAppointment({
+              ...FULL_MONEY,
+              status: "expired",
+              start_datetime: PAST,
+              service: { id: 201, name: "Манікюр" },
+              payment_status: "succeeded",
+              deposit_outcome: null,
+            }),
+            controlCard(),
+          ]),
+      });
 
-    await waitFor(() =>
-      expect(screen.getByText("Повернення обробляється")).toBeInTheDocument(),
+      renderDashboard();
+
+      const card = await findMoneyCard("Манікюр");
+      expect(card.textContent).toContain("Термін минув");
+      expectNoMoney(card);
+      await expectControlCardPriced();
+    });
+
+    it.each([null, "pending", "failed"] as const)(
+      "test_cancelled_card_without_a_kept_or_returned_payment_shows_no_money_(payment_%s)",
+      async (paymentStatus) => {
+        mockApiRoutes({
+          list: () =>
+            pageOf([
+              buildAppointment({
+                ...FULL_MONEY,
+                status: "cancelled",
+                start_datetime: PAST,
+                service: { id: 201, name: "Манікюр" },
+                payment_status: paymentStatus,
+                payment_amount: paymentStatus === null ? null : "155.00",
+                amount_due_at_visit: null,
+                deposit_outcome: null,
+              }),
+              controlCard(),
+            ]),
+        });
+
+        renderDashboard();
+
+        const card = await findMoneyCard("Манікюр");
+        expect(card.textContent).toContain("Скасовано");
+        expectNoMoney(card);
+        await expectControlCardPriced();
+      },
     );
-  });
 
-  it("test_payment_line_cancelled_refunded_shows_refunded_amount", async () => {
-    mockApiRoutes({
-      list: () =>
-        pageOf([
-          buildAppointment({
-            status: "cancelled",
-            start_datetime: PAST,
-            payment_status: "refunded",
-            payment_amount: "100.00",
-          }),
-        ]),
+    it.each(["completed", "no_show"] as const)(
+      "test_card_shows_no_price_and_no_money_line_(%s)",
+      async (status) => {
+        mockApiRoutes({
+          list: () =>
+            pageOf([
+              buildAppointment({
+                ...FULL_MONEY,
+                status,
+                start_datetime: PAST,
+                service: { id: 201, name: "Манікюр" },
+                payment_status: "succeeded",
+              }),
+              controlCard(),
+            ]),
+        });
+
+        renderDashboard();
+
+        const card = await findMoneyCard("Манікюр");
+        expectNoMoney(card);
+        await expectControlCardPriced();
+      },
+    );
+
+    it("test_pending_payment_card_with_null_deposit_shows_no_price_and_no_prepayment", async () => {
+      mockApiRoutes({
+        list: () =>
+          pageOf([
+            buildAppointment({
+              ...FULL_MONEY,
+              status: "pending_payment",
+              service: { id: 201, name: "Манікюр" },
+              deposit_amount: null,
+              payment_amount: null,
+              amount_due_at_visit: null,
+            }),
+            controlCard(),
+          ]),
+      });
+
+      renderDashboard();
+
+      const card = await findMoneyCard("Манікюр");
+      expect(card.textContent).toContain("Очікує оплати");
+      expectNoMoney(card);
+      await expectControlCardPriced();
     });
 
-    renderDashboard();
+    it("test_currency_comes_from_the_api_and_no_hardcoded_hryvnia_remains", async () => {
+      mockApiRoutes({
+        list: () =>
+          pageOf([
+            buildAppointment({
+              status: "pending_payment",
+              service: { id: 201, name: "Манікюр" },
+              service_price_at_booking: "120.00",
+              deposit_amount: "24.00",
+              currency: "EUR",
+            }),
+          ]),
+      });
 
-    await waitFor(() => expect(screen.getByText("Повернено: 100.00 ₴")).toBeInTheDocument());
+      renderDashboard();
+
+      const card = await findMoneyCard("Манікюр");
+      expectPriceInTitleRow(card, { name: "Манікюр", price: "120,00 EUR", badge: "Очікує оплати" });
+      expectMoneyLine(card, "Передоплата: 24,00 EUR");
+      expect(document.body.textContent).not.toContain("₴");
+    });
+
+    it("test_the_word_depozyt_appears_on_no_card", async () => {
+      const cards = [
+        buildAppointment({ ...PRICED, status: "pending_payment", service: { id: 1, name: "A1" } }),
+        buildAppointment({
+          ...PRICED,
+          status: "confirmed",
+          service: { id: 2, name: "A2" },
+          payment_status: "succeeded",
+          payment_amount: "24.00",
+          amount_due_at_visit: "96.00",
+        }),
+        ...(
+          [
+            ["succeeded", "withheld"],
+            ["refunded", "refunded"],
+            ["refund_pending", "refund_processing"],
+          ] as const
+        ).map(([paymentStatus, outcome], i) =>
+          buildAppointment({
+            ...PRICED,
+            status: "cancelled",
+            start_datetime: PAST,
+            service: { id: 3 + i, name: `A${3 + i}` },
+            payment_status: paymentStatus,
+            payment_amount: "24.00",
+            deposit_outcome: outcome,
+          }),
+        ),
+      ];
+      mockApiRoutes({ list: () => pageOf(cards) });
+
+      renderDashboard();
+
+      // Every card rendered, and the withheld line is there in its new wording,
+      // so the absence below is not just an empty page.
+      await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(cards.length));
+      expect(document.body.textContent).toMatch(/Передоплату утримано/);
+      expect(document.body.textContent).not.toMatch(/Депозит/i);
+    });
   });
 
   // --- 4. Cancel action ----------------------------------------------------

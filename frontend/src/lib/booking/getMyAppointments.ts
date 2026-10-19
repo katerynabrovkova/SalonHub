@@ -74,7 +74,18 @@ export interface MyAppointment {
    * Stage 15 planning, item 14 design details). Compare with the clock at
    * the moment it matters, never cache the comparison. */
   refund_deadline: string | null;
+  /** The prepayment: Payment.amount when a Payment exists, otherwise computed
+   * by the backend; null when the deposit is 0 (docs/DECISIONS.md § "Price
+   * and prepayment on dashboard cards", point 1). Never computed here. */
+  deposit_amount: string | null;
+  /** ISO 4217 code every amount on this appointment is formatted with. */
+  currency: string;
+  /** What happened to a paid deposit; the only source for the cancelled and
+   * expired money lines, never inferred from `payment_status`. */
+  deposit_outcome: DepositOutcomeValue | null;
 }
+
+export type DepositOutcomeValue = "refunded" | "refund_processing" | "withheld";
 
 interface DrfPage<T> {
   count: number;

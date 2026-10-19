@@ -43,9 +43,14 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { apiRequest } from "@/lib/api/client";
 import { ApiError, RenewalUnsureError } from "@/lib/api/errors";
-import { getMyAppointments, type MyAppointment } from "@/lib/booking/getMyAppointments";
+import {
+  getMyAppointments,
+  type DepositOutcomeValue,
+  type MyAppointment,
+} from "@/lib/booking/getMyAppointments";
 import { payForAppointment } from "@/lib/booking/payForAppointment";
 import { formatSalonDateTime } from "@/lib/datetime/formatSalonDateTime";
+import { formatPrice } from "@/lib/pricing/formatPrice";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 
 import ClientAvatarMenu from "./ClientAvatarMenu";
@@ -86,26 +91,53 @@ function isUpcoming(appointment: MyAppointment, nowMs: number): boolean {
   );
 }
 
-/** CardStates.dc.html's status/payment_status -> payment-line mapping. */
-function paymentLine(appointment: MyAppointment): string | null {
-  if (appointment.status === "completed") {
-    return null;
+/** The money line under the date, and whether it is shown in bold. */
+interface MoneyLine {
+  text: string;
+  bold: boolean;
+}
+
+const DEPOSIT_OUTCOME_LABELS: Record<DepositOutcomeValue, string> = {
+  refund_processing: "Повернення обробляється",
+  refunded: "Повернено",
+  withheld: "Передоплату утримано",
+};
+
+/**
+ * The card's money line (docs/DECISIONS.md § "Price and prepayment on
+ * dashboard cards", point 4), or null when the card has none. The single
+ * source for point 3 as well: the price appears in the title row if and only
+ * if this returns a line. Every amount comes from the backend and is only
+ * formatted here, in the appointment's own currency (point 2).
+ *
+ * Cancelled and expired cards read `deposit_outcome` alone, never
+ * `payment_status`: a cancelled card whose payment is SUCCEEDED can be a
+ * withheld deposit or a refund that is owed, and only the backend's persisted
+ * decision tells them apart.
+ */
+function moneyLine(appointment: MyAppointment): MoneyLine | null {
+  const format = (amount: string) => formatPrice(amount, appointment.currency);
+  switch (appointment.status) {
+    case "pending_payment":
+      return appointment.deposit_amount !== null
+        ? { text: `Передоплата: ${format(appointment.deposit_amount)}`, bold: true }
+        : null;
+    case "confirmed":
+      return appointment.amount_due_at_visit !== null
+        ? { text: `Оплата при візиті: ${format(appointment.amount_due_at_visit)}`, bold: false }
+        : null;
+    case "cancelled":
+    case "expired":
+      if (appointment.deposit_outcome === null || appointment.deposit_amount === null) {
+        return null;
+      }
+      return {
+        text: `${DEPOSIT_OUTCOME_LABELS[appointment.deposit_outcome]}: ${format(appointment.deposit_amount)}`,
+        bold: false,
+      };
+    default:
+      return null;
   }
-  if (appointment.status === "confirmed" && appointment.payment_status === "succeeded") {
-    return `Оплата при візиті: ${appointment.amount_due_at_visit} ₴`;
-  }
-  if (appointment.status === "cancelled" || appointment.status === "expired") {
-    if (appointment.payment_status === "succeeded") {
-      return `Депозит утримано: ${appointment.payment_amount} ₴`;
-    }
-    if (appointment.payment_status === "refund_pending") {
-      return "Повернення обробляється";
-    }
-    if (appointment.payment_status === "refunded") {
-      return `Повернено: ${appointment.payment_amount} ₴`;
-    }
-  }
-  return null;
 }
 
 const AWAITING_CONFIRMATION_TEXT = "Очікуємо підтвердження оплати";
@@ -189,7 +221,7 @@ function AppointmentCard({
   payState,
 }: AppointmentCardProps) {
   const badge = STATUS_BADGES[appointment.status];
-  const line = paymentLine(appointment);
+  const line = moneyLine(appointment);
   const cancellable = CANCELLABLE_STATUSES.has(appointment.status);
   const payable = appointment.status === "pending_payment";
   const awaitingConfirmation =
@@ -199,7 +231,14 @@ function AppointmentCard({
   return (
     <li className="flex flex-col gap-2 rounded border border-zinc-200 p-4 dark:border-zinc-700">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">{appointment.service.name}</span>
+        <span className="flex items-baseline gap-2">
+          <span className="font-medium">{appointment.service.name}</span>
+          {line !== null ? (
+            <span className="text-sm text-zinc-600 dark:text-zinc-400">
+              {formatPrice(appointment.service_price_at_booking, appointment.currency)}
+            </span>
+          ) : null}
+        </span>
         {badge !== undefined ? (
           <span className={`rounded px-2 py-0.5 text-xs ${badge.className}`}>{badge.text}</span>
         ) : null}
@@ -208,7 +247,9 @@ function AppointmentCard({
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         {formatSalonDateTime(appointment.start_datetime)}
       </p>
-      {line !== null ? <p className="text-sm">{line}</p> : null}
+      {line !== null ? (
+        <p className="text-sm">{line.bold ? <strong>{line.text}</strong> : line.text}</p>
+      ) : null}
       {awaitingConfirmation ? <p className="text-sm">{AWAITING_CONFIRMATION_TEXT}</p> : null}
       {payLink !== null ? (
         <a href={payLink} className="self-start text-sm text-blue-600 underline">

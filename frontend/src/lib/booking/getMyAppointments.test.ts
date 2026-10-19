@@ -34,6 +34,9 @@ const APPOINTMENT: MyAppointment = {
   payment_amount: "100.00",
   amount_due_at_visit: "400.00",
   refund_deadline: "2026-09-30T10:00:00Z",
+  deposit_amount: "100.00",
+  currency: "UAH",
+  deposit_outcome: null,
 };
 
 describe("getMyAppointments", () => {
