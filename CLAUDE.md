@@ -187,6 +187,9 @@ salons without rework.
   fails once the calendar moves past the date; this has broken the baseline three
   times. Freeze now with `monkeypatch.setattr(timezone, "now", ...)` as in commit
   `7bb714d`, or build the dates relative to a frozen now.
+- Isolation is two-level: across salons (two-salon tests) and across objects in the
+  same salon. When code looks up a related row (payment, customer, appointment), add a
+  test with two such rows in the same salon and act on the one with the higher pk.
 
 ## Running the project
 

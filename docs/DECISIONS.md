@@ -5268,8 +5268,14 @@ cards".
 
 ### Persisted refund decision (`Payment.refund_due`)
 
-Decided 17.10.2026, in discussion, after the recon of the same day. Nothing
-here is implemented yet.
+Decided 17.10.2026, in discussion, after the recon of the same day.
+
+**Implemented, 19.10.2026.** The field and migration `0007_payment_refund_due`.
+`refund_due` is set inside the cancel transaction and inside the webhook
+transaction. Both paths lock the Appointment, then the Payment, and the
+webhook rechecks the Payment status after locking. Mutation testing killed
+10 of 10 mutations; M9 (looking up the Payment by salon only) was killed only
+after a same-salon test was added.
 
 1. **Field.** `Payment` gains `refund_due` (boolean, default `False`).
 2. **When it is set.** It is set to `True` in the same transaction in which
@@ -5335,3 +5341,29 @@ cards". **High priority: fix right after "Persisted refund decision
 - Planned fix: a periodic sweep that finds `SUCCEEDED` payments with
   `refund_due` and retries `initiate_refund`, which is already idempotent
   for a payment past `SUCCEEDED`.
+
+### Known issue: `initiate_payment` writes the Payment outside its lock
+
+Recorded 19.10.2026, from the recon for "Persisted refund decision
+(`Payment.refund_due`)". Not observed; to investigate later.
+
+- `initiate_payment` locks the Appointment, but creates the Payment (or
+  moves a `FAILED` one to `PENDING`) after the locked block, outside any
+  transaction.
+- Two concurrent "pay" requests could both see no active payment and both
+  start a provider session. For a new Payment, the second insert would then
+  hit the one-to-one constraint on `Payment.appointment`.
+
+### Known issue: the `flag_stuck_refunds` race test uses a savepoint
+
+Recorded 19.10.2026, while writing the tests for "Persisted refund decision
+(`Payment.refund_due`)".
+
+- The race test in `test_payments_flag_stuck_refunds.py` commits its
+  "competing" write through the same connection, inside the service's own
+  transaction, so the write is a savepoint, not a concurrent session as its
+  docstring says.
+- The test passes but proves less than it claims.
+- Fix: make the competing write through a separate connection, as test 19
+  in `test_payments_refund_due.py`
+  (`test_webhook_rechecks_payment_status_after_locking`) does.
