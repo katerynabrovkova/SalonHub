@@ -1,13 +1,16 @@
 """
 Price and prepayment on dashboard cards, backend (docs/DECISIONS.md § "Price
 and prepayment on dashboard cards", points 1 and 6): GET appointments/mine/
-gains two read-only fields.
+gains three read-only fields.
 
 - `deposit_amount`: `Payment.amount` when a Payment exists; otherwise
   computed from the appointment's own price/percentage snapshots by the
   helper payments uses. `null` whenever the deposit is 0.
 - `currency`: `Payment.currency` when a Payment exists, otherwise the
   salon's `Salon.currency`.
+- `deposit_outcome`: what happened to a paid deposit ("refunded",
+  "refund_processing", "withheld", or null), read from the Payment's status,
+  `Payment.refund_due` and the appointment's status.
 
 Fixtures mirror test_booking_account_appointment_list.py (Account path,
 `make_appointment`) and test_booking_salon_time_zone.py (two salons, each
@@ -87,7 +90,13 @@ def _appointment(
 
 
 def _make_payment(
-    salon, appointment, *, amount: str, currency: str, status: str = PaymentStatus.PENDING
+    salon,
+    appointment,
+    *,
+    amount: str,
+    currency: str,
+    status: str = PaymentStatus.PENDING,
+    refund_due: bool = False,
 ) -> Payment:
     with tenant_context(salon.id):
         return Payment.objects.create(
@@ -97,6 +106,7 @@ def _make_payment(
             currency=currency,
             status=status,
             provider_reference_id=f"ref-{appointment.id}",
+            refund_due=refund_due,
         )
 
 
@@ -297,7 +307,247 @@ def test_two_salons_with_different_currencies_each_get_their_own_amount_and_curr
     assert eur_row["currency"] == "EUR"
 
 
-# --- 7. No N+1 ----------------------------------------------------------------
+# --- 7. deposit_outcome ---------------------------------------------------------
+#
+# Point 1: "refunded" (Payment REFUNDED); "refund_processing" (REFUND_PENDING,
+# or SUCCEEDED with refund_due); "withheld" (SUCCEEDED, not refund_due,
+# appointment CANCELLED); null otherwise. Every read is row["deposit_outcome"],
+# never .get(), so a missing key fails even where the expected value is null.
+
+
+def _outcome_row(
+    client,
+    salon,
+    customer,
+    specialist,
+    service,
+    account,
+    *,
+    appointment_status: str,
+    payment_status: str | None,
+    refund_due: bool = False,
+) -> dict:
+    """One appointment, with a Payment unless payment_status is None."""
+    appointment = _appointment(
+        salon,
+        customer,
+        specialist,
+        service,
+        price="120.00",
+        percentage="20.00",
+        status=appointment_status,
+    )
+    if payment_status is not None:
+        _make_payment(
+            salon,
+            appointment,
+            amount="24.00",
+            currency=salon.currency,
+            status=payment_status,
+            refund_due=refund_due,
+        )
+    return _only_row(client, salon, account)
+
+
+@pytest.mark.parametrize(
+    ("appointment_status", "refund_due"),
+    [
+        (AppointmentStatus.CANCELLED, True),
+        # refund_due False: a row from before the field existed. REFUNDED
+        # alone decides the value.
+        (AppointmentStatus.EXPIRED, False),
+    ],
+    ids=["cancelled", "expired"],
+)
+def test_deposit_outcome_is_refunded_for_a_refunded_payment(
+    client,
+    salon,
+    customer,
+    specialist,
+    service,
+    customer_account,
+    appointment_status,
+    refund_due,
+):
+    row = _outcome_row(
+        client,
+        salon,
+        customer,
+        specialist,
+        service,
+        customer_account,
+        appointment_status=appointment_status,
+        payment_status=PaymentStatus.REFUNDED,
+        refund_due=refund_due,
+    )
+
+    assert row["deposit_outcome"] == "refunded"
+
+
+def test_deposit_outcome_is_refund_processing_for_a_refund_pending_payment(
+    client, salon, customer, specialist, service, customer_account
+):
+    """refund_due False, as on a row from before the field existed:
+    REFUND_PENDING alone decides the value."""
+    row = _outcome_row(
+        client,
+        salon,
+        customer,
+        specialist,
+        service,
+        customer_account,
+        appointment_status=AppointmentStatus.CANCELLED,
+        payment_status=PaymentStatus.REFUND_PENDING,
+    )
+
+    assert row["deposit_outcome"] == "refund_processing"
+
+
+@pytest.mark.parametrize(
+    "appointment_status",
+    [AppointmentStatus.CANCELLED, AppointmentStatus.EXPIRED],
+    ids=["cancelled", "expired"],
+)
+def test_deposit_outcome_is_refund_processing_for_a_succeeded_payment_with_refund_due(
+    client, salon, customer, specialist, service, customer_account, appointment_status
+):
+    """The refund is owed but not started yet (the retry sweep's rows).
+    payment_status alone says "succeeded"; only refund_due tells this apart
+    from "withheld"."""
+    row = _outcome_row(
+        client,
+        salon,
+        customer,
+        specialist,
+        service,
+        customer_account,
+        appointment_status=appointment_status,
+        payment_status=PaymentStatus.SUCCEEDED,
+        refund_due=True,
+    )
+
+    assert row["deposit_outcome"] == "refund_processing"
+
+
+def test_deposit_outcome_is_withheld_for_a_cancelled_appointment_with_a_kept_deposit(
+    client, salon, customer, specialist, service, customer_account
+):
+    row = _outcome_row(
+        client,
+        salon,
+        customer,
+        specialist,
+        service,
+        customer_account,
+        appointment_status=AppointmentStatus.CANCELLED,
+        payment_status=PaymentStatus.SUCCEEDED,
+        refund_due=False,
+    )
+
+    assert row["deposit_outcome"] == "withheld"
+
+
+@pytest.mark.parametrize(
+    "appointment_status",
+    [AppointmentStatus.CONFIRMED, AppointmentStatus.COMPLETED, AppointmentStatus.EXPIRED],
+    ids=["confirmed", "completed", "expired"],
+)
+def test_deposit_outcome_is_null_for_a_succeeded_payment_on_a_non_cancelled_appointment(
+    client, salon, customer, specialist, service, customer_account, appointment_status
+):
+    """The value "withheld" needs the appointment to be CANCELLED. EXPIRED is included
+    because an implementation that treats expired like cancelled would turn
+    it into "withheld", which point 1 does not allow."""
+    row = _outcome_row(
+        client,
+        salon,
+        customer,
+        specialist,
+        service,
+        customer_account,
+        appointment_status=appointment_status,
+        payment_status=PaymentStatus.SUCCEEDED,
+        refund_due=False,
+    )
+
+    assert row["deposit_outcome"] is None
+
+
+@pytest.mark.parametrize(
+    "payment_status",
+    [None, PaymentStatus.PENDING, PaymentStatus.FAILED],
+    ids=["no_payment", "pending", "failed"],
+)
+def test_deposit_outcome_is_null_when_no_deposit_was_collected(
+    client, salon, customer, specialist, service, customer_account, payment_status
+):
+    """On a CANCELLED appointment, so an implementation that decides
+    "withheld" from the appointment status alone fails here."""
+    row = _outcome_row(
+        client,
+        salon,
+        customer,
+        specialist,
+        service,
+        customer_account,
+        appointment_status=AppointmentStatus.CANCELLED,
+        payment_status=payment_status,
+    )
+
+    assert row["deposit_outcome"] is None
+
+
+def test_deposit_outcome_is_per_appointment_for_two_cancelled_appointments_of_one_client(
+    client, salon, customer, specialist, service, customer_account
+):
+    """Same salon, two objects (CLAUDE.md's two-level isolation rule): two
+    cancelled appointments of the same client. The first (lower pk) kept its
+    deposit, the second was refunded. Each row must carry its own value, not
+    the other appointment's."""
+    first = _appointment(
+        salon,
+        customer,
+        specialist,
+        service,
+        price="120.00",
+        percentage="20.00",
+        status=AppointmentStatus.CANCELLED,
+    )
+    second = _appointment(
+        salon,
+        customer,
+        specialist,
+        service,
+        price="120.00",
+        percentage="20.00",
+        status=AppointmentStatus.CANCELLED,
+        start=START + dt.timedelta(days=1),
+    )
+    _make_payment(
+        salon,
+        first,
+        amount="24.00",
+        currency=salon.currency,
+        status=PaymentStatus.SUCCEEDED,
+        refund_due=False,
+    )
+    _make_payment(
+        salon,
+        second,
+        amount="24.00",
+        currency=salon.currency,
+        status=PaymentStatus.REFUNDED,
+        refund_due=True,
+    )
+    assert first.pk < second.pk  # guards the setup, not the code
+
+    rows = {row["id"]: row for row in _rows(client, salon, customer_account)}
+
+    assert rows[first.id]["deposit_outcome"] == "withheld"
+    assert rows[second.id]["deposit_outcome"] == "refunded"
+
+
+# --- 8. No N+1 ----------------------------------------------------------------
 
 
 def test_new_fields_add_no_query_per_row(
@@ -343,4 +593,5 @@ def test_new_fields_add_no_query_per_row(
     for row in rows:
         assert "deposit_amount" in row
         assert "currency" in row
+        assert "deposit_outcome" in row
     assert len(three_rows_ctx.captured_queries) == one_row_query_count

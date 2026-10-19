@@ -176,6 +176,15 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     is `Payment.currency` when a Payment exists, otherwise `Salon.currency`:
     a historic payment keeps the currency it was actually paid in.
 
+    `deposit_outcome` states what happened to a paid deposit, so the
+    frontend never infers it from `payment_status` (same entry, point 1):
+    "refunded" for a REFUNDED Payment; "refund_processing" for
+    REFUND_PENDING, or SUCCEEDED with `Payment.refund_due`; "withheld" for
+    SUCCEEDED without `refund_due` on a CANCELLED appointment; `null`
+    otherwise. `refund_due` is the persisted refund decision, never
+    recomputed from the cancellation rules here (§ "Persisted refund
+    decision (`Payment.refund_due`)").
+
     `payment_status`/`payment_amount`/`amount_due_at_visit` read the
     OneToOneField reverse accessor `appointment.payment`
     (payments/models.py's `Payment.appointment`), which raises
@@ -225,6 +234,7 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     amount_due_at_visit = serializers.SerializerMethodField()
     deposit_amount = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
+    deposit_outcome = serializers.SerializerMethodField()
     start_datetime = SalonLocalDateTimeField()
     end_datetime = SalonLocalDateTimeField()
     refund_deadline = SalonLocalDateTimeField(value_from=_refund_deadline_or_none)
@@ -248,6 +258,7 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
             "amount_due_at_visit",
             "deposit_amount",
             "currency",
+            "deposit_outcome",
             "refund_deadline",
         ]
         read_only_fields = fields
@@ -281,6 +292,23 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     def get_currency(self, appointment: Appointment) -> str:
         payment = self._payment(appointment)
         return payment.currency if payment is not None else appointment.salon.currency
+
+    def get_deposit_outcome(self, appointment: Appointment) -> str | None:
+        payment = self._payment(appointment)
+        if payment is None:
+            return None
+        if payment.status == PaymentStatus.REFUNDED:
+            return "refunded"
+        if payment.status == PaymentStatus.REFUND_PENDING:
+            return "refund_processing"
+        if payment.status == PaymentStatus.SUCCEEDED and payment.refund_due:
+            return "refund_processing"
+        if (
+            payment.status == PaymentStatus.SUCCEEDED
+            and appointment.status == AppointmentStatus.CANCELLED
+        ):
+            return "withheld"
+        return None
 
 
 class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):
