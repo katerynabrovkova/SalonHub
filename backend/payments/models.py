@@ -63,6 +63,12 @@ class Payment(TenantScopedModel, TimeStamped):
     # (auto_now moves on every save, untrustworthy for that measurement;
     # docs/DECISIONS.md § Stage 8.G decisions).
     refund_initiated_at = models.DateTimeField(null=True, blank=True)
+    # The persisted decision that a refund is owed, set True in the same
+    # transaction that makes it (cancel_appointment, or the payment webhook's
+    # late-payment path) and never recomputed or cleared afterward: it cannot
+    # be reconstructed from the other stored fields (docs/DECISIONS.md §
+    # "Persisted refund decision (`Payment.refund_due`)").
+    refund_due = models.BooleanField(default=False)
 
     class Meta(TenantScopedModel.Meta):
         abstract = False

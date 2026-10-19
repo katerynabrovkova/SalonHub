@@ -170,6 +170,18 @@ class PaymentWebhookView(APIView):
             # this lock is released first; initiate_refund re-acquires its
             # own fresh lock on the (by-then-committed) SUCCEEDED row.
             with transaction.atomic():
+                if event_type == _PAYMENT_SUCCEEDED:
+                    # Appointment before Payment: the parent-before-child
+                    # lock order cancel_appointment also follows, so a
+                    # concurrent cancel and payment-success webhook cannot
+                    # deadlock (docs/DECISIONS.md § "Persisted refund
+                    # decision (`Payment.refund_due`)"). The appointment id
+                    # comes from the unlocked read above; it never changes
+                    # (one-to-one). The Payment status is rechecked below,
+                    # under its own lock.
+                    appointment_row = Appointment.objects.select_for_update().get(
+                        pk=payment.appointment_id
+                    )
                 payment_row = Payment.objects.select_for_update().get(pk=payment.pk)
 
                 if event_type == _PAYMENT_SUCCEEDED:
@@ -177,9 +189,6 @@ class PaymentWebhookView(APIView):
                         payment_row.status = PaymentStatus.SUCCEEDED
                         payment_row.save(update_fields=["status"])
 
-                        appointment_row = Appointment.objects.select_for_update().get(
-                            pk=payment_row.appointment_id
-                        )
                         if appointment_row.status == AppointmentStatus.PENDING_PAYMENT:
                             appointment_row.status = AppointmentStatus.CONFIRMED
                             appointment_row.save(update_fields=["status"])
@@ -217,7 +226,11 @@ class PaymentWebhookView(APIView):
                             # appointment was cancelled before this payment
                             # was ever confirmed, so the <24h deposit rule
                             # doesn't apply (docs/DECISIONS.md § Stage 15
-                            # planning, item 14 design details).
+                            # planning, item 14 design details). The
+                            # decision is persisted here, before the ledger
+                            # row below, so it commits with it.
+                            payment_row.refund_due = True
+                            payment_row.save(update_fields=["refund_due"])
                             should_initiate_refund = True
                     else:
                         # Not PENDING: either an expected duplicate/race

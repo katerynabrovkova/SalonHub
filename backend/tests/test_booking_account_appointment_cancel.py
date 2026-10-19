@@ -157,6 +157,40 @@ def test_cancelling_at_least_24h_before_start_with_a_succeeded_payment_triggers_
         assert Payment.objects.get(pk=payment.id).status == PaymentStatus.REFUND_PENDING
 
 
+def test_cancelling_at_least_24h_before_start_records_refund_due(
+    client, salon, customer, specialist, service, customer_account, monkeypatch
+):
+    """docs/DECISIONS.md § "Persisted refund decision (`Payment.refund_due`)":
+    the refund decision made through this endpoint is persisted on the
+    Payment."""
+    monkeypatch.setattr(AccountAppointmentCancelView, "provider_class", _FakeRefundProvider)
+    future_start = timezone.now() + dt.timedelta(days=3)
+    appt = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=future_start,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    with tenant_context(salon.id):
+        payment = Payment.objects.create(
+            salon=salon,
+            appointment=appt,
+            amount=Decimal("100.00"),
+            currency=salon.currency,
+            status=PaymentStatus.SUCCEEDED,
+            provider_reference_id="existing_ref",
+        )
+
+    client.force_authenticate(user=customer_account)
+    response = client.post(_cancel_url(salon, appt))
+
+    assert response.status_code == 200
+    with tenant_context(salon.id):
+        assert Payment.objects.get(pk=payment.id).refund_due is True
+
+
 # --- 3. Cross-customer ownership: 404, not 403 ------------------------------
 
 

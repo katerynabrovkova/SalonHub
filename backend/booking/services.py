@@ -466,8 +466,12 @@ def cancel_appointment(
     through between an unlocked read and the write.
 
     Refund eligibility (docs/DECISIONS.md § "Refund-eligibility gap (found
-    19.09.2026, closing Stage 8)") is decided here, after the cancellation
-    transaction above has committed — not inside it. `initiate_refund`
+    19.09.2026, closing Stage 8)") is decided inside the cancellation
+    transaction and persisted as `Payment.refund_due` (§ "Persisted refund
+    decision (`Payment.refund_due`)"), so a crash after the commit cannot
+    lose it. The Payment is locked second, after the Appointment — the
+    parent-before-child order every path locking both rows follows. Only
+    the refund itself runs after the commit: `initiate_refund`
     (payments/services.py) manages its own atomic()/select_for_update()
     plus an out-of-transaction provider network call; nesting that inside
     this function's own atomic() block would hold this row's lock for the
@@ -475,7 +479,8 @@ def cancel_appointment(
     payments/views.py's PaymentWebhookView avoids for the same reason. A
     Payment that doesn't exist, or exists but never reached SUCCEEDED (no
     money collected), is left untouched — cancellation always succeeds
-    regardless of Payment/refund outcome, since it's a separate concern.
+    regardless of Payment/refund outcome, since it's a separate concern. If
+    such a Payment succeeds later, the payment webhook makes the decision.
 
     A `PaymentProviderError` from `initiate_refund` (the provider's
     `refund()` call itself failing) is caught here and swallowed, not
@@ -510,29 +515,37 @@ def cancel_appointment(
             ),
         )
 
-    is_eligible = _is_refund_eligible(
-        cancelled_by=cancelled_by, now=now, start_datetime=appointment.start_datetime
-    )
-    if is_eligible:
-        payment = Payment.objects.filter(
-            appointment=appointment, status=PaymentStatus.SUCCEEDED
-        ).first()
-        if payment is not None:
-            try:
-                initiate_refund(payment_id=payment.id, salon=salon, provider=provider, now=now)
-            except PaymentProviderError:
-                # initiate_refund already committed Payment.status =
-                # REFUND_PENDING before calling provider.refund() (its own
-                # docstring, "Writing first makes the failure mode
-                # reversible") — a failed provider call is already an
-                # async-recoverable state, with the Stage 8.G stuck-refund
-                # sweep as its recovery path (docs/DECISIONS.md § Stage
-                # 8.G decisions). Re-raising here would only turn an
-                # already-committed, successful cancellation into a
-                # caller-visible error for no gain: nothing further needs
-                # doing synchronously, and the sweep doesn't need this
-                # exception to do its job.
-                pass
+        refund_payment_id: int | None = None
+        payment = (
+            Payment.objects.select_for_update().filter(salon=salon, appointment=appointment).first()
+        )
+        if (
+            payment is not None
+            and payment.status == PaymentStatus.SUCCEEDED
+            and _is_refund_eligible(
+                cancelled_by=cancelled_by, now=now, start_datetime=appointment.start_datetime
+            )
+        ):
+            payment.refund_due = True
+            payment.save(update_fields=["refund_due"])
+            refund_payment_id = payment.id
+
+    if refund_payment_id is not None:
+        try:
+            initiate_refund(payment_id=refund_payment_id, salon=salon, provider=provider, now=now)
+        except PaymentProviderError:
+            # initiate_refund already committed Payment.status =
+            # REFUND_PENDING before calling provider.refund() (its own
+            # docstring, "Writing first makes the failure mode
+            # reversible") — a failed provider call is already an
+            # async-recoverable state, with the Stage 8.G stuck-refund
+            # sweep as its recovery path (docs/DECISIONS.md § Stage
+            # 8.G decisions). Re-raising here would only turn an
+            # already-committed, successful cancellation into a
+            # caller-visible error for no gain: nothing further needs
+            # doing synchronously, and the sweep doesn't need this
+            # exception to do its job.
+            pass
 
     return appointment
 
