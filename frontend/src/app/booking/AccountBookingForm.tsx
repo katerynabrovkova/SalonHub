@@ -84,7 +84,7 @@ export default function AccountBookingForm({
       } else if (err instanceof ApiError && err.code === "account_link_unavailable") {
         setError("Не вдалося оформити запис з облікового запису. Зверніться до салону.");
       } else {
-        setError("Something went wrong. Please try again.");
+        setError("Щось пішло не так. Спробуйте ще раз.");
       }
     } finally {
       setPending(false);

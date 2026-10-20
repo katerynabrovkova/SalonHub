@@ -222,7 +222,7 @@ describe("AccountBookingForm", () => {
     await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Something went wrong. Please try again.",
+      "Щось пішло не так. Спробуйте ще раз.",
     );
     expect(pushMock).not.toHaveBeenCalled();
   });
@@ -260,7 +260,7 @@ describe("AccountBookingForm", () => {
     expect(alert).toHaveTextContent(
       "Не вдалося оформити запис з облікового запису. Зверніться до салону.",
     );
-    expect(alert).not.toHaveTextContent("Something went wrong");
+    expect(alert).not.toHaveTextContent("Щось пішло не так");
     expect(pushMock).not.toHaveBeenCalled();
     expect(refreshMock).not.toHaveBeenCalled();
   });
@@ -275,7 +275,7 @@ describe("AccountBookingForm", () => {
     await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Something went wrong. Please try again.");
+    expect(alert).toHaveTextContent("Щось пішло не так. Спробуйте ще раз.");
     expect(alert).not.toHaveTextContent("Спершу підтвердіть пошту, щоб бронювати з облікового запису.");
     expect(pushMock).not.toHaveBeenCalled();
   });
@@ -290,7 +290,7 @@ describe("AccountBookingForm", () => {
     await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Something went wrong. Please try again.",
+      "Щось пішло не так. Спробуйте ще раз.",
     );
     expect(pushMock).not.toHaveBeenCalled();
 
@@ -298,7 +298,7 @@ describe("AccountBookingForm", () => {
     await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Something went wrong. Please try again.",
+      "Щось пішло не так. Спробуйте ще раз.",
     );
     expect(pushMock).not.toHaveBeenCalled();
     expect(createAccountBookingMock).toHaveBeenCalledTimes(2);

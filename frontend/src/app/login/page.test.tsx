@@ -42,7 +42,7 @@ function renderLoginPage() {
 async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/email/i), "person@example.com");
   await user.type(screen.getByLabelText(/^пароль$/i), "correct-horse-battery-staple");
-  await user.click(screen.getByRole("button", { name: /log in/i }));
+  await user.click(screen.getByRole("button", { name: /увійти/i }));
 }
 
 /**
@@ -201,7 +201,7 @@ describe("LoginPage", () => {
     await fillAndSubmit(user);
 
     await waitFor(() => {
-      expect(screen.getByText(/email or password is incorrect/i)).toBeInTheDocument();
+      expect(screen.getByText(/неправильний email або пароль/i)).toBeInTheDocument();
     });
 
     // The backend collapses "no such email" and "wrong password" into one
@@ -229,7 +229,7 @@ describe("LoginPage", () => {
     });
 
     // Must be a distinct message from the 401 case, not the same generic text.
-    expect(screen.queryByText(/email or password is incorrect/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/неправильний email або пароль/i)).not.toBeInTheDocument();
   });
 
   test("test_submit_disabled_while_pending", async () => {
@@ -249,7 +249,7 @@ describe("LoginPage", () => {
     await fillAndSubmit(user);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /log in/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /увійти/i })).toBeDisabled();
     });
 
     // Clean up the dangling promise so it doesn't leak into other tests.
@@ -360,7 +360,7 @@ describe("LoginPage return path", () => {
     await fillAndSubmit(user);
 
     await waitFor(() => {
-      expect(screen.getByText(/email or password is incorrect/i)).toBeInTheDocument();
+      expect(screen.getByText(/неправильний email або пароль/i)).toBeInTheDocument();
     });
     expect(sessionStorage.getItem(RETURN_PATH_KEY)).toBe("/client/profile");
   });
@@ -452,7 +452,7 @@ describe("LoginPage csrf priming", () => {
     await fillAndSubmit(user);
 
     await waitFor(() => {
-      expect(screen.getByText("Something went wrong. Please try again.")).toBeInTheDocument();
+      expect(screen.getByText("Щось пішло не так. Спробуйте ще раз.")).toBeInTheDocument();
     });
     expect(loginPostCalled()).toBe(false);
     expect(pushMock).not.toHaveBeenCalled();
@@ -486,7 +486,7 @@ describe("LoginPage notice", () => {
 
     const status = await screen.findByRole("status");
     expect(status).toHaveTextContent(NOTICE_TEXT);
-    const form = screen.getByRole("button", { name: /log in/i }).closest("form");
+    const form = screen.getByRole("button", { name: /увійти/i }).closest("form");
     expect(form).not.toBeNull();
     expect(status.compareDocumentPosition(form!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

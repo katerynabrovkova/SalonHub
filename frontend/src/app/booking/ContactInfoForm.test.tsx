@@ -162,7 +162,7 @@ describe("ContactInfoForm", () => {
     await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Something went wrong. Please try again.",
+      "Щось пішло не так. Спробуйте ще раз.",
     );
     expect(pushMock).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Ім'я")).toHaveValue("Alice");
@@ -175,7 +175,7 @@ describe("ContactInfoForm", () => {
     await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Something went wrong. Please try again.",
+      "Щось пішло не так. Спробуйте ще раз.",
     );
     expect(pushMock).not.toHaveBeenCalled();
   });
@@ -222,7 +222,7 @@ describe("ContactInfoForm", () => {
     await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Something went wrong. Please try again.",
+      "Щось пішло не так. Спробуйте ще раз.",
     );
     expect(pushMock).not.toHaveBeenCalled();
   });

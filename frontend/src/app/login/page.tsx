@@ -12,7 +12,7 @@ import { ApiError } from "@/lib/api/errors";
 import { consumeReturnPath, isSafeReturnPath } from "@/lib/auth/returnPath";
 import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 
-const GENERIC_ERROR = "Something went wrong. Please try again.";
+const GENERIC_ERROR = "Щось пішло не так. Спробуйте ще раз.";
 
 // Mirrors middleware.ts's PLATFORM_DOMAIN resolution, but client-side only
 // `NEXT_PUBLIC_*` env vars are ever inlined into the browser bundle
@@ -93,7 +93,7 @@ export default function LoginPage() {
         if (err.status === 401) {
           // The backend collapses "no such email" and "wrong password" into
           // one response — do not re-introduce that distinction here.
-          setError("Email or password is incorrect.");
+          setError("Неправильний email або пароль.");
         } else if (err.status === 429) {
           setError("Забагато спроб. Спробуйте пізніше.");
         } else {
@@ -119,7 +119,7 @@ export default function LoginPage() {
         onSubmit={handleSubmit}
         className="flex w-full max-w-sm flex-col gap-4"
       >
-        <h1 className="text-xl font-semibold">Log in</h1>
+        <h1 className="text-xl font-semibold">Вхід</h1>
 
         <div className="flex flex-col gap-1">
           <label htmlFor="email">Email</label>
@@ -145,7 +145,7 @@ export default function LoginPage() {
         {error !== null ? <p role="alert">{error}</p> : null}
 
         <button type="submit" disabled={pending}>
-          Log in
+          Увійти
         </button>
       </form>
 

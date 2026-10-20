@@ -52,13 +52,13 @@ export async function guestApiRequest<T>(
       throw new ApiError(
         response.status,
         typeof code === "string" ? code : "unknown_error",
-        typeof message === "string" ? message : "Request failed.",
+        typeof message === "string" ? message : "Не вдалося виконати запит.",
         typeof details === "object" && details !== null
           ? (details as Record<string, unknown>)
           : {},
       );
     }
-    throw new ApiError(response.status, "unknown_error", "Request failed.");
+    throw new ApiError(response.status, "unknown_error", "Не вдалося виконати запит.");
   }
 
   return body as T;

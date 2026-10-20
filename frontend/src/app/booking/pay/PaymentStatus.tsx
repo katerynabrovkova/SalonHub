@@ -170,7 +170,7 @@ function PaymentFlow({ slug, appointmentId, token }: PaymentFlowProps) {
         currency: response.payment.currency,
       });
     } catch {
-      setError("Something went wrong. Please try again.");
+      setError("Щось пішло не так. Спробуйте ще раз.");
     } finally {
       setPending(false);
     }

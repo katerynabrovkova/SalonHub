@@ -22,7 +22,7 @@ export default async function BookingPayPage() {
   if (slug === null) {
     return (
       <main className="p-8 text-center text-zinc-600 dark:text-zinc-400">
-        <p>The platform is still in development.</p>
+        <p>Платформа ще в розробці.</p>
       </main>
     );
   }

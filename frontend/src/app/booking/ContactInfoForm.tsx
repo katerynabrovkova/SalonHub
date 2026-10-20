@@ -105,7 +105,7 @@ export default function ContactInfoForm({
         router.push(buildSlotTakenUrl(entry, service, specialist, startDatetime));
         return;
       }
-      setError("Something went wrong. Please try again.");
+      setError("Щось пішло не так. Спробуйте ще раз.");
     } finally {
       setPending(false);
     }

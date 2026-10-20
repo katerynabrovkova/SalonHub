@@ -580,7 +580,7 @@ describe("BookingPage routing skeleton", () => {
     });
     render(element);
 
-    expect(screen.getByText("The platform is still in development.")).toBeInTheDocument();
+    expect(screen.getByText("Платформа ще в розробці.")).toBeInTheDocument();
   });
 
   it("test_step4_without_specialist_calls_not_found", async () => {
@@ -751,7 +751,7 @@ describe("BookingPage step 2, entry=specialist: fetches and renders services_det
     });
     render(element);
 
-    expect(screen.getByText("The platform is still in development.")).toBeInTheDocument();
+    expect(screen.getByText("Платформа ще в розробці.")).toBeInTheDocument();
     expect(mockedGetSpecialistDetailPage).not.toHaveBeenCalled();
   });
 
