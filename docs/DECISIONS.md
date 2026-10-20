@@ -3963,9 +3963,9 @@ order.
    implemented, browser-checked, "implemented" note added.
 2. **Item 8 relink.** Decide what `create_account_appointment` does when
    the Customer it finds is linked to a different Account, add a test, and
-   correct the "bare 500" note. Decided 20.10.2026 and the note marked
-   superseded: see "Account linked to a Customer held by another Account".
-   Implementation and tests pending.
+   correct the "bare 500" note. Done 20.10.2026: decided, implemented and
+   tested, the note marked superseded; see "Account linked to a Customer
+   held by another Account".
 3. **"Нове бронювання" link** on a non-empty client dashboard. Pending.
 4. **Logout target.** Deferred to the design stage; to be recorded in the
    deferred list under "Agreed stage order". Pending.
@@ -5541,6 +5541,15 @@ dashboard cards".
 Decided 20.10.2026, in discussion, after the recon of the same day. Closes
 Stage 15 closure checklist item 2. Supersedes the "bare 500" note in §
 Stage 15 planning, item 8.
+
+**Implemented, 20.10.2026.** `AccountLinkUnavailableError` (409,
+`account_link_unavailable`) is raised in `create_account_appointment`
+before the Customer is changed. `_verify_and_link` keeps
+`email_verified_at` and skips the link. `AccountBookingForm` shows the
+message. Mutation testing killed 7 of 7 mutations, including a message
+that would reveal another account and refusing a guest Customer.
+No browser check: the state can only be created through the database; 
+behaviour is covered by tests and mutations.
 
 1. **Facts from the recon.**
    - The state (account B's email matches a Customer already linked to
