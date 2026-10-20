@@ -4883,6 +4883,17 @@ Decided 05.10.2026, in discussion.
       щойно змінено. Ви вийшли з акаунта на всіх пристроях.", "Якщо ви не
       змінювали пароль, відновіть доступ через «Забули пароль?» на
       сторінці входу.", then the salon name. No "if it was you" line.
+      Changed 20.10.2026: the last sentence is now "Якщо ви не змінювали
+      пароль, відновіть доступ за посиланням: <посилання>", a plain-text
+      link to the same salon's `/forgot-password`. The view passes the
+      slug of the salon the change was made in, and the task builds the
+      link with `build_salon_frontend_url`, like the verification and
+      reset emails; no `?from` parameter. Reason: a person whose password
+      was changed by someone else needs the shortest path back, and the
+      other account emails already carry links. Decided by Katya after a
+      check on 20.10.2026 found the email named the login page's "Забули
+      пароль?" in words only, with no link, while Item 11 point 13 read as
+      if it linked there.
 
    Frontend (`/client/profile/password`)
    7. **Fields.** Current password, new password (hint "Пароль має
@@ -5086,8 +5097,11 @@ Frontend
 13. **Links.** "Забули пароль?" on the login page and "Забули поточний
     пароль?" on `/client/profile/password`, both to `/forgot-password`.
     The login link is needed because a person who forgot the password
-    cannot reach the profile; the item 9 notice email also points there.
-    The item 9 test asserting there is no link changes, because the
+    cannot reach the profile; the item 9 notice email named the login
+    page's "Забули пароль?" link in words only, with no URL, until
+    20.10.2026; since then it links to `/forgot-password` directly (Item 9
+    point 6, changed 20.10.2026). The item 9 frontend test asserting the
+    change-password page has no forgot-password link changes, because the
     requirement changed.
 
 Build order: B1 the email (point 1); B2 the confirm step (points 2-4);
