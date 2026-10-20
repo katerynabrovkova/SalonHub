@@ -3979,7 +3979,7 @@ order.
 4. **Logout target.** Deferred to the design stage; to be recorded in the
    deferred list under "Agreed stage order". Done 20.10.2026: recorded in
    the deferred list.
-5. **Cleanup.** Pending. Covers:
+5. **Cleanup.** Done 20.10.2026. Covers:
    - "Known issue: `tsc --noEmit` does not type-check the project";
    - "Known issue: ESLint `react-hooks/set-state-in-effect` in the client
      dashboard";
@@ -3988,6 +3988,16 @@ order.
      `src/app/specialists/[id]/page.test.tsx`;
    - `ruff format` for `config/settings/development.py` and
      `notifications/migrations/0005_notification_booking_link_mode.py`.
+
+   What was done:
+   - the `typecheck` npm script (`tsc --noEmit --incremental false`) and
+     the CLAUDE.md note, see the resolved tsc known issue;
+   - the two test type errors: a type annotation on `fillForm`'s options in
+     `register/page.test.tsx`, and `services_detail: []` in the
+     `specialist()` fixture defaults in `specialists/[id]/page.test.tsx`;
+   - the ESLint fix in `client/page.tsx`, see the resolved ESLint known
+     issue;
+   - `ruff format` of the two backend files (line joins only).
 6. **Mark Stage 15 done.** Pending.
 
 Found during Stage 15, fixed:
@@ -5560,6 +5570,23 @@ dashboard cards".
   `react-hooks/set-state-in-effect`.
 - Pre-existing: the committed version of the file has the same error. The
   money-line change did not touch that effect.
+
+**Resolved 20.10.2026.** `loadAppointments()` now sets state only in the
+`then` callbacks of the `getMyAppointments` request. The mount effect only
+starts the request, as in `VerifyEmailStatus`, and the page starts in the
+loading state. Cancel and pay still call the same `loadAppointments()`.
+The existing `client/page.test.tsx` tests are unchanged and pass.
+
+**Fully resolved 20.10.2026.** `booking/pay/PaymentStatus.tsx:82` had the
+same error: the mount effect set the "invalid" phase synchronously when the
+URL fragment was missing or malformed. Now the hash is read with
+`useSyncExternalStore`, as in `VerifyEmailStatus`. Its subscribe never
+fires, so the fragment is still read once, when the page loads. The
+invalid case is derived during render. A child `PaymentFlow` does the
+detail fetch once on mount, with the same `cancelled` cleanup, and sets
+state only after the request settles. The existing
+`PaymentStatus.test.tsx` tests are unchanged and pass. `npm run lint`
+reports no errors in the frontend.
 
 ### Account linked to a Customer held by another Account
 
