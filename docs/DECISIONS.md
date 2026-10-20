@@ -131,6 +131,10 @@ on booking step 3 (see its known-issue entry).
   useSyncExternalStore precedent cited in Item 9 point 3 applies to URL
   hashes, not query strings; consider reading notice server-side together
   with option E in the design pass (20.10.2026).
+- Recorded 20.10.2026, for Stage 21: if someone changes both the password
+  and the account email (item 8), reset links go to their mailbox; the
+  item 8 notice tells the owner to contact the salon, but salon staff have
+  no tool to restore the account (20.10.2026).
 
 ## Open questions
 
