@@ -188,8 +188,10 @@ def _verify_and_link(*, account_id: int, salon: Salon, now: dt.datetime) -> None
     The stamp is a filtered update, so verifying twice with the same token
     selects zero rows the second time and leaves the original timestamp
     intact. The link runs only when the account has no ``Customer`` yet and
-    is matched on the verified email alone, never the phone. Both steps
-    share one transaction.
+    is matched on the verified email alone, never the phone. A match already
+    linked to another Account is skipped, and verification still succeeds
+    (docs/DECISIONS.md § "Account linked to a Customer held by another
+    Account"). Both steps share one transaction.
     """
     with transaction.atomic():
         Account.objects.filter(pk=account_id, salon=salon, email_verified_at__isnull=True).update(
@@ -198,7 +200,7 @@ def _verify_and_link(*, account_id: int, salon: Salon, now: dt.datetime) -> None
         account = Account.objects.get(pk=account_id, salon=salon)
         if account.customer_id is None:
             match = Customer.objects.filter(salon=salon, email=account.email).first()
-            if match is not None:
+            if match is not None and not Account.objects.filter(customer=match).exists():
                 account.customer = match
                 account.save(update_fields=["customer"])
 

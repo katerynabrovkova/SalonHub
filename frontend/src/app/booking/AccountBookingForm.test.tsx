@@ -243,6 +243,28 @@ describe("AccountBookingForm", () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
+  it("test_409_account_link_unavailable_shows_contact_salon_message_not_generic", async () => {
+    const user = userEvent.setup();
+    createAccountBookingMock.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        "account_link_unavailable",
+        "Не вдалося оформити запис з облікового запису. Зверніться до салону.",
+      ),
+    );
+
+    renderForm(true);
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Не вдалося оформити запис з облікового запису. Зверніться до салону.",
+    );
+    expect(alert).not.toHaveTextContent("Something went wrong");
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
   it("test_403_other_code_shows_generic_message_not_verify_message", async () => {
     const user = userEvent.setup();
     createAccountBookingMock.mockRejectedValueOnce(

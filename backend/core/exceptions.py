@@ -120,6 +120,21 @@ class EmailNotVerifiedError(DomainError):
     default_message = "Please verify your email before booking directly from your account."
 
 
+class AccountLinkUnavailableError(DomainError):
+    """
+    docs/DECISIONS.md § "Account linked to a Customer held by another
+    Account": account-aware booking found the Customer for the Account's
+    email already linked to another Account in the salon. Raised from
+    create_account_appointment before the Customer is changed or linked.
+    The message is neutral and never says that another account exists
+    (anti-enumeration).
+    """
+
+    code = "account_link_unavailable"
+    status_code = status.HTTP_409_CONFLICT
+    default_message = "Не вдалося оформити запис з облікового запису. Зверніться до салону."
+
+
 class ReviewRequiresCompletedAppointmentError(DomainError):
     """
     docs/DECISIONS.md § Stage 11 Part 2: a review may only be left for a

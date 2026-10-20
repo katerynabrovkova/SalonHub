@@ -35,6 +35,7 @@ from booking.guest_tokens import issue_guest_token
 from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus, CancelledBy
 from catalog.models import Service
 from core.exceptions import (
+    AccountLinkUnavailableError,
     EmailNotVerifiedError,
     InvalidStateTransitionError,
     PaymentProviderError,
@@ -345,6 +346,13 @@ def create_account_appointment(
     name/phone refreshed from what the Account holder just typed, not
     silently kept stale from an old guest booking.
 
+    A Customer found by that lookup but already linked to another Account
+    raises AccountLinkUnavailableError (409) before its name/phone are
+    touched or the link is written (docs/DECISIONS.md § "Account linked to
+    a Customer held by another Account"). The one-to-one constraint on
+    Account.customer, translated by core.exceptions.exception_handler,
+    stays the backstop.
+
     create_appointment / create_appointment_for_any_specialist are reused
     completely unchanged -- only this function's Customer-resolution step
     and its lack of a guest token differ from create_guest_appointment's.
@@ -375,6 +383,8 @@ def create_account_appointment(
                 email=locked_account.email,
                 defaults={"name": customer_name, "phone": customer_phone},
             )
+            if not created and Account.objects.filter(customer=customer).exists():
+                raise AccountLinkUnavailableError()
             if not created:
                 customer.name = customer_name
                 customer.phone = customer_phone

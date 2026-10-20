@@ -81,6 +81,8 @@ export default function AccountBookingForm({
       }
       if (err instanceof ApiError && err.code === "email_not_verified") {
         setError("Спершу підтвердіть пошту, щоб бронювати з облікового запису.");
+      } else if (err instanceof ApiError && err.code === "account_link_unavailable") {
+        setError("Не вдалося оформити запис з облікового запису. Зверніться до салону.");
       } else {
         setError("Something went wrong. Please try again.");
       }
