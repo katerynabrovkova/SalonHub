@@ -24,7 +24,16 @@ class ServiceCategoryWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ServiceCategory
-        fields = ["id", "salon", "name", "photo", "ordering", "is_active", "created_at", "updated_at"]
+        fields = [
+            "id",
+            "salon",
+            "name",
+            "photo",
+            "ordering",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
         read_only_fields = ["id", "salon", "created_at", "updated_at"]
 
     def validate_name(self, value: dict[str, str]) -> dict[str, str]:
@@ -74,7 +83,16 @@ class ServiceCategoryReadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ServiceCategory
-        fields = ["id", "salon", "name", "photo", "ordering", "is_active", "created_at", "updated_at"]
+        fields = [
+            "id",
+            "salon",
+            "name",
+            "photo",
+            "ordering",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
         read_only_fields = fields
 
     def get_name(self, obj: ServiceCategory) -> str:

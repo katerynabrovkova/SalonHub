@@ -4,20 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('catalog', '0004_remove_service_service_salon_name_en_uniq_and_more'),
+        ("catalog", "0004_remove_service_service_salon_name_en_uniq_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='service',
-            name='description',
+            model_name="service",
+            name="description",
             field=models.CharField(blank=True, max_length=600, null=True),
         ),
         migrations.AddField(
-            model_name='servicecategory',
-            name='photo',
+            model_name="servicecategory",
+            name="photo",
             field=models.CharField(blank=True, max_length=1024, null=True),
         ),
     ]
