@@ -3966,7 +3966,9 @@ order.
    correct the "bare 500" note. Done 20.10.2026: decided, implemented and
    tested, the note marked superseded; see "Account linked to a Customer
    held by another Account".
-3. **"Нове бронювання" link** on a non-empty client dashboard. Pending.
+3. **"Нове бронювання" link** on a non-empty client dashboard. Decided
+   20.10.2026: see "New booking button on the client dashboard".
+   Implementation and tests pending.
 4. **Logout target.** Deferred to the design stage; to be recorded in the
    deferred list under "Agreed stage order". Pending.
 5. **Cleanup.** Pending. Covers:
@@ -5595,3 +5597,33 @@ the salon admin panel built in Stages 18-21.
 - Deleting an Account leaves its Customer unlinked, and a new account with
   the same email can claim it.
 - Planned fix: validation in the admin forms (option C from the recon).
+
+### New booking button on the client dashboard
+
+Decided 20.10.2026, in discussion, after the recon of the same day. Closes
+Stage 15 closure checklist item 3.
+
+1. **When it is shown.** Only when the appointment list has loaded and
+   contains at least one appointment, upcoming or past. Not shown in the
+   empty state, which keeps its own "Забронювати візит" link to
+   `/services` unchanged. Not shown while loading or on the error state.
+2. **Target.** A link to `/services`, the only booking entry that needs
+   no pre-selection. `/booking` without parameters is a 404 by the
+   Stage 14 scope revision of 13.09.2026.
+3. **Look and placement.** From the mockup board "Нове бронювання: внизу",
+   variant (д): a pill fixed to the bottom-right of the viewport,
+   "+ Нове бронювання", in the accent colour, at least 48px tall, above
+   the iPhone safe area (`env(safe-area-inset-bottom)`).
+4. **Accessibility.** The accessible name is exactly "Нове бронювання";
+   the "+" is `aria-hidden`.
+5. **Nothing hidden under it.** The list gets bottom padding at least as
+   tall as the button, so the last card and its actions are never hidden
+   under it.
+6. **Styling.** Final styling belongs to the design pass (Stages 18-21);
+   placement and behaviour are decided here.
+7. **Required tests.**
+   - The button is present, with that name and `href="/services"`, when
+     there are upcoming appointments, and when there are only past ones.
+   - It is absent in the empty state (where "Забронювати візит" is still
+     present), while loading, and on the error state.
+   - The "+" is not part of the accessible name.
