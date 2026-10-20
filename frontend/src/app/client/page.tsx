@@ -427,8 +427,22 @@ export default function ClientDashboardPage() {
     const upcoming = appointments.filter((appointment) => isUpcoming(appointment, asOfMs));
     const past = appointments.filter((appointment) => !isUpcoming(appointment, asOfMs));
 
+    // New booking button (docs/DECISIONS.md § "New booking button on the
+    // client dashboard"): only in this branch, so never in the empty,
+    // loading or error state. Fixed above the iPhone safe area; the bottom
+    // padding below (5rem) is taller than the button (min 48px) plus its 1rem
+    // offset, so the last card's actions are never under it. Colours from
+    // the "Забронювати" link on /specialists/[id]; final styling is the
+    // design pass's (Stages 18-21).
     body = (
-      <>
+      <div className="flex flex-col gap-8 pb-[calc(5rem+env(safe-area-inset-bottom))]">
+        <Link
+          href="/services"
+          className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-10 inline-flex min-h-12 items-center rounded-full bg-zinc-900 px-5 text-white shadow dark:bg-zinc-100 dark:text-zinc-900"
+        >
+          <span aria-hidden="true">+</span> Нове бронювання
+        </Link>
+
         {actionError !== null ? <p role="alert">{actionError}</p> : null}
 
         <AppointmentSection
@@ -450,7 +464,7 @@ export default function ClientDashboardPage() {
           onPay={handlePay}
           payStates={payStates}
         />
-      </>
+      </div>
     );
   }
 

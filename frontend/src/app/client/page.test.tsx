@@ -1263,4 +1263,92 @@ describe("ClientDashboardPage", () => {
     expect(screen.queryByText("Найближчі")).not.toBeInTheDocument();
     expect(screen.queryByText("Минулі")).not.toBeInTheDocument();
   });
+
+  // --- 7. New booking button (docs/DECISIONS.md § "New booking button on
+  // the client dashboard") ----------------------------------------------
+  //
+  // Absence checks match the name by regex, so a button whose name wrongly
+  // includes the "+" still counts as present there.
+
+  describe("new booking button", () => {
+    const NEW_BOOKING = "Нове бронювання";
+    const NEW_BOOKING_ANY = /Нове бронювання/;
+
+    it("test_new_booking_button_links_to_services_with_upcoming_appointments", async () => {
+      mockApiRoutes({
+        list: () => pageOf([buildAppointment({ status: "confirmed", start_datetime: FUTURE })]),
+      });
+
+      renderDashboard();
+      await findCard("Manicure");
+
+      expect(screen.getByText("Найближчі")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: NEW_BOOKING })).toHaveAttribute("href", "/services");
+    });
+
+    it("test_new_booking_button_shown_with_only_past_appointments", async () => {
+      mockApiRoutes({
+        list: () => pageOf([buildAppointment({ status: "completed", start_datetime: PAST })]),
+      });
+
+      renderDashboard();
+      await findCard("Manicure");
+
+      expect(screen.getByText("Немає майбутніх записів.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: NEW_BOOKING })).toHaveAttribute("href", "/services");
+    });
+
+    it("test_new_booking_button_absent_in_empty_state", async () => {
+      mockApiRoutes({ list: emptyPage });
+
+      renderDashboard();
+
+      await waitFor(() =>
+        expect(screen.getByText("У вас поки немає жодного запису.")).toBeInTheDocument(),
+      );
+      expect(screen.getByRole("link", { name: "Забронювати візит" })).toHaveAttribute(
+        "href",
+        "/services",
+      );
+      expect(screen.queryByRole("link", { name: NEW_BOOKING_ANY })).not.toBeInTheDocument();
+    });
+
+    it("test_new_booking_button_absent_while_loading", async () => {
+      // The list request never settles, so the page stays on its loading
+      // text. The avatar appearing proves /auth/me/ resolved and the page
+      // has re-rendered past its first frame.
+      mockApiRoutes({ list: () => new Promise(() => {}) });
+
+      renderDashboard();
+
+      expect(await screen.findByRole("button", { name: "Меню акаунту" })).toBeInTheDocument();
+      expect(screen.getByText("Завантаження...")).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: NEW_BOOKING_ANY })).not.toBeInTheDocument();
+    });
+
+    it("test_new_booking_button_absent_on_error_state", async () => {
+      mockApiRoutes({ list: () => Promise.reject(new Error("network down")) });
+
+      renderDashboard();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Не вдалося завантажити ваші записи. Спробуйте ще раз.",
+      );
+      expect(screen.queryByRole("link", { name: NEW_BOOKING_ANY })).not.toBeInTheDocument();
+    });
+
+    it("test_new_booking_button_plus_is_not_part_of_the_accessible_name", async () => {
+      mockApiRoutes({
+        list: () => pageOf([buildAppointment({ status: "confirmed", start_datetime: FUTURE })]),
+      });
+
+      renderDashboard();
+      await findCard("Manicure");
+
+      const link = screen.getByRole("link", { name: NEW_BOOKING_ANY });
+      expect(link).toHaveAccessibleName(NEW_BOOKING);
+      expect(link).toHaveTextContent("+ Нове бронювання");
+      expect(within(link).getByText("+")).toHaveAttribute("aria-hidden", "true");
+    });
+  });
 });
