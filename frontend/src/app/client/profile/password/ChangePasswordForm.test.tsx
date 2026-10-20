@@ -132,9 +132,10 @@ describe("ChangePasswordForm", () => {
 
     expect(screen.getByRole("button", { name: SUBMIT_BUTTON })).toBeInTheDocument();
 
-    // docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 13.
+    // docs/DECISIONS.md § "Item 11 decisions (forgot password)", points 13
+    // and 8 (changed 20.10.2026).
     const forgotLink = screen.getByRole("link", { name: "Забули поточний пароль?" });
-    expect(forgotLink).toHaveAttribute("href", "/forgot-password");
+    expect(forgotLink).toHaveAttribute("href", "/forgot-password?from=change-password");
   });
 
   it("test_mismatched_confirmation_shows_message_and_sends_no_request", async () => {

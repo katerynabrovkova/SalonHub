@@ -24,7 +24,16 @@ import { resolveSlugFromHost } from "@/lib/routing/resolveSlugFromHost";
 // Mirrors AuthContext.tsx/login/page.tsx's PLATFORM_DOMAIN resolution.
 const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "salonhub.com";
 
-const LOGIN_PATH = "/login";
+/** Which back link to show (docs/DECISIONS.md § "Item 11 decisions (forgot
+ * password)", point 8, changed 20.10.2026). page.tsx maps the `from` query
+ * parameter to one of these on the server; the parameter itself never
+ * reaches an href. */
+export type ForgotPasswordBackLink = "login" | "change-password";
+
+const BACK_LINKS: Record<ForgotPasswordBackLink, { href: string; label: string }> = {
+  login: { href: "/login", label: "Вхід" },
+  "change-password": { href: "/client/profile/password", label: "Зміна пароля" },
+};
 
 function sendErrorMessage(err: unknown): string {
   if (err instanceof TypeError) {
@@ -41,12 +50,17 @@ function sendErrorMessage(err: unknown): string {
   return "Не вдалося надіслати. Спробуйте ще раз.";
 }
 
-export default function ForgotPasswordForm() {
+export default function ForgotPasswordForm({
+  backLink = "login",
+}: {
+  backLink?: ForgotPasswordBackLink;
+}) {
   const [email, setEmail] = useState("");
   const [sentEmail, setSentEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resent, setResent] = useState(false);
   const [pending, setPending] = useState(false);
+  const back = BACK_LINKS[backLink];
 
   // Guarded: this is a "use client" component but Next.js still renders it
   // once on the server for the initial HTML, where `window` doesn't exist.
@@ -103,8 +117,8 @@ export default function ForgotPasswordForm() {
 
   return (
     <main className="flex flex-col gap-8 p-8">
-      <Link href={LOGIN_PATH} className="text-sm text-blue-600 underline">
-        &larr; Вхід
+      <Link href={back.href} className="text-sm text-blue-600 underline">
+        &larr; {back.label}
       </Link>
 
       <h1 className="text-xl font-semibold">Відновлення пароля</h1>

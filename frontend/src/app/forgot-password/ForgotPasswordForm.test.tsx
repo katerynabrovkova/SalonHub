@@ -220,3 +220,30 @@ describe("ForgotPasswordForm", () => {
     expect(screen.queryByText(SENT_MESSAGE)).not.toBeInTheDocument();
   });
 });
+
+describe("ForgotPasswordForm back link", () => {
+  // docs/DECISIONS.md § "Item 11 decisions (forgot password)", point 8,
+  // changed 20.10.2026. Which prop each `from` value maps to is tested in
+  // page.test.tsx.
+
+  it("test_change_password_back_link_links_to_change_password", () => {
+    render(<ForgotPasswordForm backLink="change-password" />);
+
+    const link = screen.getByRole("link", { name: /Зміна пароля/ });
+    expect(link).toHaveAttribute("href", "/client/profile/password");
+    expect(link).toHaveTextContent("← Зміна пароля");
+    expect(screen.queryByRole("link", { name: /Вхід/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { name: "login", props: { backLink: "login" as const } },
+    { name: "default", props: {} },
+  ])("test_login_back_link_links_to_login_($name)", ({ props }) => {
+    render(<ForgotPasswordForm {...props} />);
+
+    const link = screen.getByRole("link", { name: /Вхід/ });
+    expect(link).toHaveAttribute("href", "/login");
+    expect(link).toHaveTextContent("← Вхід");
+    expect(screen.queryByRole("link", { name: /Зміна пароля/ })).not.toBeInTheDocument();
+  });
+});

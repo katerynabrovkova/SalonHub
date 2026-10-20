@@ -32,7 +32,9 @@ const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "salonhub.com
 
 const PROFILE_PATH = "/client/profile";
 const SUCCESS_PATH = "/login?notice=password_changed";
-const FORGOT_PASSWORD_PATH = "/forgot-password";
+// `from` picks the forgot-password page's back link (docs/DECISIONS.md
+// § "Item 11 decisions (forgot password)", point 8, changed 20.10.2026).
+const FORGOT_PASSWORD_PATH = "/forgot-password?from=change-password";
 
 function changeErrorMessage(err: unknown): string {
   // Same connectivity reading as item 10's EditProfileField.
