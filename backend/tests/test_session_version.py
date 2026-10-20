@@ -272,3 +272,56 @@ def test_bumping_one_account_does_not_affect_another_in_the_same_salon(salon) ->
     _bump(account_a)
 
     assert _me_with_access(salon, login_b.cookies[ACCESS_COOKIE].value).status_code == 200
+
+
+# --- 13-15. reset through the real confirm endpoint: isolation, refresh ---
+
+
+def test_reset_in_one_salon_leaves_the_same_email_account_in_another_salon_untouched(
+    salon, other_salon
+) -> None:
+    account_a = _make_account(salon, "same@example.com")
+    account_b = _make_account(other_salon, "same@example.com")
+    assert account_b.pk > account_a.pk
+    login_a = _login(APIClient(enforce_csrf_checks=True), salon, account_a)
+    _login(APIClient(enforce_csrf_checks=True), other_salon, account_b)
+    before_a = _session_version(account_a)
+    before_b = _session_version(account_b)
+
+    response = _reset_confirm(other_salon, account_b, password=NEW_PASSWORD)
+
+    assert response.status_code == 204
+    assert _session_version(account_b) == before_b + 1
+    row_a = Account.unscoped_objects.get(pk=account_a.pk)
+    assert row_a.check_password(STRONG_PASSWORD)
+    assert row_a.session_version == before_a
+    assert _me_with_access(salon, login_a.cookies[ACCESS_COOKIE].value).status_code == 200
+
+
+def test_reset_of_one_account_leaves_another_account_in_the_same_salon_untouched(salon) -> None:
+    account_a = _make_account(salon, "a@example.com")
+    account_b = _make_account(salon, "b@example.com")
+    assert account_b.pk > account_a.pk
+    login_a = _login(APIClient(enforce_csrf_checks=True), salon, account_a)
+    login_b = _login(APIClient(enforce_csrf_checks=True), salon, account_b)
+    before_a = _session_version(account_a)
+
+    response = _reset_confirm(salon, account_b, password=NEW_PASSWORD)
+
+    assert response.status_code == 204
+    assert _me_with_access(salon, login_b.cookies[ACCESS_COOKIE].value).status_code == 401
+    assert _session_version(account_a) == before_a
+    assert _me_with_access(salon, login_a.cookies[ACCESS_COOKIE].value).status_code == 200
+
+
+def test_after_a_reset_the_old_refresh_cookie_gets_401_and_sets_no_cookies(client, salon) -> None:
+    account = _make_account(salon, "a@example.com")
+    _login(client, salon, account)
+
+    reset = _reset_confirm(salon, account, password=NEW_PASSWORD)
+    response = _refresh(client, salon)
+
+    assert reset.status_code == 204
+    assert response.status_code == 401
+    assert not _sets_new_cookie(response, ACCESS_COOKIE)
+    assert not _sets_new_cookie(response, REFRESH_COOKIE)
