@@ -35,10 +35,10 @@ current stage. `Stage N` references elsewhere point at this list.
 11.5. Content localization — per-salon language, translatable catalog /
     salon profile / notification templates. Numbered 11.5 so it doesn't
     renumber every existing `Stage N` reference. ✓
-12. Frontend skeleton — design system, API client, auth
-13. Frontend catalog / service / specialists / reviews
-14. Frontend booking flow + payment + confirmation
-15. Frontend customer account + guest token management
+12. Frontend skeleton — design system, API client, auth ✓
+13. Frontend catalog / service / specialists / reviews ✓
+14. Frontend booking flow + payment + confirmation ✓
+15. Frontend customer account + guest token management ✓ (20.10.2026)
 16. AI assistant backend
 17. AI assistant frontend widget
 18. Admin shell + dashboard + appointments list
@@ -3998,7 +3998,8 @@ order.
    - the ESLint fix in `client/page.tsx`, see the resolved ESLint known
      issue;
    - `ruff format` of the two backend files (line joins only).
-6. **Mark Stage 15 done.** Pending.
+6. **Mark Stage 15 done.** Done 20.10.2026: marked ✓ in "Agreed stage
+   order".
 
 Found during Stage 15, fixed:
 
@@ -4014,6 +4015,17 @@ Found during Stage 15, deferred:
 - `formatPrice` shows ISO codes for some currencies ("24,00 USD", "24,00 EUR") 
  but a symbol for UAH ("₴"), and always ",00" for whole amounts. 
  Decide symbols and whole-amount format in the design stage.
+
+**Stage 15 summary.** Done 20.10.2026.
+
+- Built: all 14 scope items in § Stage 15 planning, from the account
+  appointments endpoint to the "Оплатити" action on the dashboard.
+- Found and fixed during the stage: "Appointment times in the salon's time
+  zone", "Persisted refund decision (`Payment.refund_due`)", "Refund retry
+  sweep", "Account linked to a Customer held by another Account", and a
+  reliable frontend type-check (`npm run typecheck`, checklist item 5).
+- Carried over: the deferred list under "Agreed stage order", the "Found
+  during Stage 15, deferred" list above, and the open "Known issue" entries.
 
 ### Session renewal and session lifetime, decided 21.09.2026
 
