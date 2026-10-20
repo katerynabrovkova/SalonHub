@@ -19,6 +19,8 @@ RED shape: the route exists but its view is a stub answering 501, so each
 behaviour test fails on its first status assertion.
 """
 
+import re
+
 import pytest
 from django.core import mail
 from django.middleware.csrf import get_token
@@ -28,6 +30,7 @@ from rest_framework.test import APIClient
 from accounts.models import Account, AccountRole
 from core.i18n import resolve_translation
 from core.tenancy import tenant_context
+from core.urls import build_salon_frontend_url
 
 pytestmark = pytest.mark.django_db
 
@@ -46,9 +49,9 @@ SIGNED_OUT_TEXT = (
     "Пароль до вашого акаунта в салоні {salon} щойно змінено. "
     "Ви вийшли з акаунта на всіх пристроях."
 )
-NOT_YOU_TEXT = (
-    "Якщо ви не змінювали пароль, відновіть доступ через «Забули пароль?» на сторінці входу."
-)
+# Point 6, changed 20.10.2026: a link to the same salon's /forgot-password.
+NOT_YOU_TEXT = "Якщо ви не змінювали пароль, відновіть доступ за посиланням: {url}"
+URL_PATTERN = re.compile(r"https?://\S+")
 
 
 @pytest.fixture
@@ -120,6 +123,10 @@ def _post(client, salon, current: str = PASSWORD, new: str = NEW_PASSWORD, csrf:
 
 def _salon_name(salon) -> str:
     return resolve_translation(salon.name, "uk")
+
+
+def _forgot_password_url(salon) -> str:
+    return build_salon_frontend_url(salon.slug, "/forgot-password")
 
 
 def _reload_account(account) -> Account:
@@ -355,8 +362,51 @@ def test_success_queues_one_notice_on_commit_to_the_current_address(
     salon_name = _salon_name(salon)
     body = letter.body
     signed_out = SIGNED_OUT_TEXT.format(salon=salon_name)
+    not_you = NOT_YOU_TEXT.format(url=_forgot_password_url(salon))
     assert GREETING in body
     assert signed_out in body
-    assert NOT_YOU_TEXT in body
-    assert body.index(GREETING) < body.index(signed_out) < body.index(NOT_YOU_TEXT)
+    assert not_you in body
+    assert body.index(GREETING) < body.index(signed_out) < body.index(not_you)
     assert body.rstrip().endswith(salon_name)
+
+
+def test_notice_contains_exactly_one_url_to_the_salons_forgot_password_page(
+    csrf_client, salon, customer_account, django_capture_on_commit_callbacks
+):
+    csrf = _login(csrf_client, salon, customer_account)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _post(csrf_client, salon, csrf=csrf)
+
+    assert response.status_code == 204
+    assert len(mail.outbox) == 1
+    assert URL_PATTERN.findall(mail.outbox[0].body) == [_forgot_password_url(salon)]
+
+
+def test_notice_after_change_on_salon_b_links_to_salon_b_only(
+    csrf_client, salon, other_salon, customer_account, django_capture_on_commit_callbacks
+):
+    # customer_account lives in salon A; the change is made on salon B, whose
+    # row is created later and so has the higher pk.
+    with tenant_context(other_salon.id):
+        other_account = Account.objects.create_account(
+            salon=other_salon,
+            email="bob@example.com",
+            password=PASSWORD,
+            role=AccountRole.CLIENT,
+        )
+    csrf = _login(csrf_client, other_salon, other_account)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _post(csrf_client, other_salon, csrf=csrf)
+
+    assert response.status_code == 204
+    assert len(mail.outbox) == 1
+    letter = mail.outbox[0]
+    assert letter.to == [other_account.email]
+    urls = URL_PATTERN.findall(letter.body)
+    assert urls == [_forgot_password_url(other_salon)]
+    assert other_salon.slug in urls[0]
+    assert salon.slug not in urls[0]
+    assert _salon_name(other_salon) in letter.body
+    assert _salon_name(salon) not in letter.body

@@ -574,6 +574,7 @@ class MePasswordChangeView(APIView):
         serializer.is_valid(raise_exception=True)
 
         salon = get_object_or_404(Salon, pk=get_current_salon_id())
+        salon_slug = salon.slug
         salon_name = resolve_translation(salon.name, "uk")
 
         with transaction.atomic():
@@ -584,7 +585,9 @@ class MePasswordChangeView(APIView):
             locked.save(update_fields=["password"])
             Account.objects.filter(pk=locked.pk).update(session_version=F("session_version") + 1)
             recipient = locked.email
-            transaction.on_commit(lambda: send_password_changed_email.delay(recipient, salon_name))
+            transaction.on_commit(
+                lambda: send_password_changed_email.delay(recipient, salon_slug, salon_name)
+            )
 
         response = Response(status=status.HTTP_204_NO_CONTENT)
         clear_auth_cookies(response, salon_slug=str(kwargs["slug"]))

@@ -115,18 +115,19 @@ def send_password_reset_email(
 
 
 @shared_task
-def send_password_changed_email(recipient_email: str, salon_name: str) -> None:
+def send_password_changed_email(recipient_email: str, salon_slug: str, salon_name: str) -> None:
     """Notice after a password change (docs/DECISIONS.md § "Item 9 decisions
     (change password): ending sessions", "Endpoint and page, decided
-    06.10.2026", point 6)."""
+    06.10.2026", point 6, changed 20.10.2026). The view resolves
+    ``salon_name``."""
+    link = build_salon_frontend_url(salon_slug, "/forgot-password")
     send_mail(
         subject="Пароль змінено",
         message=(
             f"Вітаємо!\n\n"
             f"Пароль до вашого акаунта в салоні {salon_name} щойно змінено. "
             f"Ви вийшли з акаунта на всіх пристроях.\n\n"
-            f"Якщо ви не змінювали пароль, відновіть доступ через «Забули пароль?» "
-            f"на сторінці входу.\n\n"
+            f"Якщо ви не змінювали пароль, відновіть доступ за посиланням: {link}\n\n"
             f"{salon_name}"
         ),
         from_email=settings.DEFAULT_FROM_EMAIL,
