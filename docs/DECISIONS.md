@@ -104,6 +104,14 @@ on booking step 3 (see its known-issue entry).
   in production, refuse to start with `MockPaymentProvider`. Its webhook
   accepts any signature, so anyone could confirm a booking without paying.
   Add a startup check.
+- Recorded 20.10.2026: where to send the client after logout (login page,
+  salon home or `/services`) is decided in the design pass, together with
+  the salon home page. Today: both "Вийти" buttons (the avatar menu,
+  `client/ClientAvatarMenu.tsx`, and the profile page,
+  `client/profile/page.tsx`) ask for confirmation, call `logout()` and then
+  `router.replace("/login")`: plain `/login`, no notice, no saved return
+  path (`logout()` clears it). The password-change and password-reset
+  forms also end the session, but go to `/login?notice=password_changed`.
 
 ## Open questions
 
@@ -3966,11 +3974,11 @@ order.
    correct the "bare 500" note. Done 20.10.2026: decided, implemented and
    tested, the note marked superseded; see "Account linked to a Customer
    held by another Account".
-3. **"Нове бронювання" link** on a non-empty client dashboard. Decided
+3. **"Нове бронювання" link** on a non-empty client dashboard. Done
    20.10.2026: see "New booking button on the client dashboard".
-   Implementation and tests pending.
 4. **Logout target.** Deferred to the design stage; to be recorded in the
-   deferred list under "Agreed stage order". Pending.
+   deferred list under "Agreed stage order". Done 20.10.2026: recorded in
+   the deferred list.
 5. **Cleanup.** Pending. Covers:
    - "Known issue: `tsc --noEmit` does not type-check the project";
    - "Known issue: ESLint `react-hooks/set-state-in-effect` in the client
@@ -5602,6 +5610,13 @@ the salon admin panel built in Stages 18-21.
 
 Decided 20.10.2026, in discussion, after the recon of the same day. Closes
 Stage 15 closure checklist item 3.
+
+**Implemented, 20.10.2026.** Shown only with at least one appointment;
+a link to `/services`; a pill fixed to the bottom-right with the safe-area
+offset; bottom padding on the list. The colour is reused from the
+"Забронювати" link on `/specialists/[id]`. Mutation testing killed 6 of 6
+mutations. Browser-checked at 390px width. The iPhone safe-area offset
+cannot be checked in desktop Chrome and still needs a real device.
 
 1. **When it is shown.** Only when the appointment list has loaded and
    contains at least one appointment, upcoming or past. Not shown in the
