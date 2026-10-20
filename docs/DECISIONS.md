@@ -121,6 +121,16 @@ on booking step 3 (see its known-issue entry).
   `router.replace("/login")`: plain `/login`, no notice, no saved return
   path (`logout()` clears it). The password-change and password-reset
   forms also end the session, but go to `/login?notice=password_changed`.
+- Recorded 20.10.2026: `/login` renders the form for an already
+  authenticated user, which looks like a logout; consider redirecting
+  authenticated users (option E, 20.10.2026). Found in manual testing via
+  the forgot-password back link, see "Item 11 decisions (forgot
+  password)", point 8.
+- Recorded 20.10.2026: login notice ('Пароль змінено...') is read on the
+  client and pops in after hydration, shifting the form down. The
+  useSyncExternalStore precedent cited in Item 9 point 3 applies to URL
+  hashes, not query strings; consider reading notice server-side together
+  with option E in the design pass (20.10.2026).
 
 ## Open questions
 
@@ -5037,6 +5047,18 @@ Frontend
    per IP and reveals nothing about accounts); `TypeError` "Не вдалося
    з'єднатися. Перевірте інтернет і спробуйте ще раз."; anything else
    "Не вдалося надіслати. Спробуйте ще раз."
+   Changed 20.10.2026, found in manual testing after Stage 15 closure:
+   from the change-password page the fixed "← Вхід" landed a logged-in
+   user on `/login`, which looks like a logout. The back link now depends
+   on a `from` query parameter, read on the server from the page's
+   `searchParams` (so the label doesn't switch after the page loads) and
+   passed to the form as a fixed value.
+   "← Зміна пароля" to `/client/profile/password` only for the exact
+   value `change-password` (an allowlist; the value is never used as a
+   URL); a missing or any other value, including paths and full URLs,
+   keeps "← Вхід" to `/login`. Only the change-password link
+   (point 13) passes `?from=change-password`; the login page and the
+   reset page's "Надіслати новий лист" link are unchanged.
 9. **Sent screen.** "Якщо ця адреса зареєстрована, ми надіслали на неї
    лист із посиланням. Посилання діє 1 годину." with "Надіслати ще раз"
    (success text "Лист надіслано ще раз.", same errors as point 8) and
