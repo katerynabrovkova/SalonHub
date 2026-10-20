@@ -76,7 +76,16 @@ on booking step 3 (see its known-issue entry).
   `lang="en"`), `login/page.tsx`, `page.tsx`, `register/page.tsx` (shows
   backend messages as-is, including `apiRequest`'s "Request failed."
   fallback), `reviews/page.tsx`, `services/page.tsx`, `specialists/page.tsx`,
-  `specialists/[id]/page.tsx`, `verify-email/page.tsx`.
+  `specialists/[id]/page.tsx`, `verify-email/page.tsx`. Done 20.10.2026:
+  replaced in these files and in two more found during the pass,
+  `confirm-email-change/page.tsx` and `reset-password/page.tsx` (the "still
+  in development" fallback); `lang="uk"`; the "Request failed." fallback is
+  now "Не вдалося виконати запит." in `lib/api/client.ts`,
+  `lib/api/guestClient.ts` and `lib/booking/createGuestBooking.ts`. Decided
+  by Katya: the home page's salon line became "Сторінка салону в розробці."
+  without the slug (the page is replaced by the landing page in the design
+  pass); "Email" labels and "SalonHub" stay as they are; developer-facing
+  errors and Next.js's built-in 404/error pages are out of scope.
 - Recorded 02.10.2026: guest booking does not normalize `Customer.email`.
   `customer_email` is a plain `EmailField` (`backend/booking/serializers.py:260`)
   that only trims whitespace, and `get_or_create_guest_customer` stores it
@@ -172,7 +181,9 @@ on them.
   the candidate list jumps (…01:40, 02:00, 03:00, 03:20…) because 02:xx
   doesn't exist locally. Show as-is / label / suppress — a presentation
   decision for the local-time formatting substage.
-- **UI chrome i18n — not yet scheduled to a specific stage.** Static
+- **UI chrome i18n — belongs to Stages 18-21** (clarification of
+  20.09.2026 under "Agreed stage order"; the exact scope is decided when
+  Stage 18 starts). Static
   interface labels (button text, navigation, empty-state messages — e.g.
   "Далі", "Назад", "Забронювати", "Інформація про послугу") have no
   translation mechanism. This is distinct from the existing Stage 11.5
@@ -183,9 +194,7 @@ on them.
   concern. Until UI i18n lands, all interface chrome is hardcoded
   Ukrainian, with no locale-switching mechanism. `docs/ARCHITECTURE.md`
   §§ on Stage 11.5 notification formatting record the same carve-out for
-  admin/staff interface language. Flagged here rather than left to fall
-  out of a stage's scope discovery, since no stage in the roadmap above
-  currently commits to building it.
+  admin/staff interface language.
 - **Max-advance boundary at local midnight can land on a non-existent
   local time.** In zones whose DST transition is exactly at midnight
   (`America/Santiago`, `America/Havana`), `zoneinfo` shifts rather than
