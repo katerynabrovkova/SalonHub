@@ -13,9 +13,7 @@ DEBUG = env.bool("DJANGO_DEBUG", default=True)
 # actually effective in the normal docker compose setup. Kept in sync with
 # .env/.env.example so a from-scratch dev setup that skips copying .env
 # still works.
-ALLOWED_HOSTS = env.list(
-    "DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1", ".localhost"]
-)
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1", ".localhost"])
 
 # TEMPORARY — lets a local ngrok tunnel through Django's ALLOWED_HOSTS check
 # so WayForPay's real sandbox webhook can reach the local backend. Empty

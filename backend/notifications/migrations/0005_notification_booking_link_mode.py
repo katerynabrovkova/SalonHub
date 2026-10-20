@@ -20,9 +20,7 @@ def backfill_booking_link_mode(apps, schema_editor):
     delete_blank_email_users.
     """
     Notification = apps.get_model("notifications", "Notification")
-    Notification.objects.filter(trigger_type="booking_created").update(
-        booking_link_mode="guest"
-    )
+    Notification.objects.filter(trigger_type="booking_created").update(booking_link_mode="guest")
 
 
 class Migration(migrations.Migration):
