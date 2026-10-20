@@ -5535,6 +5535,21 @@ dashboard cards".
   as missing in `src/app/layout.tsx`, but only because the generated
   Next.js types are excluded.
 
+**Resolved 20.10.2026.**
+
+- The 19.10 failure came from a corrupted `.next/dev/types` file, not from
+  a permanent break. `next dev` writes `routes.d.ts` and `validator.ts`
+  with a plain, non-atomic `writeFile`, and both files had leftover text
+  after their real end. After a container restart the files were
+  regenerated cleanly, and `tsc --noEmit` checked all 134 source files.
+- The command also always exited 2, because `tsc` could not write
+  `tsconfig.tsbuildinfo` into the root-owned `/app` bind mount
+  (`incremental: true` in `tsconfig.json`).
+- Fix: the `typecheck` npm script, `tsc --noEmit --incremental false`, run
+  as `docker compose exec frontend npm run typecheck`. CLAUDE.md now says
+  that errors inside `.next/` mean corrupted generated types and the
+  frontend container should be restarted. `tsconfig.json` is unchanged.
+
 ### Known issue: ESLint `react-hooks/set-state-in-effect` in the client dashboard
 
 Recorded 19.10.2026, during the frontend GREEN for "Price and prepayment on

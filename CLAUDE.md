@@ -263,4 +263,17 @@ docker compose exec backend ruff check .
 docker compose exec backend ruff format --check .
 docker compose exec backend mypy .
 docker compose exec frontend npm test
+docker compose exec frontend npm run typecheck
 ```
+
+- **Errors reported inside `frontend/.next/` mean the generated types are corrupt**,
+  not that the source is broken: `next dev` rewrites `.next/dev/types/*` non-atomically
+  and can leave a stale tail behind. Restart the frontend container
+  (`docker compose restart frontend`) and re-run the type-check. The script passes
+  `--incremental false` because `tsc` cannot write `tsconfig.tsbuildinfo` into the
+  root-owned `/app` bind mount; without it the command always exits 2.
+- **Never run `npx <tool>` for a tool the project already has; use its npm script.**
+  If `npx` doesn't resolve the project's own binary (e.g. it runs from another
+  directory), it downloads and runs whatever unrelated package has that name from the
+  registry: `npx tsc` outside `/app` fetched the stub package `tsc@2.0.4`, not
+  TypeScript.
