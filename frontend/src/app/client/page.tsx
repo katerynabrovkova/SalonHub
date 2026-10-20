@@ -351,14 +351,19 @@ export default function ClientDashboardPage() {
       ? (resolveSlugFromHost(window.location.host, PLATFORM_DOMAIN) ?? "")
       : "";
 
-  async function loadAppointments() {
-    try {
-      const result = await getMyAppointments(slug);
-      setLoaded({ appointments: result, asOfMs: Date.now() });
-      setLoadError(null);
-    } catch {
-      setLoadError("Не вдалося завантажити ваші записи. Спробуйте ще раз.");
-    }
+  // State is set only in the request's settle callbacks, so the mount
+  // effect below only starts the request (same as VerifyEmailStatus.tsx);
+  // the page starts in the loading state (`loaded === null`).
+  function loadAppointments(): Promise<void> {
+    return getMyAppointments(slug).then(
+      (result) => {
+        setLoaded({ appointments: result, asOfMs: Date.now() });
+        setLoadError(null);
+      },
+      () => {
+        setLoadError("Не вдалося завантажити ваші записи. Спробуйте ще раз.");
+      },
+    );
   }
 
   useEffect(() => {

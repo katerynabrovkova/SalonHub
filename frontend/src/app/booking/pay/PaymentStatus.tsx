@@ -3,10 +3,16 @@
 /**
  * Booking step 5 client half (docs/DECISIONS.md § Stage 14 step 5:
  * `/booking/pay` architecture). Reads `appointment_id`/`token` from
- * `window.location.hash` inside a `useEffect` — unavailable during any
- * server render, hence a "use client" component receiving only `slug` as a
- * prop, with the server component above it doing no fragment handling of
- * its own.
+ * `window.location.hash` — unavailable during any server render, hence a
+ * "use client" component receiving only `slug` as a prop, with the server
+ * component above it doing no fragment handling of its own.
+ *
+ * The hash is read through `useSyncExternalStore` (null on the server
+ * render), so a missing/malformed fragment is derived during render instead
+ * of being set from inside an effect, like `VerifyEmailStatus.tsx`. Its
+ * subscribe never fires: the fragment is read when the page loads and a
+ * later hash change is ignored. `PaymentFlow` fetches the detail once on
+ * mount and sets state only after the request settles.
  *
  * Mirrors ContactInfoForm/LoginPage's conventions: a single
  * `error: string | null`, a `pending: boolean`, submit disabled while
@@ -24,7 +30,7 @@
  * existing pattern of an explicit user action (the "Оплатити" button)
  * rather than anything auto-navigating on its own.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { guestApiRequest } from "@/lib/api/guestClient";
 
@@ -71,34 +77,61 @@ function parseFragment(hash: string): { appointmentId: number; token: string } |
   return { appointmentId, token };
 }
 
+function subscribeNever(): () => void {
+  return () => {};
+}
+
+function readHash(): string | null {
+  return window.location.hash;
+}
+
+function readServerHash(): string | null {
+  return null;
+}
+
 export default function PaymentStatus({ slug }: PaymentStatusProps) {
+  const hash = useSyncExternalStore(subscribeNever, readHash, readServerHash);
+
+  if (hash === null) {
+    return <p>Завантаження...</p>;
+  }
+
+  const parsed = parseFragment(hash);
+  if (parsed === null) {
+    return <p>{INVALID_LINK_MESSAGE}</p>;
+  }
+
+  return <PaymentFlow slug={slug} appointmentId={parsed.appointmentId} token={parsed.token} />;
+}
+
+interface PaymentFlowProps {
+  slug: string;
+  appointmentId: number;
+  token: string;
+}
+
+function PaymentFlow({ slug, appointmentId, token }: PaymentFlowProps) {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
-    const parsed = parseFragment(window.location.hash);
-    if (parsed === null) {
-      setPhase({ kind: "invalid" });
-      return;
-    }
-
     let cancelled = false;
 
     void (async () => {
       try {
         const appointment = await guestApiRequest<AppointmentDetail>(
           slug,
-          `/guest/appointments/${parsed.appointmentId}/`,
-          parsed.token,
+          `/guest/appointments/${appointmentId}/`,
+          token,
         );
         if (cancelled) {
           return;
         }
         setPhase({
           kind: "status",
-          appointmentId: parsed.appointmentId,
-          token: parsed.token,
+          appointmentId,
+          token,
           status: appointment.status,
         });
       } catch {
