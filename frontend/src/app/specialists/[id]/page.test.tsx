@@ -47,6 +47,7 @@ function specialist(overrides: Partial<SpecialistDetail> = {}): SpecialistDetail
     photo: "https://example.com/photos/olena.jpg",
     is_active: true,
     services: [{ id: 10, name: "Manicure" }],
+    services_detail: [],
     average_rating: 4.5,
     review_count: 2,
     created_at: "2026-01-01T00:00:00Z",

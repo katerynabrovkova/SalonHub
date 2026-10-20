@@ -23,7 +23,11 @@ function findCall(path: string) {
 
 async function fillForm(
   user: ReturnType<typeof userEvent.setup>,
-  { email = "person@example.com", password = "correct-horse-battery-staple", confirm = password } = {},
+  {
+    email = "person@example.com",
+    password = "correct-horse-battery-staple",
+    confirm = password,
+  }: { email?: string; password?: string; confirm?: string } = {},
 ) {
   await user.type(screen.getByLabelText(/^email$/i), email);
   await user.type(screen.getByLabelText(/^пароль$/i), password);
