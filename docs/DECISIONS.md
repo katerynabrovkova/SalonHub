@@ -3817,6 +3817,21 @@ Scope, in build order:
    Not reachable today — `Account.email` cannot change by any existing
    path — so nothing is fixed in item 5 for this; it is this item's scope
    once it lands.
+
+   **Superseded 20.10.2026 by "Account linked to a Customer held by
+   another Account" below.** Kept for history. What was wrong in the
+   "bare 500" paragraph above, found in the recon of 20.10.2026:
+   - The `IntegrityError` *is* translated. Its cause is a
+     `UniqueViolation`, so `core.exceptions.exception_handler` answers
+     400 `unique_violation`, not 500. "No data leaks or gets overwritten"
+     was correct.
+   - The trigger it describes no longer leads to a relink. Item 8's
+     confirm step changes the linked Customer's email together with the
+     Account's, so a later Account registered with the old address gets
+     its own Customer.
+   - It names only booking. Verification (`_verify_and_link`) fails the
+     same way, and its rollback also undoes `email_verified_at`, so the
+     second Account can never verify.
 9. **Backend + frontend: change password (authenticated).** Requires
    the current password — distinct from the existing unauthenticated
    `PasswordResetConfirmView` flow (which stays as-is for "forgot
@@ -3948,7 +3963,9 @@ order.
    implemented, browser-checked, "implemented" note added.
 2. **Item 8 relink.** Decide what `create_account_appointment` does when
    the Customer it finds is linked to a different Account, add a test, and
-   correct the "bare 500" note. Pending.
+   correct the "bare 500" note. Decided 20.10.2026 and the note marked
+   superseded: see "Account linked to a Customer held by another Account".
+   Implementation and tests pending.
 3. **"Нове бронювання" link** on a non-empty client dashboard. Pending.
 4. **Logout target.** Deferred to the design stage; to be recorded in the
    deferred list under "Agreed stage order". Pending.
@@ -4507,6 +4524,8 @@ Decided 30.09.2026, in discussion, before item 8 starts.
    looks, from reading `core/exceptions.py`, like a 400
    `unique_violation`. To be confirmed by a test during item 8, and that
    note corrected then.
+   Confirmed 20.10.2026: 400 `unique_violation`; see "Account linked to a
+   Customer held by another Account".
 
    Design details, decided 30.09.2026:
 
@@ -5516,3 +5535,54 @@ dashboard cards".
   `react-hooks/set-state-in-effect`.
 - Pre-existing: the committed version of the file has the same error. The
   money-line change did not touch that effect.
+
+### Account linked to a Customer held by another Account
+
+Decided 20.10.2026, in discussion, after the recon of the same day. Closes
+Stage 15 closure checklist item 2. Supersedes the "bare 500" note in §
+Stage 15 planning, item 8.
+
+1. **Facts from the recon.**
+   - The state (account B's email matches a Customer already linked to
+     account A) arises only from Django admin edits. See "Known issue:
+     Admin can create mismatched Account/Customer links".
+   - No API path lets B reach A's Customer, A's appointments in
+     `appointments/mine/`, cancel them, or receive A's notifications.
+   - Today both booking (`create_account_appointment`) and verification
+     (`_verify_and_link`) end in a 400 `unique_violation` from the
+     `Account.customer` one-to-one constraint and roll back. Nothing is
+     changed.
+2. **Booking.** In `create_account_appointment`, before linking: if the
+   matched Customer is already linked to another Account, raise a
+   dedicated error mapped to 409 with code `account_link_unavailable` and
+   the neutral message "Не вдалося оформити запис з облікового запису.
+   Зверніться до салону." The message must not reveal that another
+   account exists (anti-enumeration). The `IntegrityError` translation in
+   `core.exceptions.exception_handler` stays as the backstop.
+3. **Verification.** In `_verify_and_link`, in the same situation: set
+   `email_verified_at`, skip the link, and return the normal success
+   response, so B is never locked out of verification.
+4. **Frontend.** `AccountBookingForm` shows that message for
+   `account_link_unavailable`.
+5. **Required tests**, with two accounts in the same salon:
+   - booking returns 409 with `account_link_unavailable`, creates nothing,
+     and leaves the Customer's name and phone unchanged;
+   - verification succeeds without linking;
+   - B's `appointments/mine/` stays empty, and B cannot cancel A's
+     appointment (404);
+   - a frontend test for the message.
+
+### Known issue: Admin can create mismatched Account/Customer links
+
+Recorded 20.10.2026, from the recon for "Account linked to a Customer held
+by another Account". Deferred to Stage 21. Applies to any place that edits
+Account/Customer links or a linked Customer's email: the Django admin and
+the salon admin panel built in Stages 18-21.
+
+- `AccountAdmin` can link any Customer to an Account.
+- `CustomerAdmin` can change a linked Customer's email. Notifications go
+  to `Customer.email`, so this can route A's notifications to someone
+  else's mailbox.
+- Deleting an Account leaves its Customer unlinked, and a new account with
+  the same email can claim it.
+- Planned fix: validation in the admin forms (option C from the recon).
