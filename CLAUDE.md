@@ -272,6 +272,17 @@ docker compose exec frontend npm run typecheck
   (`docker compose restart frontend`) and re-run the type-check. The script passes
   `--incremental false` because `tsc` cannot write `tsconfig.tsbuildinfo` into the
   root-owned `/app` bind mount; without it the command always exits 2.
+- **After `makemigrations`, run `ruff check --fix` and `ruff format` on the new
+  migration files** before reporting the work as done. Django writes them in its
+  own style (single quotes, its import order), which `ruff format --check .`
+  rejects.
+- **The green gate before any commit is the full project-wide run** —
+  `ruff check .`, `ruff format --check .`, `mypy .` and `pytest`, plus the
+  frontend checks above when frontend files changed — not a run limited to the
+  changed files. Pre-existing failures in untouched files are reported to Katya,
+  not silently fixed. Reason: on 20.10.2026 ruff failures from Stage 13
+  migrations and a serializer were found five weeks later because only selected
+  files had been checked.
 - **Never run `npx <tool>` for a tool the project already has; use its npm script.**
   If `npx` doesn't resolve the project's own binary (e.g. it runs from another
   directory), it downloads and runs whatever unrelated package has that name from the
