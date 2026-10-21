@@ -5595,6 +5595,21 @@ Recorded 19.10.2026, while writing the tests for "Persisted refund decision
   in `test_payments_refund_due.py`
   (`test_webhook_rechecks_payment_status_after_locking`) does.
 
+### Known issue: `WayForPayProvider` must be cleaned up before it is wired
+
+Found 21.10.2026 during the Stage 16 sub-step 3 recon.
+
+- `payments/providers/wayforpay.py` has "TEMPORARY" diagnostic logging in
+  `start_payment()` (comment at ~lines 170-174): on failure it logs the
+  network exception, or WayForPay's response status and body (~lines 193
+  and 209). Remove it before WayForPay is wired. `refund()` logs the
+  response body on failure too (~line 279), without the "TEMPORARY"
+  marker; review it at the same time.
+- "WayForPayProvider: first-time technical conventions" says the adapter
+  raises no custom exceptions and `payments/services.py` does the
+  wrapping, but `refund()` raises `PaymentProviderError` itself (~lines
+  266 and 281). Reconcile the code and this entry when WayForPay is wired.
+
 ### Known issue: `tsc --noEmit` does not type-check the project
 
 Recorded 19.10.2026, during the frontend GREEN for "Price and prepayment on
@@ -6077,6 +6092,55 @@ are reachable only in local dev.
   Hard delete is allowed: nothing references FAQ items.
 - **Admin:** `SalonScopedAdmin`; `list_display` `salon`, `question`,
   `ordering`, `is_active`; filter by `salon` and `is_active`.
+
+### Sub-step 3 details (decided 21.10.2026)
+
+- **Two event layers.** Provider events are internal, from the provider
+  to the orchestrator: `TextDelta(text)`, `ToolCall(id, name, arguments)`,
+  `Finish(input_tokens, output_tokens)`. Client events go from the
+  orchestrator/view to the widget: `text`, `proposal`, `error`, `done`,
+  as decided in "Request flow". The customer never sees provider events
+  or tool calls.
+- **New app `ai_assistant`.** `AppConfig` like the other apps, added to
+  `INSTALLED_APPS` after `reviews`. No `models.py` and no migrations,
+  consistent with "owns no persistent models" (sub-step 2 details;
+  `docs/ARCHITECTURE.md` § apps). Provider code lives in
+  `ai_assistant/providers/{__init__,base,mock}.py`, mirroring
+  `payments/providers/`.
+- **`AssistantProvider(ABC)`** has one abstract method,
+  `stream(*, system, messages, tools) -> Iterator[provider event]`,
+  keyword-only, plain values only. A provider is a dumb pipe for one model
+  turn: it never executes tools, knows nothing about salons or tenant
+  context, and never logs request or response content.
+- **Frozen dataclasses** for `ChatMessage` (role `user`/`assistant`/`tool`,
+  content, an optional tool call id, and the tool calls the assistant
+  made), `ToolSpec` (name, description, JSON-schema parameters) and the
+  three provider events. Vendor formats are translated inside adapters
+  only.
+- **`AssistantProviderError(DomainError)`**, code
+  `assistant_provider_error`, status 502, in `core/exceptions.py` next to
+  `PaymentProviderError`. Real adapters wrap vendor exceptions into it;
+  the orchestrator turns it into a client `error` event. This differs from
+  the WayForPay convention ("WayForPayProvider: first-time technical
+  conventions"), where the service layer wraps provider exceptions.
+- **`MockAssistantProvider`** is built with a script: a list of turns.
+  Each `stream()` call plays the next turn. A turn is a list of provider
+  events and may contain an exception, raised at that point (a
+  mid-stream failure). The mock records every call (`system`, `messages`,
+  `tools`) for assertions. When the script is finished, a further call
+  raises a clear error instead of replaying. Without a script it replies
+  with one neutral test sentence and `Finish`, so local dev endpoints work
+  before the real provider exists. No network, no logging.
+- **`get_assistant_provider()`** returns the mock until sub-step 10 adds
+  the OpenAI adapter and a setting to choose it. Tests inject providers by
+  monkeypatching the factory where it is imported, as the payments tests
+  do (`test_payments_refund_retry_sweep.py`).
+- **Tests for this sub-step:** the ABC cannot be instantiated and has
+  exactly one abstract method; `stream` is keyword-only; the mock plays
+  turns in order, records calls, raises mid-stream, errors when the script
+  is exhausted, gives the default reply without a script, and opens no
+  network connection (socket-blocking test like
+  `test_payments_providers.py`).
 
 ### Open items (not decisions)
 
