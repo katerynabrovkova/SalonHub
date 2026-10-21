@@ -16,6 +16,7 @@ key. See `payments/providers/base.py`'s `start_payment` docstring.
 
 import datetime as dt
 import logging
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
@@ -34,13 +35,30 @@ def _round_half_up_to_whole(amount: Decimal) -> Decimal:
     return amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))
 
 
-def compute_deposit_amount(appointment: Appointment) -> Decimal:
-    raw = (
-        appointment.service_price_at_booking
-        * appointment.deposit_percentage_at_booking
-        / Decimal("100")
+@dataclass(frozen=True)
+class DepositBreakdown:
+    deposit: Decimal
+    due_at_visit: Decimal
+
+
+def compute_deposit_breakdown(*, price: Decimal, percentage: Decimal) -> DepositBreakdown:
+    """
+    The deposit for `price` at `percentage`, and what is left to pay at the
+    visit, without an existing Appointment (docs/DECISIONS.md § Stage 16
+    planning, "Sub-step 4 details", 4a). The AI assistant's only source of
+    these amounts.
+    """
+    deposit = _round_half_up_to_whole(price * percentage / Decimal("100"))
+    return DepositBreakdown(
+        deposit=deposit, due_at_visit=(price - deposit).quantize(Decimal("0.01"))
     )
-    return _round_half_up_to_whole(raw)
+
+
+def compute_deposit_amount(appointment: Appointment) -> Decimal:
+    return compute_deposit_breakdown(
+        price=appointment.service_price_at_booking,
+        percentage=appointment.deposit_percentage_at_booking,
+    ).deposit
 
 
 def initiate_payment(

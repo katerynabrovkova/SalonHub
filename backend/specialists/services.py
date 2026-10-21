@@ -11,7 +11,7 @@ rule (docs/DECISIONS.md § Business rules) that such a conflict must be
 explicitly resolved, never silently orphaned.
 """
 
-from django.db.models import QuerySet
+from django.db.models import Avg, Count, QuerySet
 from django.utils import timezone
 
 from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment
@@ -35,6 +35,18 @@ def _future_appointments(specialist: Specialist) -> QuerySet[Appointment]:
         status__in=ACTIVE_APPOINTMENT_STATUSES,
         end_datetime__gt=timezone.now(),
     )
+
+
+def annotate_rating(queryset: QuerySet[Specialist]) -> QuerySet[Specialist]:
+    """
+    `queryset` annotated with `average_rating` and `review_count`, for the
+    specialists views and the AI assistant (docs/DECISIONS.md § Stage 16
+    planning, "Sub-step 4 details", 4a). Callers prefetch `services`
+    separately, never join it into this aggregate: a join on `services`
+    would multiply rows before aggregation and inflate both values. A
+    specialist with no reviews gets `average_rating=None`, `review_count=0`.
+    """
+    return queryset.annotate(average_rating=Avg("reviews__rating"), review_count=Count("reviews"))
 
 
 def soft_delete_specialist(specialist: Specialist) -> None:

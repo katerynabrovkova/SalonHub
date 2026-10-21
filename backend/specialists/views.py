@@ -8,7 +8,7 @@ the URL's bound tenant context — never from client input (both serializers
 keep it read-only, see specialists/serializers.py).
 """
 
-from django.db.models import Avg, Count, QuerySet
+from django.db.models import QuerySet
 from rest_framework import generics
 from rest_framework.permissions import SAFE_METHODS, AllowAny, BasePermission
 from rest_framework.request import Request
@@ -22,7 +22,7 @@ from specialists.serializers import (
     SpecialistReadSerializer,
     SpecialistWriteSerializer,
 )
-from specialists.services import soft_delete_specialist
+from specialists.services import annotate_rating, soft_delete_specialist
 
 
 class _SpecialistSerializerMixin:
@@ -94,11 +94,7 @@ class _SpecialistViewMixin:
         inconsistent results across pages. The explicit `order_by` below
         restores the same order as `Specialist.Meta.ordering`.
         """
-        return (
-            queryset.prefetch_related("services")
-            .annotate(average_rating=Avg("reviews__rating"), review_count=Count("reviews"))
-            .order_by("created_at", "id")
-        )
+        return annotate_rating(queryset.prefetch_related("services")).order_by("created_at", "id")
 
 
 class SpecialistListCreateView(
