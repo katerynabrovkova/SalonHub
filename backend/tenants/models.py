@@ -5,7 +5,7 @@ from django.db.models.functions import Length
 from django.db.models.lookups import LessThanOrEqual
 
 from core.i18n import SUPPORTED_LANGUAGES, resolve_display_name
-from core.models import TimeStamped
+from core.models import TenantScopedModel, TimeStamped
 from core.validators import ISO_4217_PATTERN, iso_4217_validator
 
 SALON_ABOUT_MAX_LENGTH = 2000
@@ -14,6 +14,10 @@ SALON_ABOUT_MAX_LENGTH = 2000
 # "Sub-step 1 details"). Enforced in Salon.clean(), not in the database.
 ASSISTANT_STARTERS_MAX_ITEMS = 3
 ASSISTANT_STARTER_MAX_LENGTH = 60
+
+# Per-salon cap on active FAQItem rows (docs/DECISIONS.md § Stage 16 planning,
+# "Sub-step 2 details"): get_faq sends the whole active list to the model.
+FAQ_ITEMS_MAX_ACTIVE = 50
 
 # Enumerated per-language length checks for the translatable `about` dict
 # (docs/DECISIONS.md § Stage 11.5 sub-step 1). A dict of arbitrary keys can't
@@ -167,3 +171,41 @@ class Salon(TimeStamped):
         error = _assistant_starters_error(self.assistant_starters)
         if error is not None:
             raise ValidationError({"assistant_starters": error})
+
+
+class FAQItem(TenantScopedModel, TimeStamped):
+    """
+    One salon FAQ question and its answer, read by the AI assistant's get_faq
+    tool (docs/DECISIONS.md § Stage 16 planning, "Sub-step 2 details"). One
+    language, not translatable, like Service.description. Inactive items stay
+    in admin and are left out of get_faq. Nothing references a FAQItem, so a
+    hard delete is fine.
+    """
+
+    question = models.CharField(max_length=200)
+    answer = models.CharField(max_length=1000)
+    ordering = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta(TenantScopedModel.Meta):
+        abstract = False
+        ordering = ["ordering", "id"]
+
+    def __str__(self) -> str:
+        return self.question or f"FAQItem #{self.pk}"
+
+    def clean(self) -> None:
+        # Counted through unscoped_objects with an explicit salon filter, not
+        # the tenant-bound default manager. Not race-proof: the only writer
+        # is the operator in admin, so a concurrent save is accepted.
+        super().clean()
+        if not self.is_active:
+            return
+        other_active = FAQItem.unscoped_objects.filter(salon_id=self.salon_id, is_active=True)
+        if self.pk is not None:
+            other_active = other_active.exclude(pk=self.pk)
+        if other_active.count() >= FAQ_ITEMS_MAX_ACTIVE:
+            raise ValidationError(
+                f"A salon can have at most {FAQ_ITEMS_MAX_ACTIVE} active FAQ items. "
+                "Deactivate another item first."
+            )

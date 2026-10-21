@@ -10,7 +10,7 @@ from booking.models import Appointment, AppointmentStatus
 from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
 from specialists.models import Specialist, TimeOff, WorkingHours
-from tenants.models import Salon
+from tenants.models import FAQ_ITEMS_MAX_ACTIVE, FAQItem, Salon
 
 
 @pytest.fixture(autouse=True)
@@ -191,3 +191,10 @@ def make_appointment(
             hold_expires_at=hold_expires_at,
             status=status,
         )
+
+
+def make_active_faq_items(salon: Salon, count: int = FAQ_ITEMS_MAX_ACTIVE) -> list[FAQItem]:
+    """`count` active FAQ items for `salon` in one INSERT (defaults to the cap)."""
+    return FAQItem.unscoped_objects.bulk_create(
+        FAQItem(salon=salon, question=f"Question {i}?", answer=f"Answer {i}.") for i in range(count)
+    )
