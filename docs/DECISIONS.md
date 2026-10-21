@@ -5774,12 +5774,14 @@ Decided 21.10.2026. Not yet implemented.
 
 - **Read-only grounding tools only:** `list_services`,
   `get_specialist_info`, `check_availability`, `get_salon_info`,
-  `get_faq`. `get_salon_info` returns the deposit percentage, the deposit
-  amount and the amount due at the visit per service, the 24h
+  `get_faq`. `get_salon_info` returns the deposit percentage, the 24h
   cancellation/refund rule, the currency, the timezone and the
-  customer-facing contacts. Money amounts are computed by the
-  backend with the same functions as booking; the model never computes
-  money.
+  customer-facing contacts. The per-service deposit amount and amount due
+  at the visit come from `list_services`. Money amounts are computed by
+  the backend with the same functions as booking; the model never
+  computes money.
+  - **Refined 21.10.2026,** see "Sub-step 4 details": this entry first
+    put the per-service deposit and amount due in `get_salon_info`.
 - **Propose-only handoff** (§ Business rules, unchanged). The proposal
   carries `service_id`, an optional `specialist_id` (`"any"` allowed),
   up to 3 validated slots and the card display data (see "Product
@@ -6014,10 +6016,17 @@ Each sub-step gets its own red/green/commit cycle.
 2. **`FAQItem` model**, admin, limits.
 3. **Provider interface and `MockAssistantProvider`:** streamed events
    (text chunk, tool call, end). Plain Python, no views.
-4. **Tools:** `list_services`, `get_specialist_info` (rating, review
-   count), `check_availability` (filters), `get_salon_info` (money via
-   booking functions, contacts), `get_faq`. Two-salon and same-salon
-   isolation tests.
+4. **Tools**, split into three sub-steps, each with its own
+   red/green/commit cycle. Details in "Sub-step 4 details".
+   - **4a. Shared helpers:** the deposit and amount-due helper extracted
+     from `compute_deposit_amount`; the rating annotation extracted from
+     the specialists view mixin. Behaviour-preserving refactors.
+   - **4b. Simple tools:** `list_services`, `get_specialist_info` (rating,
+     review count), `get_salon_info` (contacts, cancellation rule),
+     `get_faq`, with their `ToolSpec` definitions and a registry.
+     Two-salon and same-salon isolation tests.
+   - **4c. `check_availability`** (filters, 14-day cap, at most 20
+     slots). Two-salon and same-salon isolation tests.
 5. **Session store in Redis DB 3:** salon in the key, sliding 30-minute
    TTL, last 20 messages, texts only, customer message stored only with a
    successful reply. Test: a session id from another salon resolves to
@@ -6142,6 +6151,69 @@ are reachable only in local dev.
   network connection (socket-blocking test like
   `test_payments_providers.py`).
 
+### Sub-step 4 details (decided 21.10.2026)
+
+**4a. Shared helpers.** Behaviour-preserving refactors that give existing
+code a second caller.
+
+- **Money.** No function computes a deposit without an existing
+  appointment: `payments.services.compute_deposit_amount` takes an
+  `Appointment` and reads its price and percentage snapshots. A helper is
+  extracted from it that takes a price and a percentage and returns the
+  deposit (the same half-up rounding to whole units) and the amount due
+  at the visit (price minus deposit). `compute_deposit_amount` calls the
+  helper. The assistant uses only this helper; `ai_assistant` contains no
+  money formula. Existing booking and payment tests stay unchanged and
+  green.
+- **Rating.** The average rating and review count annotation is
+  extracted from the specialists view mixin (`_with_card_annotations`)
+  into a reusable function, used by the view and by the assistant. The
+  aggregate stays separate from the `services` prefetch, as documented
+  there (a join on `services` would inflate the counts). Existing
+  specialist tests stay unchanged and green.
+
+**4b. Simple tools,** in `ai_assistant`: plain functions, their `ToolSpec`
+definitions and a registry from tool name to function.
+
+- **Context.** The salon comes only from the bound tenant context. The
+  site language is passed in by the orchestrator, never by the model.
+  Names are resolved with `core.i18n.resolve_translation`.
+- **Output** is JSON-serializable dicts. Money is a string like in the
+  API (`"40.00"`), together with the salon currency.
+- **`list_services`:** active services only (the same visibility as the
+  public catalog), with name, category, description, duration, price, and
+  the per-service deposit and amount due at the visit from the 4a helper.
+  This refines "Scope and tools": the per-service amounts are returned
+  here, next to the price; `get_salon_info` gives the deposit percentage
+  and the cancellation rule.
+- **`get_specialist_info`:** active specialists, only their active
+  services, average rating and review count from the 4a function. No
+  review texts.
+- **`get_salon_info`:** name, timezone, currency, deposit percentage,
+  the 24h cancellation/refund rule taken from booking's existing cutoff
+  (`REFUND_ELIGIBILITY_CUTOFF`, not restated as a new constant), and the
+  customer-facing contacts (`phone`, `address`, `instagram_url`).
+- **`get_faq`:** active FAQ items in their order.
+- **Bad model input.** An unknown id and another salon's id return the
+  same "not found" result. Tools never raise on bad model input.
+
+**4c. `check_availability`.**
+
+- **Inputs:** service id, specialist id or `"any"`, date range, optional
+  weekdays, optional time-of-day window. `now` is passed in.
+- **The tool enforces what the engine does not:** the service is active;
+  the specialist is active and linked to the service; the range is at
+  most 14 days. A longer range returns a message asking the model to
+  narrow it.
+- **Weekday and time-of-day filters** are applied to the engine's output
+  in the salon's timezone.
+- **Output:** at most the 20 earliest matching slots, plus a flag that
+  more exist, in the same format as the slots endpoint (salon-local ISO
+  8601 with offset).
+- **Availability comes only from `scheduling.services`**
+  (`compute_candidate_start_times` / `compute_multi_specialist_availability`);
+  the tool has no availability logic of its own.
+
 ### Open items (not decisions)
 
 - Stage 22 requirements: the production server must support streaming
@@ -6149,3 +6221,7 @@ are reachable only in local dev.
   snapshots could hold conversation text.
 - A privacy policy page must exist before the assistant is enabled for
   real customers.
+- Check whether the public slots endpoint and appointment creation verify
+  that the specialist performs the service (the availability engine does
+  not). Read-only recon after sub-step 4; fix in a separate commit if
+  needed. Found 21.10.2026.
