@@ -5866,6 +5866,37 @@ Decided 21.10.2026. Not yet implemented.
   `sessionStorage` does not conflict with the Stage 12 rule (§
   "Authenticated session transport: httpOnly cookie, not localStorage").
 
+### Sub-step order
+
+Each sub-step gets its own red/green/commit cycle.
+
+1. **`Salon.assistant_enabled`:** field (default `False`), data migration
+   enabling `bella-demo`, exposed in `GET /api/v1/salons/<slug>/`.
+2. **Provider interface and `MockAssistantProvider`:** streamed events
+   (text chunk, tool call, end). Plain Python, no views.
+3. **Grounding tools:** `list_services`, `get_specialist_info`,
+   `check_availability`, `get_salon_info`. Money via the booking
+   functions. Two-salon and same-salon isolation tests.
+4. **Session store in Redis DB 3:** salon in the key, sliding 30-minute
+   TTL, last 20 messages, texts only. Test: a session id from another
+   salon resolves to nothing.
+5. **Conversation orchestrator:** model/tool loop, system instructions,
+   proposal validation (tenant-scoped ids, stale slot dropped). Mock only.
+6. **Endpoints:** streaming POST, history GET, 404 when disabled, public
+   mixin, session header in `CORS_ALLOW_HEADERS`. Key test: a tool called
+   mid-stream sees the correct salon.
+7. **Limits:** per session, per salon + IP, per-salon daily limit in the
+   salon's timezone, global cap of 16 streams released even when a stream
+   fails.
+8. **Real OpenAI provider:** adapter, settings and key via env, tests
+   without network; then a manual check with 10-15 Ukrainian questions.
+
+Closure: docs update and a manual stream check.
+
+**The real provider is wired only after sub-step 7 is committed.** Until
+then only the mock provider exists, so endpoints without limits cost
+nothing and are reachable only in local dev.
+
 ### Open items (not decisions)
 
 - `Salon.contact_email` exists, but it is for alerts to the salon, not
