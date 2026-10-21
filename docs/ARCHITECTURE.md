@@ -24,7 +24,7 @@ stage arrives. Proposed app list and responsibility:
 | App | Responsibility |
 |---|---|
 | `core` | Cross-cutting infrastructure with no domain meaning of its own: the tenant-scoped abstract base model and manager/queryset, the domain exception hierarchy, shared permission base classes, common mixins (e.g. a `TimeStamped` abstract base with `created_at`/`updated_at`), shared pagination/error-envelope config. |
-| `tenants` | `Salon` — the tenant root entity — plus salon-level settings (timezone, business hours defaults, deposit percentage — single salon-wide value, no per-service override — booking lead-time/advance-window limits) and the tenant-resolution middleware. |
+| `tenants` | `Salon` — the tenant root entity — plus salon-level settings (timezone, business hours defaults, deposit percentage — single salon-wide value, no per-service override — booking lead-time/advance-window limits), the salon FAQ (`FAQItem`, salon-authored questions and answers read by the assistant), and the tenant-resolution middleware. |
 | `accounts` | `User` (platform/admin auth only), `Account` (per-salon login credential every JWT authenticates as), `Customer` (per-salon identity, guest or registered, see `docs/DECISIONS.md` § Identity), salon-scoped registration/login/verification. |
 | `catalog` | `ServiceCategory`, `Service`. |
 | `specialists` | `Specialist`, which services a specialist performs, `WorkingHours` (recurring weekly schedule), `TimeOff` (dated exceptions). |
@@ -133,6 +133,9 @@ Described, not modeled in code:
 - **Review** — salon FK, appointment FK (**one-to-one** — see § 11), customer FK,
   denormalized specialist FK (grouped-by-specialist read path; snapshot of who
   performed the visit — see § 11), rating, text, created_at.
+- **FAQItem** — salon FK, question, answer, ordering, is_active. Salon-authored
+  questions and answers (one language, not translatable) that the AI assistant reads
+  as grounding (§ 10).
 - **AI assistant conversation state is not a persisted entity at all** — held in
   Redis with a TTL, not a database table. See § 10.
 

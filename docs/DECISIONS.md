@@ -5996,7 +5996,7 @@ Each sub-step gets its own red/green/commit cycle.
    `assistant_starters`; expose `assistant_enabled` and
    `assistant_starters` in `GET /api/v1/salons/<slug>/`. Details in
    "Sub-step 1 details".
-2. **`SalonFAQ` model**, admin, limits.
+2. **`FAQItem` model**, admin, limits.
 3. **Provider interface and `MockAssistantProvider`:** streamed events
    (text chunk, tool call, end). Plain Python, no views.
 4. **Tools:** `list_services`, `get_specialist_info` (rating, review
@@ -6053,6 +6053,30 @@ are reachable only in local dev.
   `GET /api/v1/salons/<slug>/` until a frontend consumer exists (design
   pass, Stages 18-21); the assistant reads them through `get_salon_info`.
 - **No new `Meta` constraints in this sub-step.**
+
+### Sub-step 2 details (decided 21.10.2026)
+
+- **Model `FAQItem` in the `tenants` app.** One row is one question.
+  FAQ content describes the salon (parking, payment, rules); `catalog` is
+  services only, and `ai_assistant` owns no persistent models. This is
+  the first tenant-scoped model in `tenants`.
+- **Fields:** `TenantScopedModel` + `TimeStamped`. `question`
+  `CharField(max_length=200)`, `answer` `CharField(max_length=1000)`,
+  `ordering` `PositiveIntegerField(default=0)`, `is_active`
+  `BooleanField(default=True)`. One language, not translatable.
+- **`Meta` (approved 21.10.2026):** `ordering = ["ordering", "id"]`;
+  inherits the base constraints only; no other constraints.
+- **Limit:** at most 50 active items per salon, checked in `clean()`
+  when the item is active (counting the salon's other active items). No
+  DB enforcement: the limit spans rows, and the only writer is the
+  operator, so the concurrent-save race is accepted.
+- **Why 50:** `get_faq` sends the whole active list to the model on each
+  call (cost and answer quality); typical salons need 10-30. If a salon
+  outgrows it, move to search (RAG) then.
+- **Inactive items** are visible in admin and excluded from `get_faq`.
+  Hard delete is allowed: nothing references FAQ items.
+- **Admin:** `SalonScopedAdmin`; `list_display` `salon`, `question`,
+  `ordering`, `is_active`; filter by `salon` and `is_active`.
 
 ### Open items (not decisions)
 
