@@ -78,8 +78,8 @@ Described, not modeled in code:
   because turnaround differs by service). `name` is a translatable `JSONField`
   (Stage 11.5, § Content localization).
 - **Specialist** — salon FK, name, bio, is_active (Stage 5). No login in this build
-  (`docs/DECISIONS.md` § Business rules). `bio` is a translatable `JSONField`
-  (Stage 11.5, § Content localization).
+  (`docs/DECISIONS.md` § Business rules). `name` and `bio` are translatable
+  `JSONField`s (Stage 11.5, § Content localization).
 - **`Service` and `Specialist` rows can never be hard-deleted once an `Appointment`
   references them** — the FK would either cascade-delete real booking history or
   require `SET NULL`/`PROTECT` gymnastics that make "delete" mean something
@@ -486,13 +486,14 @@ prompt. This keeps context small and always current — catalog edits take effec
 immediately, with no re-embedding or prompt-template step.
 
 **Session memory is Redis, not a database table — no `AIConversationSession` or
-`AIMessage` models exist.** The client is issued an opaque session id (cookie or
-local storage); conversation turns for that id are stored as a Redis value with a
-sliding TTL, refreshed on each new message up to a fixed inactivity cutoff (e.g.
-expire 30 minutes after the last message). When the TTL lapses, Redis drops the key
-itself — no cleanup task, no retained history, nothing left to query later. This
-applies uniformly to every customer, including logged-in ones; there is no
-"logged-in customers keep their history" exception. Salon chat routinely surfaces
+`AIMessage` models exist.** The client is issued an opaque session id (kept in
+`sessionStorage` and sent in a request header); conversation turns for that id are
+stored as a Redis value with a sliding TTL, refreshed on each new message: the
+conversation ends when the tab closes or 30 minutes after the last message. When
+the TTL lapses, Redis drops the key itself — no cleanup task, no retained history,
+nothing left to query later. This applies uniformly to every customer, including
+logged-in ones; there is no "logged-in customers keep their history" exception.
+Salon chat routinely surfaces
 health-adjacent personal information (skin conditions, allergies, treatment
 contraindications), and the deliberate choice is to not retain that for anyone by
 default, not to make retention opt-in per user type (`docs/DECISIONS.md` § Business
@@ -500,7 +501,8 @@ rules). Redis is already in the stack for Celery, so this adds no new
 infrastructure.
 
 **Booking handoff is propose-only.** The assistant can call the same read-only
-grounding tools to identify a candidate service and slot and present it to the user,
+grounding tools to identify a candidate service, optionally a specialist and a slot,
+and present it to the user,
 but it has no tool that calls the appointment-creation service function directly —
 turning a proposal into a real appointment always goes through the normal booking
 flow and its service layer (§ 7). This is a firm decision: a hallucinated or
@@ -593,8 +595,8 @@ per-salon default-language field. Each translatable field is a `JSONField` stori
 `{lang_code: string}` dict rather than per-language columns or a translation table, so
 adding a language needs no migration. Translatable fields: `ServiceCategory.name`,
 `Service.name`, `Salon.name`, `Salon.about` (new, 2000-char-per-language DB check),
-`Specialist.bio`, and the notification message templates (§ 9). Not translatable —
-customer-authored or internal-only: `Review.text`, `TimeOff.reason`,
+`Specialist.name`, `Specialist.bio`, and the notification message templates (§ 9).
+Not translatable — customer-authored or internal-only: `Review.text`, `TimeOff.reason`,
 `Appointment.cancellation_reason`.
 
 `(salon, name)` uniqueness on `ServiceCategory` / `Service` is checked per populated

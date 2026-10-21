@@ -415,9 +415,10 @@ describes the mechanisms; the numbers live here, stated once.
   service, not salon-wide.
 - **No specialist logins in this build.** Specialists are managed by salon
   staff/admin.
-- **The AI assistant only proposes a service + slot; it never creates a
-  binding appointment.** The user must confirm through the normal booking
-  flow — a hallucinated parameter must never produce a real paid booking.
+- **The AI assistant only proposes a service, optionally a specialist and
+  a slot; it never creates a binding appointment.** The user must confirm
+  through the normal booking flow — a hallucinated parameter must never
+  produce a real paid booking.
 - **AI assistant memory is session-only for everyone (incl. logged-in),
   Redis with a TTL, never persisted to a DB.** Salon chat surfaces
   health-adjacent personal info; the deliberate choice is not to retain it
@@ -1022,6 +1023,7 @@ localization note above.
   (`Length` lookup registered on the field; constraint expressed against the
   value's `__length__lte`). The cap must hold for every populated language
   key, not just `en`.
+- `specialists.Specialist.name`
 - `specialists.Specialist.bio`
 - **Notification message templates** — the `(subject, body)` strings
   currently inline in `notifications._MESSAGES` and built in
@@ -5745,3 +5747,132 @@ cannot be checked in desktop Chrome and still needs a real device.
    - It is absent in the empty state (where "Забронювати візит" is still
      present), while loading, and on the error state.
    - The "+" is not part of the accessible name.
+
+## Stage 16 planning
+
+Decided 21.10.2026. Not yet implemented.
+
+### Scope and tools
+
+- **Read-only grounding tools only:** `list_services`,
+  `get_specialist_info`, `check_availability`, `get_salon_info`.
+  `get_salon_info` returns the deposit percentage, the deposit amount and
+  the amount due at the visit per service, the 24h cancellation/refund
+  rule, the currency and the timezone. Money amounts are computed by the
+  backend with the same functions as booking; the model never computes
+  money.
+- **Propose-only handoff** (§ Business rules, unchanged). The proposal
+  carries `service_id`, an optional `specialist_id` (`"any"` allowed) and
+  an optional slot, and only what the customer asked for. The backend
+  validates every id through tenant-scoped querysets before sending the
+  proposal. A slot that is no longer offered is silently dropped from the
+  proposal, not reported as an error. The frontend builds the "Go to
+  booking" button from the validated proposal using the existing
+  `/booking` query parameters (`entry`, `service`, `specialist`, `slot`,
+  `step`, `date_from`). The model never writes URLs.
+- **The assistant does not see the customer's own appointments**; the
+  endpoint does not use account authentication.
+- **New field `Salon.assistant_enabled`, default `False`**, enabled for
+  `bella-demo` by a data migration. When `False`,
+  `GET /api/v1/salons/<slug>/` exposes `assistant_enabled=false` so the
+  widget is not rendered, and the chat endpoints return 404.
+
+### Request flow
+
+- **Streamed responses with typed events:** `text`, `proposal`, `error`,
+  `done`. The proposal is sent after the text, once validated.
+- **Synchronous Django view returning a streamed response.** The
+  generator binds `tenant_context(salon_id)` itself: the middleware's
+  context has ended by the time the body is iterated. It converts any
+  exception into an `error` event: the DRF exception handler never sees
+  exceptions raised during iteration.
+- **Global cap of 16 concurrent streams**, counted in Redis across
+  processes. Over the cap returns error code `assistant_busy`.
+- **ASGI deferred.** Revisit when the concurrency cap is actually being
+  hit.
+- **Provider abstraction following the payments pattern.**
+  `MockAssistantProvider` first (scripted streams including tool calls, no
+  network in tests). First real provider: OpenAI, GPT-5.6 Luna with
+  minimal reasoning effort; the exact model id and parameters are verified
+  against OpenAI docs at implementation time. Anthropic remains possible
+  behind the same interface. Before enabling for real customers, run
+  10-15 real Ukrainian questions and review quality.
+
+### Session
+
+- **Server-issued opaque random session id**, stored by the widget in
+  `sessionStorage` and sent in a request header. Not a cookie, so the chat
+  has no CSRF surface.
+- **The Redis key includes the salon id from tenant context**: a session
+  id from another salon resolves to nothing. Separate Redis DB 3, not the
+  throttle cache DB 2.
+- **The conversation ends when the tab closes or 30 minutes after the
+  last message** (sliding TTL).
+- **A GET endpoint returns the live history** so the widget can restore
+  it after a reload; empty once expired.
+- **Message texts only** (no tool results), last 20 messages, max 2000
+  characters per customer message. No "start over" endpoint for now.
+
+### Language
+
+- **Reply in the language of the customer's message.** Service names
+  exactly as returned by tools in the site language (the request's
+  `lang`); a name is translated only when the customer asks, keeping the
+  original in parentheses. `Service.description` is conveyed faithfully
+  in the chat language, adding nothing.
+
+### Safety and privacy
+
+- **No tool can modify data.** Tools never accept a salon id from the
+  model; the salon comes only from tenant context.
+- **Conversation text is never logged**; log only salon, token counts,
+  latency and errors.
+- **Health questions:** answer from salon data only, no medical
+  conclusions, suggest checking with the specialist.
+- **The customer is told about AI processing:** a short notice in the
+  widget (Stage 17) plus the privacy policy. OpenAI retains API data up to
+  30 days by default; zero data retention is a possible later improvement.
+
+### Limits
+
+- **Per session:** 10 messages per minute.
+- **Per IP:** 200 messages per hour, counted per salon (key: salon + IP).
+  Generous because mobile carriers and salon Wi-Fi share IPs; per salon so
+  one salon's traffic never affects another.
+- **Per salon:** 1000 messages per day, counted in the salon's timezone,
+  error code `assistant_daily_limit`.
+- **Widget texts (Stage 17)**, both followed by a "go to booking" button
+  where relevant:
+  - `assistant_daily_limit`: "Я сьогодні наговорився досхочу і пішов на
+    заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без
+    мене:"
+  - `assistant_busy`: "Зараз у мене багато співрозмовниць. Спробуйте,
+    будь ласка, за хвилинку 🤗"
+
+### Implementation notes
+
+- **The chat endpoints are public.** They need an explicit `AllowAny`
+  plus the existing `PublicEndpointMixin` (`authentication_classes = ()`,
+  `accounts/views.py`): the global default is `IsAuthenticated`, and DRF
+  authenticates before it checks permissions.
+- **The new session header must be added to `CORS_ALLOW_HEADERS`.** Same
+  failure mode as `X-Guest-Token` (§ "Fix: CORS_ALLOW_HEADERS missing
+  X-Guest-Token"): mocked-fetch tests cannot catch it; it needs a real
+  browser check.
+- **When Redis DB 3 is implemented**, update the Redis DB descriptions in
+  § Stage 3 ("DRF throttling needs a shared cache"), the comment in
+  `config/settings/base.py` and `.env.example` in the same code commit.
+- **The chat session id is not an auth credential**, so storing it in
+  `sessionStorage` does not conflict with the Stage 12 rule (§
+  "Authenticated session transport: httpOnly cookie, not localStorage").
+
+### Open items (not decisions)
+
+- `Salon.contact_email` exists, but it is for alerts to the salon, not
+  customer-facing; there is no phone or address field. Whether to add
+  customer-facing contacts is still open.
+- Stage 22 requirements: the production server must support streaming
+  (threaded workers, no proxy buffering); decide Redis persistence, since
+  snapshots could hold conversation text.
+- A privacy policy page must exist before the assistant is enabled for
+  real customers.
