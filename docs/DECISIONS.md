@@ -5755,18 +5755,25 @@ Decided 21.10.2026. Not yet implemented.
 ### Scope and tools
 
 - **Read-only grounding tools only:** `list_services`,
-  `get_specialist_info`, `check_availability`, `get_salon_info`.
-  `get_salon_info` returns the deposit percentage, the deposit amount and
-  the amount due at the visit per service, the 24h cancellation/refund
-  rule, the currency and the timezone. Money amounts are computed by the
+  `get_specialist_info`, `check_availability`, `get_salon_info`,
+  `get_faq`. `get_salon_info` returns the deposit percentage, the deposit
+  amount and the amount due at the visit per service, the 24h
+  cancellation/refund rule, the currency, the timezone and the
+  customer-facing contacts. Money amounts are computed by the
   backend with the same functions as booking; the model never computes
   money.
 - **Propose-only handoff** (§ Business rules, unchanged). The proposal
-  carries `service_id`, an optional `specialist_id` (`"any"` allowed) and
-  an optional slot, and only what the customer asked for. The backend
+  carries `service_id`, an optional `specialist_id` (`"any"` allowed),
+  up to 3 validated slots and the card display data (see "Product
+  decisions"), and only what the customer asked for. The backend
   validates every id through tenant-scoped querysets before sending the
-  proposal. A slot that is no longer offered is silently dropped from the
-  proposal, not reported as an error. The frontend builds the "Go to
+  proposal. Normally the model learns from `check_availability` that a
+  slot is taken and offers nearby validated slots in its reply. If a slot
+  becomes unavailable between the tool call and the final proposal
+  validation (a race), it is removed from the card without an `error`
+  event; the card shows the remaining validated slots, or only "Another
+  day or time" if none remain. The booking form still rejects a stale
+  slot as today. The frontend builds the "Go to
   booking" button from the validated proposal using the existing
   `/booking` query parameters (`entry`, `service`, `specialist`, `slot`,
   `step`, `date_from`). The model never writes URLs.
@@ -5849,6 +5856,111 @@ Decided 21.10.2026. Not yet implemented.
   - `assistant_busy`: "Зараз у мене багато співрозмовниць. Спробуйте,
     будь ласка, за хвилинку 🤗"
 
+### Product decisions (added 21.10.2026)
+
+Agreed after the first planning commit. Mockups: Design canvas boards
+"AI 1" to "AI 8" (not in the repo).
+
+**Knowledge and data**
+
+- **Salon FAQ.** New tenant-owned model (`question`, `answer`,
+  `ordering`, `is_active`), one language like `Service.description`; the
+  model conveys answers in the chat language, adding nothing. New
+  read-only tool `get_faq` returns all active entries (small lists, no
+  search/RAG). Limits: up to 50 entries, question up to 200 and answer up
+  to 1000 characters. Filled by the operator in Django admin until the
+  salon admin UI (Stages 18-21).
+- **Customer-facing salon contacts.** New `Salon` fields `phone`,
+  `address`, `instagram_url`. `get_salon_info` returns them; the
+  assistant points to them whenever it cannot answer (including health
+  questions). `Salon.contact_email` stays alerts-only.
+- **Specialist rating.** `get_specialist_info` returns the average rating
+  and review count (reviews come only from completed appointments). No
+  review texts are given to the model.
+- **`check_availability` filters:** date range up to 14 days per call,
+  weekdays, time-of-day window, specialist id or `"any"`. The model only
+  turns wishes into these filters; free time comes only from the
+  availability engine. When nothing matches, the tool says so and the
+  model explains and may offer a compromise.
+
+**Assistant behaviour (system instructions)**
+
+- **General knowledge is allowed for explaining terms in simple words.**
+  If the salon does not offer that service, say so explicitly and suggest
+  the closest service from the menu. Prices, durations and availability
+  only from salon data. Never promise a result that depends on an
+  individual consultation.
+- **No invented rankings:** never call a specialist "the best"; state
+  rating and review count as facts.
+- **Specialist preference.** "Only <name>" means offer only that
+  specialist (other days/times). "Preferably <name>" allows a compromise
+  with another specialist, explained. Unclear: show that specialist's
+  options and ask whether another specialist is acceptable.
+- These behaviours are checked in the manual 10-15 question review before
+  enabling for real customers (model behaviour, not enforceable by
+  automated tests).
+
+**Proposal card (contract for the `proposal` event)**
+
+- **The proposal carries display data computed by the backend:** service
+  name (site language), specialist name with rating and review count (or
+  "any"), duration, price, deposit amount, amount due at the visit,
+  currency, and up to 3 validated slots.
+- **Stage 17 renders it as a card.** A slot chip opens `/booking` at
+  step 4 with that slot; "Another day or time" opens `/booking` at step 3
+  with the same service and specialist (no message to the model); a
+  single named and still free slot shows one "Go to booking" button. A
+  slot that became unavailable after `check_availability` (a race) is
+  removed from the card without an `error` event; the card shows the
+  remaining validated slots, or only "Another day or time" if none
+  remain (see "Scope and tools").
+
+**Widget-related backend**
+
+- **Starter suggestions.** New `Salon` field `assistant_starters`,
+  translatable like other names, up to 3 items of up to 60 characters;
+  empty means no suggestions. Exposed with `assistant_enabled` in
+  `GET /api/v1/salons/<slug>/`.
+- **Retry.** The customer message is written to the session history only
+  together with a successful reply, so the widget's "Try again" (after
+  `assistant_busy` or a mid-stream error) resends the last message
+  without duplicating it.
+
+**Analytics (counters only, no conversation text)**
+
+- **Collected from Stage 16:** conversations started, proposals per
+  service, bookings created from an assistant proposal. The proposal's
+  booking link carries a source marker (e.g. `via=assistant`) and the
+  appointment stores it in a new `source` field; the backend accepts it
+  as optional, the frontend passes it in Stage 17. Owner dashboard UI
+  belongs to Stages 18-21.
+- **Unanswered questions are not collected now** (they are conversation
+  text).
+
+**Deferred (agreed direction, not in Stage 16)**
+
+- Opt-in sharing of a conversation with the salon to improve answers:
+  built together with the salon admin UI, with explicit consent,
+  retention and deletion decided then. Without consent nothing is kept.
+- Human handoff and a knowledge base that learns from staff answers:
+  needs the admin UI, a notification channel and a privacy decision.
+- Fallback model (Anthropic behind the same interface) after the OpenAI
+  provider works.
+- Messenger channels: still deferred per the Stage 10 decision.
+- `Specialist.languages` field: for now salons mention languages in the
+  specialist bio.
+- Voice input in the widget (Stage 17): the customer presses a
+  microphone, sees the recognised text and can edit it before sending;
+  browser-side versus server-side recognition to be researched in
+  Stage 17. The backend stays text-only.
+
+**Rejected**
+
+- Binding booking with deposit inside the chat (conflicts with
+  propose-only).
+- Collecting customer contact details in the chat (the booking form does
+  this).
+
 ### Implementation notes
 
 - **The chat endpoints are public.** They need an explicit `AllowAny`
@@ -5870,38 +5982,45 @@ Decided 21.10.2026. Not yet implemented.
 
 Each sub-step gets its own red/green/commit cycle.
 
-1. **`Salon.assistant_enabled`:** field (default `False`), data migration
-   enabling `bella-demo`, exposed in `GET /api/v1/salons/<slug>/`.
-2. **Provider interface and `MockAssistantProvider`:** streamed events
+1. **Salon fields:** `assistant_enabled` (default `False`, data migration
+   enabling `bella-demo`), `phone`, `address`, `instagram_url`,
+   `assistant_starters`; expose `assistant_enabled` and
+   `assistant_starters` in `GET /api/v1/salons/<slug>/`.
+2. **`SalonFAQ` model**, admin, limits.
+3. **Provider interface and `MockAssistantProvider`:** streamed events
    (text chunk, tool call, end). Plain Python, no views.
-3. **Grounding tools:** `list_services`, `get_specialist_info`,
-   `check_availability`, `get_salon_info`. Money via the booking
-   functions. Two-salon and same-salon isolation tests.
-4. **Session store in Redis DB 3:** salon in the key, sliding 30-minute
-   TTL, last 20 messages, texts only. Test: a session id from another
-   salon resolves to nothing.
-5. **Conversation orchestrator:** model/tool loop, system instructions,
-   proposal validation (tenant-scoped ids, stale slot dropped). Mock only.
-6. **Endpoints:** streaming POST, history GET, 404 when disabled, public
+4. **Tools:** `list_services`, `get_specialist_info` (rating, review
+   count), `check_availability` (filters), `get_salon_info` (money via
+   booking functions, contacts), `get_faq`. Two-salon and same-salon
+   isolation tests.
+5. **Session store in Redis DB 3:** salon in the key, sliding 30-minute
+   TTL, last 20 messages, texts only, customer message stored only with a
+   successful reply. Test: a session id from another salon resolves to
+   nothing.
+6. **Conversation orchestrator:** model/tool loop, system instructions,
+   proposal validation and card data (tenant-scoped ids, stale slots
+   dropped, up to 3 slots). Mock only.
+7. **Endpoints:** streaming POST, history GET, 404 when disabled, public
    mixin, session header in `CORS_ALLOW_HEADERS`. Key test: a tool called
    mid-stream sees the correct salon.
-7. **Limits:** per session, per salon + IP, per-salon daily limit in the
+8. **Limits:** per session, per salon + IP, per-salon daily limit in the
    salon's timezone, global cap of 16 streams released even when a stream
    fails.
-8. **Real OpenAI provider:** adapter, settings and key via env, tests
-   without network; then a manual check with 10-15 Ukrainian questions.
+9. **Analytics counters and `Appointment.source`** (optional, accepted by
+   the booking endpoint).
+10. **Real OpenAI provider:** adapter, settings and key via env, tests
+    without network; then the manual check with 10-15 Ukrainian
+    questions, including the specialist-preference and name-translation
+    cases.
 
 Closure: docs update and a manual stream check.
 
-**The real provider is wired only after sub-step 7 is committed.** Until
-then only the mock provider exists, so endpoints without limits cost
-nothing and are reachable only in local dev.
+**The real provider is wired only after sub-step 8 is committed.** Until
+then only the mock exists, so endpoints without limits cost nothing and
+are reachable only in local dev.
 
 ### Open items (not decisions)
 
-- `Salon.contact_email` exists, but it is for alerts to the salon, not
-  customer-facing; there is no phone or address field. Whether to add
-  customer-facing contacts is still open.
 - Stage 22 requirements: the production server must support streaming
   (threaded workers, no proxy buffering); decide Redis persistence, since
   snapshots could hold conversation text.
