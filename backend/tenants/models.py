@@ -1,13 +1,19 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Length
 from django.db.models.lookups import LessThanOrEqual
 
-from core.i18n import resolve_display_name
+from core.i18n import SUPPORTED_LANGUAGES, resolve_display_name
 from core.models import TimeStamped
 from core.validators import ISO_4217_PATTERN, iso_4217_validator
 
 SALON_ABOUT_MAX_LENGTH = 2000
+
+# Limits for Salon.assistant_starters (docs/DECISIONS.md § Stage 16 planning,
+# "Sub-step 1 details"). Enforced in Salon.clean(), not in the database.
+ASSISTANT_STARTERS_MAX_ITEMS = 3
+ASSISTANT_STARTER_MAX_LENGTH = 60
 
 # Enumerated per-language length checks for the translatable `about` dict
 # (docs/DECISIONS.md § Stage 11.5 sub-step 1). A dict of arbitrary keys can't
@@ -30,6 +36,30 @@ def _about_length_condition() -> models.Q:
             for lang in _ABOUT_LENGTH_LANGUAGES
         )
     )
+
+
+def _assistant_starters_error(value: object) -> str | None:
+    """Return the first problem with an `assistant_starters` value, or None.
+    Shape: a list of at most ASSISTANT_STARTERS_MAX_ITEMS translation dicts,
+    each key a supported language code, each value a string of at most
+    ASSISTANT_STARTER_MAX_LENGTH characters."""
+    if not isinstance(value, list):
+        return "Starters must be a list."
+    if len(value) > ASSISTANT_STARTERS_MAX_ITEMS:
+        return f"At most {ASSISTANT_STARTERS_MAX_ITEMS} starters are allowed."
+    for item in value:
+        if not isinstance(item, dict):
+            return "Each starter must be an object of language code to text."
+        for lang, text in item.items():
+            if lang not in SUPPORTED_LANGUAGES:
+                return f"Unsupported language code: {lang!r}"
+            if not isinstance(text, str):
+                return "Each starter text must be a string."
+            if len(text) > ASSISTANT_STARTER_MAX_LENGTH:
+                return (
+                    f"Each starter text must be at most {ASSISTANT_STARTER_MAX_LENGTH} characters."
+                )
+    return None
 
 
 class Salon(TimeStamped):
@@ -84,6 +114,25 @@ class Salon(TimeStamped):
     max_advance_days = models.PositiveIntegerField(default=60)
     slot_granularity_minutes = models.PositiveIntegerField(default=15)
 
+    # AI assistant switch (docs/DECISIONS.md § Stage 16 planning, "Scope and
+    # tools"). Off by default; the operator enables it per salon in admin.
+    assistant_enabled = models.BooleanField(default=False)
+
+    # Widget starter suggestions: a list of up to 3 translation dicts
+    # ({lang_code: string} each). Empty list means no suggestions. Validated
+    # in clean(), not by a CheckConstraint (docs/DECISIONS.md § Stage 16
+    # planning, "Sub-step 1 details").
+    assistant_starters = models.JSONField(default=list, blank=True)
+
+    # Customer-facing contacts, read by the assistant (get_salon_info) and
+    # not exposed by the public salon endpoint. Unlike contact_email, which
+    # is alerts-only. `phone` has no format rule, same as Customer.phone;
+    # `address` is not translatable (docs/DECISIONS.md § Stage 16 planning,
+    # "Sub-step 1 details").
+    phone = models.CharField(max_length=32, blank=True, default="")
+    address = models.CharField(max_length=255, blank=True, default="")
+    instagram_url = models.URLField(blank=True, default="")
+
     class Meta:
         # `name` is a JSON dict now, not a scalar — it can't be a meaningful
         # ORDER BY key (was `["name"]`).
@@ -110,3 +159,11 @@ class Salon(TimeStamped):
         # in admin (docs/DECISIONS.md § "Admin display of translatable
         # fields"; § "Notification message builder: language resolution").
         return resolve_display_name(self.name, f"Salon #{self.pk}")
+
+    def clean(self) -> None:
+        # Run by full_clean() (the admin form); the only writer of
+        # assistant_starters is the operator, so there is no DB check.
+        super().clean()
+        error = _assistant_starters_error(self.assistant_starters)
+        if error is not None:
+            raise ValidationError({"assistant_starters": error})
