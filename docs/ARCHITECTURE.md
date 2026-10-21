@@ -48,7 +48,7 @@ boundary, not called out as an open question.
 
 ## 2. Domain entities and relationships
 
-Described, not modeled in code:
+Domain entities, all modeled in code (field-level detail lives in the models):
 
 - **Salon** — tenant root. Everything else scopes to it via a `salon` FK. `is_active`
   (default `True`) gates tenant resolution — an inactive or unknown slug resolves the
