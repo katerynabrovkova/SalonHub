@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "payments",
     "notifications",
     "reviews",
+    "ai_assistant",
 ]
 
 AUTH_USER_MODEL = "accounts.User"

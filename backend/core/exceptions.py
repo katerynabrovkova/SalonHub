@@ -173,6 +173,20 @@ class PaymentProviderError(DomainError):
     default_message = "The payment provider could not process this request."
 
 
+class AssistantProviderError(DomainError):
+    """
+    docs/DECISIONS.md § "Stage 16 planning", "Sub-step 3 details": the
+    external model provider failed, not our own code. Real assistant
+    adapters wrap vendor exceptions into it; the orchestrator turns it into
+    a client `error` event. 502 Bad Gateway, same reasoning as
+    PaymentProviderError.
+    """
+
+    code = "assistant_provider_error"
+    status_code = status.HTTP_502_BAD_GATEWAY
+    default_message = "The assistant provider could not process this request."
+
+
 class CategoryHasActiveServicesError(DomainError):
     code = "category_has_active_services"
     status_code = status.HTTP_409_CONFLICT
