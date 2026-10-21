@@ -1023,6 +1023,9 @@ localization note above.
   (`Length` lookup registered on the field; constraint expressed against the
   value's `__length__lte`). The cap must hold for every populated language
   key, not just `en`.
+- `tenants.Salon.assistant_starters` — added in Stage 16 (§ "Stage 16
+  planning", "Sub-step 1 details"). A list of translation dicts, not a
+  single dict: each item is `{lang_code: string}`.
 - `specialists.Specialist.name`
 - `specialists.Specialist.bio`
 - **Notification message templates** — the `(subject, body)` strings
@@ -5779,10 +5782,15 @@ Decided 21.10.2026. Not yet implemented.
   `step`, `date_from`). The model never writes URLs.
 - **The assistant does not see the customer's own appointments**; the
   endpoint does not use account authentication.
-- **New field `Salon.assistant_enabled`, default `False`**, enabled for
-  `bella-demo` by a data migration. When `False`,
-  `GET /api/v1/salons/<slug>/` exposes `assistant_enabled=false` so the
-  widget is not rendered, and the chat endpoints return 404.
+- **New field `Salon.assistant_enabled`, default `False`.** The operator
+  enables it per salon in Django admin, including for `bella-demo`. When
+  `False`, `GET /api/v1/salons/<slug>/` exposes `assistant_enabled=false`
+  so the widget is not rendered, and the chat endpoints return 404.
+  - **Corrected 21.10.2026:** this entry first said `bella-demo` would be
+    enabled by a data migration. There is no data migration: `bella-demo`
+    exists only in local dev databases, created by hand in `/admin/`, so
+    such a migration would be a no-op on fresh, test and production
+    databases.
 
 ### Request flow
 
@@ -5982,10 +5990,12 @@ Agreed after the first planning commit. Mockups: Design canvas boards
 
 Each sub-step gets its own red/green/commit cycle.
 
-1. **Salon fields:** `assistant_enabled` (default `False`, data migration
-   enabling `bella-demo`), `phone`, `address`, `instagram_url`,
+1. **Salon fields:** `assistant_enabled` (default `False`, enabled per
+   salon by the operator in Django admin; no data migration, see "Scope
+   and tools"), `phone`, `address`, `instagram_url`,
    `assistant_starters`; expose `assistant_enabled` and
-   `assistant_starters` in `GET /api/v1/salons/<slug>/`.
+   `assistant_starters` in `GET /api/v1/salons/<slug>/`. Details in
+   "Sub-step 1 details".
 2. **`SalonFAQ` model**, admin, limits.
 3. **Provider interface and `MockAssistantProvider`:** streamed events
    (text chunk, tool call, end). Plain Python, no views.
@@ -6018,6 +6028,31 @@ Closure: docs update and a manual stream check.
 **The real provider is wired only after sub-step 8 is committed.** Until
 then only the mock exists, so endpoints without limits cost nothing and
 are reachable only in local dev.
+
+### Sub-step 1 details (decided 21.10.2026)
+
+- **`Salon.assistant_starters`:** `JSONField`, a list of up to 3 items.
+  Each item is a translation dict `{lang_code: string}`, like other
+  translatable fields; each value is up to 60 characters; unknown
+  language keys are rejected. Validated in the model's `clean()` (run by
+  the admin). No `CheckConstraint`: the only writer is the operator, and
+  per-item length checks on JSON are awkward in the DB. An empty list
+  means no suggestions.
+- **Read side:** `GET /api/v1/salons/<slug>/` resolves each starter with
+  `resolve_translation` for the request's `?lang=` (same fallback as
+  other reads); items that resolve to an empty string are omitted. The
+  response keys are exactly `currency`, `assistant_enabled` and
+  `assistant_starters`. The allowlist test is kept and updated, not
+  removed.
+- **Contacts:** `phone` is `CharField(max_length=32)` with no format rule
+  (same as the Stage 15 customer phone rule, § "Item 10 design details
+  (edit name and phone)"). `address` is `CharField(max_length=255)`, not
+  translatable: the assistant conveys it in the chat language, like
+  `Service.description`. `instagram_url` is a `URLField`. All three are
+  optional and blank by default. They are not exposed in
+  `GET /api/v1/salons/<slug>/` until a frontend consumer exists (design
+  pass, Stages 18-21); the assistant reads them through `get_salon_info`.
+- **No new `Meta` constraints in this sub-step.**
 
 ### Open items (not decisions)
 
