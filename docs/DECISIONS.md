@@ -6309,11 +6309,13 @@ a specialist and a service without linking them.
   - Step 4 handles only `SPECIALIST_DOES_NOT_OFFER_SERVICE`. An inactive
     service is already a 404 there, via the service detail fetch.
 - **Order of work,** each its own commit:
-  1. This docs entry.
+  1. This docs entry. Done 22.10.2026.
   2. Test fixtures link the default specialist to the default service;
      tests that need an unlinked pair create one explicitly. The whole
-     suite is green on unchanged code.
-  3. Backend checks, red/green with mutations.
+     suite is green on unchanged code. Done 22.10.2026.
+  3. Backend checks, red/green with mutations. Done 22.10.2026: the new
+     error, the link check in `create_appointment` and in the slots view,
+     and active-only service binding in the slots and booking serializers.
   4. Frontend messages, red/green.
 
 ### Open items (not decisions)
@@ -6328,3 +6330,7 @@ a specialist and a service without linking them.
   not). Found 21.10.2026. Checked 22.10.2026: they do not; the fix is
   decided in "Fix: the specialist must perform the service (decided
   22.10.2026)" above.
+- `SpecialistsAtTimeQuerySerializer` (`scheduling/serializers.py` ~93)
+  still binds `Service.objects.all()`. Low risk: it only returns linked
+  specialists, and booking step 4 already 404s for an inactive service.
+  Make it active-only in a separate small fix. Found 22.10.2026.
