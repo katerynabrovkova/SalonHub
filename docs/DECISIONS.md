@@ -6236,6 +6236,24 @@ Input details for 4c (decided 22.10.2026):
   most the 20 earliest matches as salon-local ISO strings with offset, in
   the same format as the slots endpoint.
 
+Additions for 4c (22.10.2026):
+
+- **`time_from >= time_to`** (both given) returns
+  `{"error": "invalid_filter"}`, not empty slots (approved 22.10.2026).
+  Both bounds are within one day. A request for "evening or morning"
+  could be mapped to 18:00-10:00 and silently get no slots; the error
+  makes the model split it into two calls. The `ToolSpec` description
+  says so.
+- **An empty `weekdays` list** means no weekday filter.
+- **Slots are sorted in salon time** before the 20-earliest cut, so the
+  result does not depend on the order the engine returns them in.
+- **The explicit tenant check** (`_current_salon()`) at the start of every
+  tool is a deliberate second guard. In 4b, a mutation that weakened the
+  helper was caught only by `get_salon_info`, the one tool that touches no
+  tenant-scoped model; in 4c, removing the call survived. For tools that
+  query a tenant-scoped model first, mutation tests cannot distinguish the
+  explicit check from the manager's own guard.
+
 ### Open items (not decisions)
 
 - Stage 22 requirements: the production server must support streaming
