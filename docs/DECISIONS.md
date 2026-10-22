@@ -6254,6 +6254,68 @@ Additions for 4c (22.10.2026):
   query a tenant-scoped model first, mutation tests cannot distinguish the
   explicit check from the manager's own guard.
 
+### Fix: the specialist must perform the service (decided 22.10.2026)
+
+**Problem.** The public slots endpoint and appointment creation (guest
+and account, specific-specialist path) never check `SpecialistService`,
+and the slots and booking serializers accept an inactive service. A
+booking for an unlinked specialist/service pair or for an inactive
+service succeeds end to end. The normal click path only offers linked
+pairs, so this is reached through stale links (including assistant
+cards), settings changed mid-flow, or direct API calls. The gap was
+already noted in the module docstring of
+`tests/test_booking_create_appointment.py` and never scheduled. 31
+backend tests book unlinked pairs only because the shared fixtures create
+a specialist and a service without linking them.
+
+**Decisions.**
+
+- **Honest errors.** Neither "no free time" (an empty slot list) nor
+  `SLOT_NOT_OFFERED`: both would mislead the customer into retrying.
+- **New domain error** `SpecialistDoesNotOfferServiceError` in
+  `core/exceptions.py`, code `SPECIALIST_DOES_NOT_OFFER_SERVICE`, 400
+  (same casing as `SLOT_NOT_OFFERED`).
+- **Inactive service.** The slots and booking serializers bind only
+  active services, so an inactive service gets the same 400 "does not
+  exist" as an unknown id. This matches the catalog's 404 for inactive
+  services.
+- **Slots endpoint, specific specialist.** An inactive specialist still
+  returns 200 `[]` (Stage 6.I unchanged; checked first). An active but
+  unlinked specialist returns `SPECIALIST_DOES_NOT_OFFER_SERVICE`.
+- **Booking.** `create_appointment` checks the link before the slot
+  check, so both the guest and account paths and any other service-layer
+  caller are covered. The "any" path is unaffected: its candidates are
+  already linked.
+- **Frontend, step 3** reads the error code instead of falling through
+  to the default error page:
+  - `SPECIALIST_DOES_NOT_OFFER_SERVICE`: "Цей майстер не виконує обрану
+    послугу." with a link "Обрати іншого майстра" (step 2 for this
+    service).
+  - A service error: "Ця послуга зараз недоступна." with a link "До всіх
+    послуг".
+  - Any other error: "Не вдалося завантажити доступні години." with two
+    actions, "Спробувати ще раз" (reloads step 3) and "Почати запис
+    спочатку" (back to the booking start).
+- **Frontend, step 4** (guest and account forms): for
+  `SPECIALIST_DOES_NOT_OFFER_SERVICE`, the same specialist message and
+  link as step 3, instead of the generic retry text.
+- **Frontend details (decided 22.10.2026):**
+  - Step 3 recognises a service error from the validation details on the
+    `service` field. An inactive, unknown or other-salon service id all
+    show "Ця послуга зараз недоступна.", which is true for the customer
+    in each case.
+  - "Обрати іншого майстра" always links to step 2 with `entry=service`
+    for this service, even if the customer started from a specialist.
+  - Step 4 handles only `SPECIALIST_DOES_NOT_OFFER_SERVICE`. An inactive
+    service is already a 404 there, via the service detail fetch.
+- **Order of work,** each its own commit:
+  1. This docs entry.
+  2. Test fixtures link the default specialist to the default service;
+     tests that need an unlinked pair create one explicitly. The whole
+     suite is green on unchanged code.
+  3. Backend checks, red/green with mutations.
+  4. Frontend messages, red/green.
+
 ### Open items (not decisions)
 
 - Stage 22 requirements: the production server must support streaming
@@ -6263,5 +6325,6 @@ Additions for 4c (22.10.2026):
   real customers.
 - Check whether the public slots endpoint and appointment creation verify
   that the specialist performs the service (the availability engine does
-  not). Read-only recon after sub-step 4; fix in a separate commit if
-  needed. Found 21.10.2026.
+  not). Found 21.10.2026. Checked 22.10.2026: they do not; the fix is
+  decided in "Fix: the specialist must perform the service (decided
+  22.10.2026)" above.
