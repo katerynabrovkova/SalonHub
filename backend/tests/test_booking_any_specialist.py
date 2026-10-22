@@ -207,6 +207,8 @@ def test_create_appointment_for_any_specialist_retries_next_candidate_after_firs
 ):
     first_choice = _make_specialist(salon, "FirstChoice")
     second_choice = _make_specialist(salon, "SecondChoice")
+    _link_specialist_service(salon=salon, specialist=first_choice, service=service)
+    _link_specialist_service(salon=salon, specialist=second_choice, service=service)
     with tenant_context(salon.id):
         # Occupies first_choice's exact slot — the real
         # _has_overlapping_active_appointment recheck inside create_appointment
@@ -258,6 +260,8 @@ def test_create_appointment_for_any_specialist_raises_slot_unavailable_after_all
 ):
     a = _make_specialist(salon, "A")
     b = _make_specialist(salon, "B")
+    _link_specialist_service(salon=salon, specialist=a, service=service)
+    _link_specialist_service(salon=salon, specialist=b, service=service)
     with tenant_context(salon.id):
         make_appointment(
             salon=salon,

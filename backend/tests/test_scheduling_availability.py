@@ -2210,7 +2210,7 @@ def test_compute_multi_specialist_availability_single_specialist_mirrors_primiti
     specialist's own result.
     """
     monday = dt.date(2026, 8, 17)
-    _link_specialist_service(salon=salon, specialist=specialist, service=service)
+    # The `specialist` fixture is already linked to `service`.
     make_working_hours(
         salon=salon,
         specialist=specialist,

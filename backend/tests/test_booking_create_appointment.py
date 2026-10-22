@@ -88,7 +88,7 @@ from booking.models import Appointment, AppointmentStatus
 from booking.services import create_appointment
 from core.exceptions import SlotNotOfferedError, SlotUnavailableError
 from core.tenancy import tenant_context
-from specialists.models import Specialist
+from specialists.models import Specialist, SpecialistService
 from tests.conftest import make_appointment, make_working_hours
 
 UTC = dt.UTC
@@ -281,6 +281,9 @@ def test_create_appointment_slot_not_offered_specialist_has_no_working_hours(
     FIRST_CANDIDATE, regardless of another specialist's schedule."""
     with tenant_context(salon.id):
         specialist_with_no_hours = Specialist.objects.create(salon=salon, name={"en": "No Hours"})
+        SpecialistService.objects.create(
+            salon=salon, specialist=specialist_with_no_hours, service=service
+        )
     with tenant_context(salon.id), pytest.raises(SlotNotOfferedError) as exc_info:
         create_appointment(
             salon=salon,
@@ -459,6 +462,7 @@ def test_create_appointment_different_specialist_same_interval_both_succeed(
     _working_hours(salon, specialist)
     with tenant_context(salon.id):
         other_specialist = Specialist.objects.create(salon=salon, name={"en": "Other Specialist"})
+        SpecialistService.objects.create(salon=salon, specialist=other_specialist, service=service)
     _working_hours(salon, other_specialist)
 
     make_appointment(
@@ -526,6 +530,7 @@ def test_create_appointment_transaction_not_poisoned_after_db_layer_conflict(
     # right after the failed attempt above.
     with tenant_context(salon.id):
         other_specialist = Specialist.objects.create(salon=salon, name={"en": "Other Specialist"})
+        SpecialistService.objects.create(salon=salon, specialist=other_specialist, service=service)
     _working_hours(salon, other_specialist)
     with tenant_context(salon.id):
         recovery_appt = create_appointment(

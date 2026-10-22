@@ -165,6 +165,7 @@ def test_deactivated_specialist_direct_mode_returns_empty_not_400(
     """
     _freeze_now(monkeypatch)
     inactive = _make_specialist(salon=salon, name="Cleo", is_active=False)
+    _link_specialist_service(salon=salon, specialist=inactive, service=service)
     make_working_hours(
         salon=salon,
         specialist=inactive,

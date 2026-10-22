@@ -9,7 +9,7 @@ from booking.constants import SLOT_HOLD_DURATION
 from booking.models import Appointment, AppointmentStatus
 from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
-from specialists.models import Specialist, TimeOff, WorkingHours
+from specialists.models import Specialist, SpecialistService, TimeOff, WorkingHours
 from tenants.models import FAQ_ITEMS_MAX_ACTIVE, FAQItem, Salon
 
 
@@ -76,9 +76,22 @@ def service(salon, service_category):
 
 
 @pytest.fixture
-def specialist(salon):
+def specialist(request, salon):
+    """
+    When the test also uses the default `service` fixture, linked to it via
+    SpecialistService, as in a real salon where a specialist performs the
+    service they are booked for. Without `service` no service row is
+    created here, so tests that build their own services keep exactly the
+    rows they create. A test that needs an unlinked pair creates its own
+    specialist.
+    """
     with tenant_context(salon.id):
-        return Specialist.objects.create(salon=salon, name={"en": "Jane"})
+        specialist = Specialist.objects.create(salon=salon, name={"en": "Jane"})
+    if "service" in request.fixturenames:
+        service = request.getfixturevalue("service")
+        with tenant_context(salon.id):
+            SpecialistService.objects.create(salon=salon, specialist=specialist, service=service)
+    return specialist
 
 
 @pytest.fixture
