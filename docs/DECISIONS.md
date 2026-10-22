@@ -6316,7 +6316,13 @@ a specialist and a service without linking them.
   3. Backend checks, red/green with mutations. Done 22.10.2026: the new
      error, the link check in `create_appointment` and in the slots view,
      and active-only service binding in the slots and booking serializers.
-  4. Frontend messages, red/green.
+  4. Frontend messages, red/green. Done 22.10.2026, verified in a real
+     browser: unlinked pair at step 3 from both entries, unknown
+     specialist id, unlinked pair at step 4, inactive service, normal
+     booking unaffected. Shared pieces: `apiErrorFromBody` in
+     `lib/api/errors.ts`, used by both `apiRequest` and `getAvailability`;
+     `classifyStep3Error` in `lib/booking/step3Errors.ts`; and
+     `SpecialistNotOfferingNotice`.
 
 ### Open items (not decisions)
 
