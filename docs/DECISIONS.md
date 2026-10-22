@@ -6203,8 +6203,8 @@ definitions and a registry from tool name to function.
   weekdays, optional time-of-day window. `now` is passed in.
 - **The tool enforces what the engine does not:** the service is active;
   the specialist is active and linked to the service; the range is at
-  most 14 days. A longer range returns a message asking the model to
-  narrow it.
+  most 14 days. A longer range returns `{"error": "range_too_long"}` so
+  the model narrows the range.
 - **Weekday and time-of-day filters** are applied to the engine's output
   in the salon's timezone.
 - **Output:** at most the 20 earliest matching slots, plus a flag that
@@ -6213,6 +6213,28 @@ definitions and a registry from tool name to function.
 - **Availability comes only from `scheduling.services`**
   (`compute_candidate_start_times` / `compute_multi_specialist_availability`);
   the tool has no availability logic of its own.
+
+Input details for 4c (decided 22.10.2026):
+
+- **Arguments from the model:** `service_id`; `specialist_id` (an id or
+  `"any"`); `date_from` and `date_to` as salon-local dates `"YYYY-MM-DD"`;
+  optional `weekdays` as lowercase English names (`"monday"` ..
+  `"sunday"`); optional `time_from` and `time_to` as salon-local `"HH:MM"`.
+  A slot matches when `time_from <= start < time_to`.
+- **`now` and `lang`** are passed by the orchestrator, never by the model.
+- **Range:** at most 14 calendar days inclusive
+  (`(date_to - date_from).days <= 13`).
+- **Errors.** Bad model input never raises; the tool returns
+  `{"error": code}` with one of:
+  - `not_found`: unknown, inactive or other-salon service or specialist,
+    identical in all cases;
+  - `specialist_does_not_offer_service`;
+  - `range_too_long`;
+  - `invalid_range`: an unparseable date, or `date_from` after `date_to`;
+  - `invalid_filter`: an unknown weekday name or a bad time format.
+- **Success:** `{"slots": [...], "has_more": bool}`, where `slots` holds at
+  most the 20 earliest matches as salon-local ISO strings with offset, in
+  the same format as the slots endpoint.
 
 ### Open items (not decisions)
 
