@@ -25,6 +25,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.exceptions import SpecialistDoesNotOfferServiceError
 from core.tenancy import get_current_salon_id
 from scheduling.serializers import (
     AvailabilityQuerySerializer,
@@ -35,6 +36,7 @@ from scheduling.services import (
     compute_candidate_start_times,
     compute_multi_specialist_availability,
 )
+from specialists.models import SpecialistService
 from tenants.models import Salon
 
 
@@ -67,6 +69,18 @@ class AvailabilityView(APIView):
             # § Stage 6.G pick-list is_active rule governs a different
             # concern (which specialists a customer is offered to choose
             # from), not a direct id call like this one.
+            #
+            # The link check runs only for an active specialist, so an
+            # inactive one keeps its Stage 6.I 200 [] whether or not it is
+            # linked (docs/DECISIONS.md § "Fix: the specialist must perform
+            # the service").
+            if (
+                specialist.is_active
+                and not SpecialistService.objects.filter(
+                    specialist=specialist, service=service
+                ).exists()
+            ):
+                raise SpecialistDoesNotOfferServiceError()
             candidates = compute_candidate_start_times(
                 specialist=specialist,
                 service=service,

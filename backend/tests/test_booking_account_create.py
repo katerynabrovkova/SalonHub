@@ -43,6 +43,7 @@ from booking.services import create_account_appointment
 from core.exceptions import EmailNotVerifiedError
 from core.tenancy import tenant_context
 from notifications.models import Notification, NotificationTrigger
+from specialists.models import Specialist
 from tests.conftest import make_appointment, make_working_hours
 
 pytestmark = pytest.mark.django_db
@@ -478,4 +479,47 @@ def test_create_account_appointment_rejects_an_unverified_account_directly(
 
     with tenant_context(salon.id):
         assert not Customer.objects.filter(email="direct-call-unverified@example.com").exists()
+        assert not Appointment.objects.exists()
+
+
+# --- 14. The specialist must perform the service ----------------------------
+# docs/DECISIONS.md § "Fix: the specialist must perform the service".
+
+
+def test_account_booking_with_an_unlinked_specialist_returns_400_and_creates_no_appointment(
+    client, monkeypatch, salon, service
+):
+    with tenant_context(salon.id):
+        unlinked = Specialist.objects.create(salon=salon, name={"en": "Dana"})
+    _working_hours(salon, unlinked)
+    _freeze_now(monkeypatch)
+    account = _verified_account(salon, email="unlinked-pair@example.com")
+    client.force_authenticate(user=account)
+
+    response = client.post(_account_bookings_url(salon), _payload(unlinked, service), format="json")
+
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "SPECIALIST_DOES_NOT_OFFER_SERVICE"
+    with tenant_context(salon.id):
+        assert not Appointment.objects.exists()
+
+
+def test_account_booking_with_an_inactive_service_returns_400_on_the_service_field(
+    client, monkeypatch, salon, specialist, service
+):
+    _working_hours(salon, specialist)
+    _freeze_now(monkeypatch)
+    with tenant_context(salon.id):
+        service.is_active = False
+        service.save(update_fields=["is_active"])
+    account = _verified_account(salon, email="inactive-service@example.com")
+    client.force_authenticate(user=account)
+
+    response = client.post(
+        _account_bookings_url(salon), _payload(specialist, service), format="json"
+    )
+
+    assert response.status_code == 400
+    assert "service" in response.data["error"]["details"]
+    with tenant_context(salon.id):
         assert not Appointment.objects.exists()

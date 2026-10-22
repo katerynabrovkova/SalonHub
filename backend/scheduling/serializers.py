@@ -44,7 +44,10 @@ class AvailabilityQuerySerializer(serializers.Serializer):
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
-        self.fields["service"].queryset = Service.objects.all()
+        # Active services only: an inactive one gets the same "does not
+        # exist" 400 as an unknown id (docs/DECISIONS.md § "Fix: the
+        # specialist must perform the service").
+        self.fields["service"].queryset = Service.objects.filter(is_active=True)
         self.fields["specialist"].queryset = Specialist.objects.all()
 
 

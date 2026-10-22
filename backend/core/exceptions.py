@@ -222,6 +222,19 @@ class SlotNotOfferedError(DomainError):
     default_message = "This slot is not currently offered."
 
 
+class SpecialistDoesNotOfferServiceError(DomainError):
+    """
+    docs/DECISIONS.md § "Fix: the specialist must perform the service": the
+    specialist is active but not linked to the service via SpecialistService.
+    Distinct from SlotNotOfferedError, which would invite the customer to
+    retry another time with the same specialist.
+    """
+
+    code = "SPECIALIST_DOES_NOT_OFFER_SERVICE"
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_message = "This specialist does not perform the selected service."
+
+
 class SlotUnavailableError(DomainError):
     """
     docs/DECISIONS.md § Stage 7.C decisions: the slot was valid and offered

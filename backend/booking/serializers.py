@@ -355,7 +355,10 @@ class GuestBookingRequestSerializer(serializers.Serializer):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self.fields["specialist"].queryset = Specialist.objects.all()
-        self.fields["service"].queryset = Service.objects.all()
+        # Active services only: an inactive one gets the same "does not
+        # exist" 400 as an unknown id (docs/DECISIONS.md § "Fix: the
+        # specialist must perform the service").
+        self.fields["service"].queryset = Service.objects.filter(is_active=True)
 
 
 class AccountBookingRequestSerializer(serializers.Serializer):
@@ -391,7 +394,8 @@ class AccountBookingRequestSerializer(serializers.Serializer):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self.fields["specialist"].queryset = Specialist.objects.all()
-        self.fields["service"].queryset = Service.objects.all()
+        # Same active-only binding as GuestBookingRequestSerializer above.
+        self.fields["service"].queryset = Service.objects.filter(is_active=True)
 
     def validate(self, attrs: dict) -> dict:
         account = self.context["request"].user

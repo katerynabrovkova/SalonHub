@@ -61,16 +61,14 @@ layers observable:
     double-booked insert.
 
 "Wrong specialist" (item 5 in the agreed test list) is written here as a
-specialist with no matching `WorkingHours` for the requested day — not as a
-specialist unqualified for the service via `SpecialistService`.
-`compute_candidate_start_times` never checks `SpecialistService` itself
-(only `compute_multi_specialist_availability`'s "any specialist"
-composition does, § Stage 6.H decisions), and `create_appointment` per §
-Stage 7.C decisions only calls `compute_candidate_start_times` — so an
-unqualified-but-active specialist with matching working hours is not
-rejected by this service function at all. That gap is real but out of
-scope for this sub-step's test list; "wrong specialist" is pinned here as
-"no working hours," the one mechanism that actually is enforced.
+specialist with no matching `WorkingHours` for the requested day, linked to
+the service so that only the missing hours are tested. A specialist not
+linked to the service via `SpecialistService` is a separate case:
+`compute_candidate_start_times` never checks the link, so
+`create_appointment` checks it itself, before the slot check, and raises
+`SpecialistDoesNotOfferServiceError` (docs/DECISIONS.md § "Fix: the
+specialist must perform the service";
+`test_create_appointment_unlinked_specialist_is_rejected_before_the_slot_check`).
 
 All fixed `now`/`start_datetime` values are tz-aware UTC literals, never
 `timezone.now()` — same discipline as § Stage 6.F decisions.
@@ -86,7 +84,11 @@ import booking.services as booking_services
 from booking.constants import SLOT_HOLD_DURATION
 from booking.models import Appointment, AppointmentStatus
 from booking.services import create_appointment
-from core.exceptions import SlotNotOfferedError, SlotUnavailableError
+from core.exceptions import (
+    SlotNotOfferedError,
+    SlotUnavailableError,
+    SpecialistDoesNotOfferServiceError,
+)
 from core.tenancy import tenant_context
 from specialists.models import Specialist, SpecialistService
 from tests.conftest import make_appointment, make_working_hours
@@ -315,6 +317,27 @@ def test_create_appointment_slot_not_offered_inactive_specialist(
             now=SAFE_NOW,
         )
     assert exc_info.value.status_code == 400
+    with tenant_context(salon.id):
+        assert Appointment.objects.count() == 0
+
+
+def test_create_appointment_unlinked_specialist_is_rejected_before_the_slot_check(
+    salon, service, customer
+):
+    """docs/DECISIONS.md § "Fix: the specialist must perform the service":
+    the specialist has no WorkingHours, so FIRST_CANDIDATE is not offered
+    either; the link is checked first, so the error names the real cause."""
+    with tenant_context(salon.id):
+        unlinked = Specialist.objects.create(salon=salon, name={"en": "Unlinked"})
+    with tenant_context(salon.id), pytest.raises(SpecialistDoesNotOfferServiceError):
+        create_appointment(
+            salon=salon,
+            specialist=unlinked,
+            service=service,
+            customer=customer,
+            start_datetime=FIRST_CANDIDATE,
+            now=SAFE_NOW,
+        )
     with tenant_context(salon.id):
         assert Appointment.objects.count() == 0
 

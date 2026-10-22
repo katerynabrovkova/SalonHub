@@ -188,6 +188,114 @@ def test_deactivated_specialist_direct_mode_returns_empty_not_400(
     assert response.data == {"available_times": []}
 
 
+# --- the specialist must perform the service --------------------------------
+# docs/DECISIONS.md § "Fix: the specialist must perform the service".
+
+
+@pytest.mark.parametrize(
+    "performs_another_service", [False, True], ids=["no_services", "another_service"]
+)
+def test_unlinked_active_specialist_direct_mode_returns_400_specialist_does_not_offer_service(
+    client, monkeypatch, salon, service, performs_another_service
+):
+    """WorkingHours exist, so a 200 here would carry real slots: the 400 must
+    come from the missing SpecialistService link, not an empty schedule. The
+    `another_service` case links the specialist to a different service, so
+    the check must be for this service, not for any service."""
+    _freeze_now(monkeypatch)
+    unlinked = _make_specialist(salon=salon, name="Dana")
+    if performs_another_service:
+        with tenant_context(salon.id):
+            other_service = Service.objects.create(
+                salon=salon,
+                category=service.category,
+                name={"en": "Pedicure"},
+                duration_minutes=60,
+                price="500.00",
+            )
+        _link_specialist_service(salon=salon, specialist=unlinked, service=other_service)
+    make_working_hours(
+        salon=salon,
+        specialist=unlinked,
+        day_of_week=MONDAY.weekday(),
+        start_time=dt.time(9, 0),
+        end_time=dt.time(10, 15),
+    )
+
+    response = client.get(
+        _availability_url(salon),
+        {
+            "service": service.id,
+            "specialist": unlinked.id,
+            "date_from": MONDAY.isoformat(),
+            "date_to": MONDAY.isoformat(),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "SPECIALIST_DOES_NOT_OFFER_SERVICE"
+
+
+def test_inactive_unlinked_specialist_direct_mode_still_returns_empty_not_400(
+    client, monkeypatch, salon, service
+):
+    """The Stage 6.I inactive check comes before the link check: an inactive
+    specialist is 200 [] whether or not it is linked."""
+    _freeze_now(monkeypatch)
+    inactive = _make_specialist(salon=salon, name="Cleo", is_active=False)
+    make_working_hours(
+        salon=salon,
+        specialist=inactive,
+        day_of_week=MONDAY.weekday(),
+        start_time=dt.time(9, 0),
+        end_time=dt.time(10, 15),
+    )
+
+    response = client.get(
+        _availability_url(salon),
+        {
+            "service": service.id,
+            "specialist": inactive.id,
+            "date_from": MONDAY.isoformat(),
+            "date_to": MONDAY.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.data == {"available_times": []}
+
+
+@pytest.mark.parametrize("mode", ["specific", "any"])
+def test_inactive_service_returns_400_on_the_service_field(
+    client, monkeypatch, salon, specialist, service, mode
+):
+    """`specialist` is linked to `service` and has WorkingHours, so a 200
+    here would carry real slots."""
+    _freeze_now(monkeypatch)
+    make_working_hours(
+        salon=salon,
+        specialist=specialist,
+        day_of_week=MONDAY.weekday(),
+        start_time=dt.time(9, 0),
+        end_time=dt.time(10, 15),
+    )
+    with tenant_context(salon.id):
+        service.is_active = False
+        service.save(update_fields=["is_active"])
+    params = {
+        "service": service.id,
+        "date_from": MONDAY.isoformat(),
+        "date_to": MONDAY.isoformat(),
+    }
+    if mode == "specific":
+        params["specialist"] = specialist.id
+
+    response = client.get(_availability_url(salon), params)
+
+    assert response.status_code == 400
+    assert "service" in response.data["error"]["details"]
+
+
 # --- validation: missing / malformed params ---------------------------------
 
 

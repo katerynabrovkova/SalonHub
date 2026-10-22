@@ -41,6 +41,7 @@ from core.exceptions import (
     PaymentProviderError,
     SlotNotOfferedError,
     SlotUnavailableError,
+    SpecialistDoesNotOfferServiceError,
 )
 from notifications.models import NotificationTrigger
 from notifications.services import record_and_dispatch_notification
@@ -48,7 +49,7 @@ from payments.models import Payment, PaymentStatus
 from payments.providers.base import PaymentProvider
 from payments.services import initiate_refund
 from scheduling.services import compute_candidate_start_times, compute_multi_specialist_availability
-from specialists.models import Specialist
+from specialists.models import Specialist, SpecialistService
 from tenants.models import Salon
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,16 @@ def create_appointment(
     specialist/service/date, or SlotUnavailableError if it was offered but
     got taken between that check and the insert (application-level re-check,
     then the exclusion constraint as the final guard).
+
+    Before the slot check, raises SpecialistDoesNotOfferServiceError when no
+    SpecialistService row links the specialist to the service
+    (docs/DECISIONS.md § "Fix: the specialist must perform the service"):
+    the engine does not check the link, and an unlinked pair must not look
+    like a slot that could be retried.
     """
+    if not SpecialistService.objects.filter(specialist=specialist, service=service).exists():
+        raise SpecialistDoesNotOfferServiceError()
+
     local_date = start_datetime.astimezone(ZoneInfo(salon.timezone)).date()
     candidates = compute_candidate_start_times(
         specialist=specialist,

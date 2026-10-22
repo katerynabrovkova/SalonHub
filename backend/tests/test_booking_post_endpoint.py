@@ -42,10 +42,12 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 import booking.services as booking_services
-from accounts.models import Account, AccountRole
+from accounts.models import Account, AccountRole, Customer
 from booking.guest_tokens import derive_guest_token, validate_guest_token
 from booking.models import Appointment, AppointmentStatus
+from catalog.models import Service
 from core.tenancy import tenant_context
+from specialists.models import Specialist, SpecialistService
 from tests.conftest import make_appointment, make_working_hours
 
 pytestmark = pytest.mark.django_db
@@ -216,3 +218,81 @@ def test_guest_booking_with_a_linked_customers_email_keeps_its_name_and_phone(
     assert appt.customer_id == customer.id
     assert customer.name == "Alice"
     assert customer.phone == "+10000000000"
+
+
+# --- 5. The specialist must perform the service ------------------------------
+# docs/DECISIONS.md § "Fix: the specialist must perform the service".
+
+
+def _make_unlinked_specialist(salon, name: str) -> Specialist:
+    with tenant_context(salon.id):
+        return Specialist.objects.create(salon=salon, name={"en": name})
+
+
+@pytest.mark.parametrize(
+    "performs_another_service", [False, True], ids=["no_services", "another_service"]
+)
+def test_guest_booking_with_an_unlinked_specialist_returns_400_and_creates_nothing(
+    client, monkeypatch, salon, service, performs_another_service
+):
+    """The `another_service` case links the specialist to a different
+    service, so the check must be for this service, not for any service."""
+    unlinked = _make_unlinked_specialist(salon, "Dana")
+    if performs_another_service:
+        with tenant_context(salon.id):
+            other_service = Service.objects.create(
+                salon=salon,
+                category=service.category,
+                name={"en": "Pedicure"},
+                duration_minutes=60,
+                price="500.00",
+            )
+            SpecialistService.objects.create(
+                salon=salon, specialist=unlinked, service=other_service
+            )
+    _working_hours(salon, unlinked)
+    _freeze_now(monkeypatch)
+
+    response = client.post(_bookings_url(salon), _payload(unlinked, service), format="json")
+
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "SPECIALIST_DOES_NOT_OFFER_SERVICE"
+    with tenant_context(salon.id):
+        assert not Appointment.objects.exists()
+        assert not Customer.objects.exists()
+
+
+def test_guest_booking_with_an_inactive_service_returns_400_on_the_service_field(
+    client, monkeypatch, salon, specialist, service
+):
+    _working_hours(salon, specialist)
+    _freeze_now(monkeypatch)
+    with tenant_context(salon.id):
+        service.is_active = False
+        service.save(update_fields=["is_active"])
+
+    response = client.post(_bookings_url(salon), _payload(specialist, service), format="json")
+
+    assert response.status_code == 400
+    assert "service" in response.data["error"]["details"]
+    with tenant_context(salon.id):
+        assert not Appointment.objects.exists()
+
+
+def test_guest_booking_rejects_the_unlinked_higher_pk_specialist_and_books_the_linked_one(
+    client, monkeypatch, salon, specialist, service
+):
+    unlinked = _make_unlinked_specialist(salon, "Dana")
+    assert unlinked.pk > specialist.pk
+    _working_hours(salon, specialist)
+    _working_hours(salon, unlinked)
+    _freeze_now(monkeypatch)
+
+    rejected = client.post(_bookings_url(salon), _payload(unlinked, service), format="json")
+    booked = client.post(_bookings_url(salon), _payload(specialist, service), format="json")
+
+    assert rejected.status_code == 400
+    assert rejected.data["error"]["code"] == "SPECIALIST_DOES_NOT_OFFER_SERVICE"
+    assert booked.status_code == 201
+    with tenant_context(salon.id):
+        assert list(Appointment.objects.values_list("specialist_id", flat=True)) == [specialist.id]
