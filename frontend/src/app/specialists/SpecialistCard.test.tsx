@@ -74,4 +74,12 @@ describe("SpecialistCard", () => {
     render(<SpecialistCard specialist={data} variant="detail" />);
     expect(screen.queryByText("Manicure")).not.toBeInTheDocument();
   });
+
+  // docs/DECISIONS.md § "Fix: specialist list cards lead to the specialist
+  // page": only the grid card is a link; the detail page is the target.
+  it("test_detail_variant_renders_no_link", () => {
+    render(<SpecialistCard specialist={specialist()} variant="detail" />);
+
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
 });
