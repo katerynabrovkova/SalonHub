@@ -2336,11 +2336,15 @@ code. Decided only; none of this is implemented yet.
   `frontend/src/app/booking/page.test.tsx:6`, which currently cites
   `services/[id]/page.tsx`'s `notFound()` usage as the reason its own
   `notFound` mock throws.
-- The service card's click target navigates straight to
+- The service card's click target navigated straight to
   `/booking?entry=service&service=<id>` (confirmed against
   `booking/page.tsx`'s `entry`/`service` param handling) — clicking the
-  card books the service directly, rather than opening the popup. A
+  card booked the service directly, rather than opening the popup. A
   separate "i" (info) button opens `ServiceInfoPopover` instead.
+  Superseded 14.09.2026: the service grid is select-then-confirm now
+  (a radio per card, then "Продовжити" navigates to
+  `/booking?entry=service&service=<id>`); see "Service selection:
+  select-then-confirm interaction pattern" below.
 - Card HTML structure: the card is a relatively-positioned container;
   the `Link` inside it uses the "stretched link" pattern (`absolute
   inset-0`, covering the full card) for its click target, rather than
@@ -2350,6 +2354,8 @@ code. Decided only; none of this is implemented yet.
   nested inside an `<a>` is invalid HTML and produces unpredictable
   click behavior, which is why the stretched-link pattern is used
   instead of the naive "wrap everything in one link" approach.
+  Superseded 14.09.2026: the service card has no `Link` now; see
+  "Service selection: select-then-confirm interaction pattern" below.
 - `getServicesPage.ts`'s `Service` interface gets `description: string
   | null` added. The field has been present in the API response
   (`ServiceReadSerializer.Meta.fields`) since the `d1cd709 feat: add
@@ -6323,6 +6329,26 @@ a specialist and a service without linking them.
      `lib/api/errors.ts`, used by both `apiRequest` and `getAvailability`;
      `classifyStep3Error` in `lib/booking/step3Errors.ts`; and
      `SpecialistNotOfferingNotice`.
+
+### Fix: specialist list cards lead to the specialist page (decided 22.10.2026)
+
+**Problem.** `/specialists/[id]` has the "Забронювати" entry into
+booking (`entry=specialist`), but nothing links to it: the `/specialists`
+list cards are plain blocks. Found during the Stage 16 manual check.
+
+**Decision** (variant A, mockup boards "Майстри А" on the Design canvas):
+
+- On the `/specialists` list, each card (`SpecialistCard` variant
+  `"grid"`) is one whole-card link to `/specialists/<id>`, with a
+  decorative chevron. The link's accessible name is the specialist's
+  name.
+- No nested interactive elements inside the card.
+- The `"detail"` variant is not a link.
+- Variant B (two buttons per card) was rejected: heavier cards, fewer
+  on screen.
+
+**Open item.** No navigation leads to `/specialists` or `/services` at
+all. Site navigation belongs to the design pass (Stages 18-21).
 
 ### Open items (not decisions)
 
