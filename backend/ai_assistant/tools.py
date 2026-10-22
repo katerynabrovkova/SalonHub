@@ -10,13 +10,18 @@ argument. Money comes only from payments.services.compute_deposit_breakdown,
 as strings like the API ("40.00"). An unknown or another salon's id returns
 NOT_FOUND; tools never raise on bad model input.
 
+check_availability (4c) also takes `now` from the orchestrator and reads
+availability only from scheduling.services.
+
 TOOLS maps each tool name to its ToolSpec (what the model sees) and its
 function.
 """
 
 import datetime as dt
+import re
 from collections.abc import Callable
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from django.db.models import Prefetch
 
@@ -26,11 +31,23 @@ from catalog.models import Service
 from core.i18n import resolve_translation
 from core.tenancy import TenantContextMissingError, get_current_salon_id
 from payments.services import compute_deposit_breakdown
-from specialists.models import Specialist
+from scheduling.services import (
+    compute_candidate_start_times,
+    compute_multi_specialist_availability,
+)
+from specialists.models import Specialist, SpecialistService
 from specialists.services import annotate_rating
 from tenants.models import FAQItem, Salon
 
 NOT_FOUND: dict[str, Any] = {"error": "not_found"}
+
+ANY_SPECIALIST = "any"
+MAX_RANGE_DAYS = 14
+MAX_SLOTS = 20
+# Index matches dt.date.weekday() and specialists.models.DayOfWeek.
+WEEKDAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_TIME_PATTERN = re.compile(r"[0-9]{2}:[0-9]{2}")
 
 _NO_PARAMETERS: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
 
@@ -57,6 +74,26 @@ def _parse_id(value: int | str | None) -> int | None:
         parsed = int(value)
         return parsed if parsed > 0 else None
     return None
+
+
+def _parse_date(value: object) -> dt.date | None:
+    """A "YYYY-MM-DD" date from model input, or None for anything else."""
+    if not isinstance(value, str) or not _DATE_PATTERN.fullmatch(value):
+        return None
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _parse_time(value: object) -> dt.time | None:
+    """An "HH:MM" time from model input, or None for anything else."""
+    if not isinstance(value, str) or not _TIME_PATTERN.fullmatch(value):
+        return None
+    try:
+        return dt.time.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def list_services(*, lang: str) -> dict[str, Any]:
@@ -140,6 +177,90 @@ def get_faq(*, lang: str) -> dict[str, Any]:
     }
 
 
+def check_availability(
+    *,
+    lang: str,
+    now: dt.datetime,
+    service_id: int | str | None,
+    specialist_id: int | str | None,
+    date_from: str | None,
+    date_to: str | None,
+    weekdays: list[str] | None = None,
+    time_from: str | None = None,
+    time_to: str | None = None,
+) -> dict[str, Any]:
+    salon = _current_salon()
+
+    start_date = _parse_date(date_from)
+    end_date = _parse_date(date_to)
+    if start_date is None or end_date is None or start_date > end_date:
+        return {"error": "invalid_range"}
+    if (end_date - start_date).days > MAX_RANGE_DAYS - 1:
+        return {"error": "range_too_long"}
+
+    weekday_numbers: set[int] | None = None
+    if weekdays is not None and not isinstance(weekdays, list):
+        return {"error": "invalid_filter"}
+    if weekdays:
+        if not all(day in WEEKDAY_NAMES for day in weekdays):
+            return {"error": "invalid_filter"}
+        weekday_numbers = {WEEKDAY_NAMES.index(day) for day in weekdays}
+    start_time = _parse_time(time_from)
+    end_time = _parse_time(time_to)
+    if (time_from is not None and start_time is None) or (time_to is not None and end_time is None):
+        return {"error": "invalid_filter"}
+    if start_time is not None and end_time is not None and start_time >= end_time:
+        return {"error": "invalid_filter"}
+
+    parsed_service_id = _parse_id(service_id)
+    service = (
+        Service.objects.filter(pk=parsed_service_id, is_active=True).first()
+        if parsed_service_id is not None
+        else None
+    )
+    if service is None:
+        return NOT_FOUND
+
+    if specialist_id == ANY_SPECIALIST:
+        candidates = list(
+            compute_multi_specialist_availability(
+                service=service, salon=salon, date_from=start_date, date_to=end_date, now=now
+            ).keys()
+        )
+    else:
+        parsed_specialist_id = _parse_id(specialist_id)
+        specialist = (
+            Specialist.objects.filter(pk=parsed_specialist_id, is_active=True).first()
+            if parsed_specialist_id is not None
+            else None
+        )
+        if specialist is None:
+            return NOT_FOUND
+        if not SpecialistService.objects.filter(specialist=specialist, service=service).exists():
+            return {"error": "specialist_does_not_offer_service"}
+        candidates = compute_candidate_start_times(
+            specialist=specialist,
+            service=service,
+            salon=salon,
+            date_from=start_date,
+            date_to=end_date,
+            now=now,
+        )
+
+    salon_tz = ZoneInfo(salon.timezone)
+    matches = [
+        local_start
+        for local_start in sorted(candidate.astimezone(salon_tz) for candidate in candidates)
+        if (weekday_numbers is None or local_start.weekday() in weekday_numbers)
+        and (start_time is None or start_time <= local_start.time())
+        and (end_time is None or local_start.time() < end_time)
+    ]
+    return {
+        "slots": [local_start.isoformat() for local_start in matches[:MAX_SLOTS]],
+        "has_more": len(matches) > MAX_SLOTS,
+    }
+
+
 TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
     "list_services": (
         ToolSpec(
@@ -192,5 +313,69 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
             parameters=_NO_PARAMETERS,
         ),
         get_faq,
+    ),
+    "check_availability": (
+        ToolSpec(
+            name="check_availability",
+            description=(
+                "Free start times for one service, with one specialist or any "
+                "specialist, between two salon-local dates (at most 14 days). "
+                "Optionally keep only some weekdays and a time-of-day window "
+                "(time_from inclusive, time_to exclusive). Returns at most the 20 "
+                "earliest times in salon-local ISO 8601 and has_more when more exist."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "service_id": {
+                        "type": "integer",
+                        "description": "Id of the service, as returned by list_services.",
+                    },
+                    "specialist_id": {
+                        "anyOf": [
+                            {"type": "integer"},
+                            {"type": "string", "enum": [ANY_SPECIALIST]},
+                        ],
+                        "description": (
+                            'Id of the specialist, as returned by get_specialist_info, or "any".'
+                        ),
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "First salon-local date, YYYY-MM-DD.",
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "Last salon-local date, YYYY-MM-DD, inclusive.",
+                    },
+                    "weekdays": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": list(WEEKDAY_NAMES),
+                        },
+                        "description": "Keep only these salon-local weekdays.",
+                    },
+                    "time_from": {
+                        "type": "string",
+                        "description": (
+                            "Earliest salon-local start time, HH:MM, inclusive. Both bounds "
+                            "are within one day and time_from must be before time_to; for "
+                            "two separate windows, call the tool twice."
+                        ),
+                    },
+                    "time_to": {
+                        "type": "string",
+                        "description": (
+                            "Salon-local start time limit, HH:MM, exclusive. Must be after "
+                            "time_from, within the same day."
+                        ),
+                    },
+                },
+                "required": ["service_id", "specialist_id", "date_from", "date_to"],
+                "additionalProperties": False,
+            },
+        ),
+        check_availability,
     ),
 }
