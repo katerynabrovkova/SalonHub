@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "@/lib/api/errors";
+
 import { getAvailability } from "./getAvailability";
 
 // Server-only var (docs/DECISIONS.md § Fix: separate server-side API URL for
@@ -66,5 +68,61 @@ describe("getAvailability", () => {
     await expect(
       getAvailability("bella-demo", "5", "2026-08-17", "2026-08-30"),
     ).rejects.toThrow();
+  });
+
+  // docs/DECISIONS.md § "Fix: the specialist must perform the service": step 3
+  // branches on the backend's error code and field details, so a failed
+  // response must reach the caller as an ApiError carrying both. Real
+  // Response objects, so the body is parsed the way production parses it.
+  it("test_specialist_does_not_offer_service_reaches_the_caller_as_api_error_code", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "SPECIALIST_DOES_NOT_OFFER_SERVICE",
+            message: "This specialist does not perform the selected service.",
+            details: {},
+          },
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const error: unknown = await getAvailability(
+      "bella-demo",
+      "5",
+      "2026-08-17",
+      "2026-08-30",
+      "12",
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(400);
+    expect((error as ApiError).code).toBe("SPECIALIST_DOES_NOT_OFFER_SERVICE");
+  });
+
+  it("test_service_field_error_reaches_the_caller_in_api_error_details", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "invalid",
+            message: "Invalid input.",
+            details: { service: ['Invalid pk "5" - object does not exist.'] },
+          },
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const error: unknown = await getAvailability(
+      "bella-demo",
+      "5",
+      "2026-08-17",
+      "2026-08-30",
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).details).toHaveProperty("service");
   });
 });

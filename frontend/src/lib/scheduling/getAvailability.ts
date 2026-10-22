@@ -15,7 +15,14 @@
  * AvailabilityView) — never sent as `specialist=any`, which is a
  * booking-flow URL encoding (docs/DECISIONS.md § Stage 14 implementation
  * decisions), not this endpoint's own query-param contract.
+ *
+ * A non-2xx response throws `ApiError` from the backend envelope, the same
+ * way `apiRequest` does, so step 3 can branch on the code and field details
+ * (docs/DECISIONS.md § "Fix: the specialist must perform the service").
+ * `api/errors.ts` holds only the error type and envelope parsing, nothing
+ * browser-only.
  */
+import { apiErrorFromBody } from "@/lib/api/errors";
 
 export interface AvailabilityResult {
   availableTimes: string[];
@@ -38,7 +45,7 @@ export async function getAvailability(
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to fetch availability for salon ${slug}`);
+    throw apiErrorFromBody(response.status, await response.json());
   }
 
   const body = (await response.json()) as { available_times: string[] };

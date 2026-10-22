@@ -227,6 +227,35 @@ describe("ContactInfoForm", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  // docs/DECISIONS.md § "Fix: the specialist must perform the service".
+  it("test_specialist_does_not_offer_service_shows_message_and_step_2_link_without_navigating", async () => {
+    const user = userEvent.setup();
+    createGuestBookingMock.mockRejectedValueOnce(
+      new ApiError(
+        400,
+        "SPECIALIST_DOES_NOT_OFFER_SERVICE",
+        "This specialist does not perform the selected service.",
+      ),
+    );
+
+    render(
+      <BookingContactInfoProvider>
+        <ContactInfoForm {...BASE_PROPS} entry="specialist" specialist="9" />
+      </BookingContactInfoProvider>,
+    );
+
+    await fillForm(user);
+    await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
+
+    expect(await screen.findByText("Цей майстер не виконує обрану послугу.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Обрати іншого майстра" })).toHaveAttribute(
+      "href",
+      "/booking?entry=service&service=5&step=2",
+    );
+    expect(screen.queryByText("Щось пішло не так. Спробуйте ще раз.")).not.toBeInTheDocument();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it("test_submit_button_disabled_while_pending", async () => {
     const user = userEvent.setup();
     let resolveCreate: (value: unknown) => void = () => {};

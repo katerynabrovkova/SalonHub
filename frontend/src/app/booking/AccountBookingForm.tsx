@@ -25,9 +25,11 @@ import { useAuth } from "@/app/AuthContext";
 import { ApiError } from "@/lib/api/errors";
 import { createAccountBooking } from "@/lib/booking/createAccountBooking";
 import { isSlotGoneError } from "@/lib/booking/isSlotGoneError";
+import { isSpecialistNotOfferingError } from "@/lib/booking/step3Errors";
 
 import { useBookingContactInfo } from "./BookingContactInfoContext";
 import { buildSlotTakenUrl } from "./ContactInfoForm";
+import SpecialistNotOfferingNotice from "./SpecialistNotOfferingNotice";
 
 interface AccountBookingFormProps {
   slug: string;
@@ -52,6 +54,7 @@ export default function AccountBookingForm({
   const { me, refresh } = useAuth();
   const { customerName, setCustomerName, customerPhone, setCustomerPhone } = useBookingContactInfo();
   const [error, setError] = useState<string | null>(null);
+  const [specialistNotOffering, setSpecialistNotOffering] = useState(false);
   const [pending, setPending] = useState(false);
 
   if (me === null) {
@@ -61,6 +64,7 @@ export default function AccountBookingForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setSpecialistNotOffering(false);
     setPending(true);
 
     try {
@@ -77,6 +81,10 @@ export default function AccountBookingForm({
     } catch (err) {
       if (isSlotGoneError(err)) {
         router.push(buildSlotTakenUrl(entry, service, specialist, startDatetime));
+        return;
+      }
+      if (isSpecialistNotOfferingError(err)) {
+        setSpecialistNotOffering(true);
         return;
       }
       if (err instanceof ApiError && err.code === "email_not_verified") {
@@ -130,6 +138,7 @@ export default function AccountBookingForm({
       )}
 
       {error !== null ? <p role="alert">{error}</p> : null}
+      {specialistNotOffering ? <SpecialistNotOfferingNotice service={service} /> : null}
 
       <button type="submit" disabled={pending}>
         Підтвердити запис

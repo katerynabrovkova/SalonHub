@@ -32,7 +32,7 @@
  * Server Components.
  */
 import { apiBaseUrl, readCookie } from "./browserContext";
-import { ApiError, RenewalUnsureError } from "./errors";
+import { ApiError, apiErrorFromBody, RenewalUnsureError } from "./errors";
 import { renewSession } from "./renewSession";
 import { hasSessionHint } from "./sessionHint";
 
@@ -46,18 +46,6 @@ const RENEWAL_EXCLUDED_PATHS = new Set([
   "/auth/logout/",
   "/auth/csrf/",
 ]);
-
-function isErrorEnvelope(
-  body: unknown,
-): body is { error: { code?: unknown; message?: unknown; details?: unknown } } {
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    "error" in body &&
-    typeof (body as { error: unknown }).error === "object" &&
-    (body as { error: unknown }).error !== null
-  );
-}
 
 /** Builds the request headers fresh, re-reading the CSRF cookie each time. */
 function buildRequestHeaders(method: string, options: RequestInit): Headers {
@@ -100,18 +88,7 @@ async function sendAndParse<T>(
   }
 
   if (!response.ok) {
-    if (isErrorEnvelope(body)) {
-      const { code, message, details } = body.error;
-      throw new ApiError(
-        response.status,
-        typeof code === "string" ? code : "unknown_error",
-        typeof message === "string" ? message : "Не вдалося виконати запит.",
-        typeof details === "object" && details !== null
-          ? (details as Record<string, unknown>)
-          : {},
-      );
-    }
-    throw new ApiError(response.status, "unknown_error", "Не вдалося виконати запит.");
+    throw apiErrorFromBody(response.status, body);
   }
 
   return body as T;

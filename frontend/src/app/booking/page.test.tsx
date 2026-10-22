@@ -51,6 +51,7 @@ vi.mock("@/app/AuthContext", () => ({
 }));
 
 // Imported after the mocks above so the mocked modules are what page.tsx sees.
+import { ApiError } from "@/lib/api/errors";
 import { getServiceDetailPage } from "@/lib/catalog/getServiceDetailPage";
 import { formatPrice } from "@/lib/pricing/formatPrice";
 import { getAvailability } from "@/lib/scheduling/getAvailability";
@@ -851,4 +852,108 @@ describe("BookingPage step 2, entry=specialist: fetches and renders services_det
     expect(dialog).toHaveTextContent("A relaxing hand treatment.");
     expect(dialog).not.toHaveTextContent("undefined");
   });
+});
+
+// docs/DECISIONS.md § "Fix: the specialist must perform the service": step 3
+// reads the availability error instead of falling through to the default
+// error page.
+describe("BookingPage step 3: availability errors", () => {
+  beforeEach(() => {
+    mockedGetAvailability.mockReset();
+  });
+
+  async function renderStep3(params: Record<string, string | undefined>) {
+    mockSlug("bella-demo");
+    const element = await BookingPage({ searchParams: searchParamsOf({ ...params, step: "3" }) });
+    render(element);
+  }
+
+  it.each([
+    { entry: "service", params: { entry: "service", service: "5", specialist: "9" }, service: "5" },
+    {
+      entry: "specialist",
+      params: { entry: "specialist", specialist: "9", service: "101" },
+      service: "101",
+    },
+  ])(
+    "test_specialist_does_not_offer_service_shows_message_and_link_to_step_2_for_this_service_($entry)",
+    async ({ params, service }) => {
+      mockedGetAvailability.mockRejectedValueOnce(
+        new ApiError(
+          400,
+          "SPECIALIST_DOES_NOT_OFFER_SERVICE",
+          "This specialist does not perform the selected service.",
+        ),
+      );
+
+      await renderStep3(params);
+
+      expect(screen.getByText("Цей майстер не виконує обрану послугу.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Обрати іншого майстра" })).toHaveAttribute(
+        "href",
+        `/booking?entry=service&service=${service}&step=2`,
+      );
+    },
+  );
+
+  it("test_service_field_error_shows_unavailable_message_and_link_to_all_services", async () => {
+    mockedGetAvailability.mockRejectedValueOnce(
+      new ApiError(400, "invalid", "Invalid input.", {
+        service: ['Invalid pk "5" - object does not exist.'],
+      }),
+    );
+
+    await renderStep3({ entry: "service", service: "5", specialist: "9" });
+
+    expect(screen.getByText("Ця послуга зараз недоступна.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "До всіх послуг" })).toHaveAttribute(
+      "href",
+      "/services",
+    );
+  });
+
+  it("test_specialist_field_error_shows_generic_message_not_service_message", async () => {
+    mockedGetAvailability.mockRejectedValueOnce(
+      new ApiError(400, "invalid", "Invalid input.", {
+        specialist: ['Invalid pk "9" - object does not exist.'],
+      }),
+    );
+
+    await renderStep3({ entry: "service", service: "5", specialist: "9" });
+
+    expect(screen.getByText("Не вдалося завантажити доступні години.")).toBeInTheDocument();
+    expect(screen.queryByText("Ця послуга зараз недоступна.")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      name: "server_error",
+      error: new ApiError(500, "internal_error", "An unexpected error occurred."),
+      params: { entry: "service", service: "5", specialist: "9", date_from: "2026-08-24" },
+      retryHref: "/booking?entry=service&service=5&specialist=9&step=3&date_from=2026-08-24",
+    },
+    {
+      name: "network_failure",
+      error: new TypeError("fetch failed"),
+      params: { entry: "specialist", specialist: "9", service: "101" },
+      retryHref: "/booking?entry=specialist&service=101&specialist=9&step=3",
+    },
+  ])(
+    "test_other_failure_shows_generic_message_with_retry_and_restart_links_($name)",
+    async ({ error, params, retryHref }) => {
+      mockedGetAvailability.mockRejectedValueOnce(error);
+
+      await renderStep3(params);
+
+      expect(screen.getByText("Не вдалося завантажити доступні години.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Спробувати ще раз" })).toHaveAttribute(
+        "href",
+        retryHref,
+      );
+      expect(screen.getByRole("link", { name: "Почати запис спочатку" })).toHaveAttribute(
+        "href",
+        "/services",
+      );
+    },
+  );
 });

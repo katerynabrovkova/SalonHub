@@ -10,8 +10,10 @@
  * to — contact info stays out of the URL entirely (Stage 14.C).
  */
 import { headers } from "next/headers";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { classifyStep3Error } from "@/lib/booking/step3Errors";
 import { getServiceDetailPage } from "@/lib/catalog/getServiceDetailPage";
 import { getAvailability } from "@/lib/scheduling/getAvailability";
 import { groupAvailabilityByDay } from "@/lib/scheduling/groupAvailabilityByDay";
@@ -24,6 +26,7 @@ import ServiceSelectionGrid from "../services/ServiceSelectionGrid";
 import SpecialistSelectionGrid from "../specialists/SpecialistSelectionGrid";
 import BookingStep4 from "./BookingStep4";
 import DateTimeSelectionGrid from "./DateTimeSelectionGrid";
+import SpecialistNotOfferingNotice from "./SpecialistNotOfferingNotice";
 
 interface BookingPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -230,20 +233,54 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
     // to a garbled, non-date string (e.g. "+010000-01") for a dateFrom
     // within WINDOW_DAYS - 1 of that rollover. Sending that to
     // getAvailability gets a correctly-rejected 400 from the backend, which
-    // getAvailability then turns into a generic thrown Error indistinguishable
-    // from a real server failure -- caught here instead, same notFound()
-    // convention as every other invalid param in this branch.
+    // step 3 would show as a generic load failure rather than the invalid
+    // param it is -- caught here instead, same notFound() convention as
+    // every other invalid param in this branch.
     if (!DATE_SHAPE.test(dateTo)) {
       notFound();
     }
 
-    const { availableTimes } = await getAvailability(
-      slug,
-      service,
-      dateFrom,
-      dateTo,
-      specialist === "any" ? undefined : specialist,
-    );
+    let availableTimes: string[];
+    try {
+      ({ availableTimes } = await getAvailability(
+        slug,
+        service,
+        dateFrom,
+        dateTo,
+        specialist === "any" ? undefined : specialist,
+      ));
+    } catch (err) {
+      // docs/DECISIONS.md § "Fix: the specialist must perform the service":
+      // the decided message for each kind instead of the default error page.
+      const kind = classifyStep3Error(err);
+      return (
+        <main className="flex flex-col gap-6 p-8">
+          {kind === "specialist_not_offering" ? (
+            <SpecialistNotOfferingNotice service={service} />
+          ) : kind === "service_unavailable" ? (
+            <div role="alert" className="flex flex-col gap-2">
+              <p>Ця послуга зараз недоступна.</p>
+              <Link href="/services" className="text-blue-600 underline">
+                До всіх послуг
+              </Link>
+            </div>
+          ) : (
+            <div role="alert" className="flex flex-col gap-2">
+              <p>Не вдалося завантажити доступні години.</p>
+              <Link
+                href={`/booking?entry=${entry}&service=${service}&specialist=${specialist}&step=3${rawDateFrom === undefined ? "" : `&date_from=${rawDateFrom}`}`}
+                className="text-blue-600 underline"
+              >
+                Спробувати ще раз
+              </Link>
+              <Link href="/services" className="text-blue-600 underline">
+                Почати запис спочатку
+              </Link>
+            </div>
+          )}
+        </main>
+      );
+    }
 
     return (
       <main className="flex flex-col gap-6 p-8">

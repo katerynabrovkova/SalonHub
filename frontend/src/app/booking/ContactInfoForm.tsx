@@ -22,8 +22,10 @@ import { useState, type FormEvent } from "react";
 
 import { createGuestBooking } from "@/lib/booking/createGuestBooking";
 import { isSlotGoneError } from "@/lib/booking/isSlotGoneError";
+import { isSpecialistNotOfferingError } from "@/lib/booking/step3Errors";
 
 import { useBookingContactInfo } from "./BookingContactInfoContext";
+import SpecialistNotOfferingNotice from "./SpecialistNotOfferingNotice";
 
 interface ContactInfoFormProps {
   slug: string;
@@ -81,11 +83,13 @@ export default function ContactInfoForm({
     setCustomerPhone,
   } = useBookingContactInfo();
   const [error, setError] = useState<string | null>(null);
+  const [specialistNotOffering, setSpecialistNotOffering] = useState(false);
   const [pending, setPending] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setSpecialistNotOffering(false);
     setPending(true);
 
     try {
@@ -103,6 +107,10 @@ export default function ContactInfoForm({
     } catch (err) {
       if (isSlotGoneError(err)) {
         router.push(buildSlotTakenUrl(entry, service, specialist, startDatetime));
+        return;
+      }
+      if (isSpecialistNotOfferingError(err)) {
+        setSpecialistNotOffering(true);
         return;
       }
       setError("Щось пішло не так. Спробуйте ще раз.");
@@ -147,6 +155,7 @@ export default function ContactInfoForm({
       </div>
 
       {error !== null ? <p role="alert">{error}</p> : null}
+      {specialistNotOffering ? <SpecialistNotOfferingNotice service={service} /> : null}
 
       <button type="submit" disabled={pending}>
         Підтвердити запис
