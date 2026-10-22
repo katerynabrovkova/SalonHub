@@ -6339,9 +6339,12 @@ list cards are plain blocks. Found during the Stage 16 manual check.
 **Decision** (variant A, mockup boards "Майстри А" on the Design canvas):
 
 - On the `/specialists` list, each card (`SpecialistCard` variant
-  `"grid"`) is one whole-card link to `/specialists/<id>`, with a
+  `"list"`) is one whole-card link to `/specialists/<id>`, with a
   decorative chevron. The link's accessible name is the specialist's
-  name.
+  name. A new `"list"` variant rather than the `"grid"` one, because
+  booking step 2 (`SpecialistSelectionGrid`) renders `"grid"` inside a
+  radio label, where a link would be nested and would leave the booking
+  flow (decided 22.10.2026, at implementation).
 - No nested interactive elements inside the card.
 - The `"detail"` variant is not a link.
 - Variant B (two buttons per card) was rejected: heavier cards, fewer
