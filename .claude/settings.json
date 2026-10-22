@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(npx *)",
+      "Bash(docker compose exec * npx *)",
+      "Bash(git commit *)",
+      "Bash(git add *)",
+      "Bash(git push *)",
+      "Bash(git reset *)",
+      "Bash(git checkout *)",
+      "Bash(git stash *)",
+      "Bash(git worktree *)",
+      "Bash(git branch *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(git -C *)",
+      "PowerShell(npx *)",
+      "PowerShell(docker compose exec * npx *)",
+      "PowerShell(git commit *)",
+      "PowerShell(git add *)",
+      "PowerShell(git push *)",
+      "PowerShell(git reset *)",
+      "PowerShell(git checkout *)",
+      "PowerShell(git stash *)",
+      "PowerShell(git worktree *)",
+      "PowerShell(git branch *)",
+      "PowerShell(git rebase *)",
+      "PowerShell(git merge *)",
+      "PowerShell(git -C *)"
+    ]
+  }
+}

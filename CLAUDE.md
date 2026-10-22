@@ -288,3 +288,6 @@ docker compose exec frontend npm run typecheck
   directory), it downloads and runs whatever unrelated package has that name from the
   registry: `npx tsc` outside `/app` fetched the stub package `tsc@2.0.4`, not
   TypeScript.
+- **The `npx` rule above and the no-commit / no-history-changing git rules are also
+  enforced as deny rules in `.claude/settings.json`, for both the Bash and PowerShell
+  tools.**
