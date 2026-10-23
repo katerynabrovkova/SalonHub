@@ -5782,12 +5782,14 @@ Decided 21.10.2026. Not yet implemented.
 
 - **Read-only grounding tools only:** `list_services`,
   `get_specialist_info`, `check_availability`, `get_salon_info`,
-  `get_faq`. `get_salon_info` returns the deposit percentage, the 24h
-  cancellation/refund rule, the currency, the timezone and the
-  customer-facing contacts. The per-service deposit amount and amount due
-  at the visit come from `list_services`. Money amounts are computed by
-  the backend with the same functions as booking; the model never
-  computes money.
+  `get_faq`, plus `propose_booking`, which reads and changes no data;
+  the orchestrator intercepts it to validate and show the card (see
+  "Sub-step 6 details"). `get_salon_info` returns the deposit
+  percentage, the 24h cancellation/refund rule, the currency, the
+  timezone and the customer-facing contacts. The per-service deposit
+  amount and amount due at the visit come from `list_services`. Money
+  amounts are computed by the backend with the same functions as
+  booking; the model never computes money.
   - **Refined 21.10.2026,** see "Sub-step 4 details": this entry first
     put the per-service deposit and amount due in `get_salon_info`.
 - **Propose-only handoff** (§ Business rules, unchanged). The proposal
@@ -5805,6 +5807,9 @@ Decided 21.10.2026. Not yet implemented.
   booking" button from the validated proposal using the existing
   `/booking` query parameters (`entry`, `service`, `specialist`, `slot`,
   `step`, `date_from`). The model never writes URLs.
+  - **Refined 23.10.2026,** see "Sub-step 6 details": when no validated
+    slot remains, the card shows a single "Choose a time" ("Обрати час")
+    button instead of "Another day or time"; both go to step 3.
 - **The assistant does not see the customer's own appointments**; the
   endpoint does not use account authentication.
 - **New field `Salon.assistant_enabled`, default `False`.** The operator
@@ -5947,6 +5952,11 @@ Agreed after the first planning commit. Mockups: Design canvas boards
   removed from the card without an `error` event; the card shows the
   remaining validated slots, or only "Another day or time" if none
   remain (see "Scope and tools").
+  - **Refined 23.10.2026,** see "Sub-step 6 details": with 1-3 slots the
+    card keeps the extra "Another day or time" ("Інший день або час")
+    button; with 0 slots it shows a single "Choose a time" ("Обрати
+    час") button instead, because "another" makes no sense when no time
+    was shown. Both go to step 3.
 
 **Widget-related backend**
 
@@ -6041,7 +6051,15 @@ Each sub-step gets its own red/green/commit cycle.
    nothing.
 6. **Conversation orchestrator:** model/tool loop, system instructions,
    proposal validation and card data (tenant-scoped ids, stale slots
-   dropped, up to 3 slots). Mock only.
+   dropped, up to 3 slots). Mock only. Split into three sub-steps, each
+   with its own red/green/commit cycle. Details in "Sub-step 6 details".
+   - **6a. Shared slot check:** the "is this start offered" function and
+     the specialist-service link helper extracted from booking.
+     Behaviour-preserving refactors.
+   - **6b. Proposal tool `propose_booking`,** intercepted by the
+     orchestrator: validation, card data, result to the model.
+   - **6c. Orchestrator:** model/tool loop, system instructions, client
+     events, storing the turn.
 7. **Endpoints:** streaming POST, history GET, 404 when disabled, public
    mixin, session header in `CORS_ALLOW_HEADERS`. Key test: a tool called
    mid-stream sees the correct salon.
@@ -6297,6 +6315,78 @@ Additions for 4c (22.10.2026):
 - **The § Stage 3 Redis note, the `config/settings/base.py` comment and
   `.env.example`** are updated in the same code commit (as already
   required by "Implementation notes").
+
+### Sub-step 6 details (decided 23.10.2026)
+
+**6a. Shared slot check.** Behaviour-preserving refactors that give
+existing booking code a second caller.
+
+- **"Is this start offered."** A function extracted from
+  `booking/services.py` that answers whether a start is offered for
+  (service, specialist or `None` for any, aware start, `now`). It uses
+  `compute_candidate_start_times` / `compute_multi_specialist_availability`
+  exactly as booking does. Booking calls it; booking's tests stay
+  unchanged and green.
+- **Specialist-service link check.** One shared helper, used by booking,
+  the slots view and the tools, in place of the three inline
+  `SpecialistService` queries.
+
+**6b. Proposal tool `propose_booking`.** Intercepted by the orchestrator:
+it is not executed against data and never books anything.
+
+- **Model arguments:** `service_id`, `specialist_id` (an id or `"any"`),
+  optional `slots` (0-3 ISO strings with offset).
+- **Validation:** active service; active and linked specialist, or
+  `"any"`; each slot parsed and checked with the 6a function. Invalid or
+  no-longer-offered slots are dropped (the race case in "Scope and
+  tools"; no `error` event).
+- **Card data computed by the backend:** service name in the site
+  language; specialist name with average rating and review count (or
+  "any"); duration; price; deposit; amount due at the visit; currency;
+  the remaining validated slots (salon-local ISO). Booking links use
+  `entry=service`; the frontend builds them.
+- **Card shape by slot count:** 1 slot → one "Go to booking" button; 2-3
+  → slot chips; 0 → only "Choose a time" (step 3). With 1-3 slots the
+  card also shows "Another day or time" ("Інший день або час"); with 0
+  slots the single button is "Choose a time" ("Обрати час") instead,
+  because "another" makes no sense when no time was shown. Both go to
+  step 3.
+- **Result returned to the model:** what was shown and which slots were
+  dropped, or an error code (`not_found`,
+  `specialist_does_not_offer_service`).
+- **At most one proposal per reply;** a second call returns
+  `{"error": "one_proposal_per_reply"}`.
+
+**6c. Orchestrator.**
+
+- **At most 5 model calls per customer message.** When exceeded, an
+  `error` event with code `assistant_turn_limit` (widget text, Stage 17:
+  "Відповідь обірвалась. Спробуйте ще раз.").
+- **Invalid tool calls.** A tool call with an unknown name, or arguments
+  that do not match the tool's schema (unknown or missing required
+  arguments), returns `{"error": "invalid_tool_call"}` to the model and
+  never raises. It counts toward the 5 calls.
+- **Tool results** are sent back to the model as JSON strings, non-ASCII
+  characters kept.
+- **System instructions** live in a Python module in `ai_assistant`,
+  written in English, built per message with the salon name, today's
+  date and weekday in the salon's timezone, and the site language. They
+  carry every assistant behaviour rule recorded in this section, by
+  reference: § Business rules (propose-only, session-only memory);
+  "Scope and tools" (grounding, money, no URLs, only what the customer
+  asked for); "Language"; "Safety and privacy"; "Product decisions"
+  (knowledge and data, assistant behaviour).
+- **`now`** is taken once per customer message and passed to every tool
+  call.
+- **Text deltas** are forwarded to the client as they arrive, also before
+  later tool rounds.
+- **Stored turn:** the full reply text of the message; tool results and
+  proposals are not stored. The customer message and reply are stored
+  only on success ("Product decisions", Retry).
+- **Logging:** token counts are summed across the message's model calls
+  for the log line (salon, tokens, latency, errors; never text).
+- **The new session id** reaches the widget in a response header
+  (sub-step 7).
 
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
