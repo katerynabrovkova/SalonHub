@@ -6260,6 +6260,38 @@ Additions for 4c (22.10.2026):
   query a tenant-scoped model first, mutation tests cannot distinguish the
   explicit check from the manager's own guard.
 
+### Sub-step 5 details (decided 23.10.2026)
+
+- **Direct redis-py client** (already installed, no new dependency), not
+  Django's cache API. The cache API has no atomic append: a
+  get/modify/set sequence loses a turn when two messages of one session
+  overlap. New env var `ASSISTANT_REDIS_URL`
+  (`redis://redis:6379/3`). The existing unused `REDIS_URL` is left as
+  is.
+- **Module `ai_assistant/session_store.py`** with `new_session_id()`,
+  `load_history(session_id)` and
+  `append_turn(session_id, user_text, assistant_text)`. The salon comes
+  only from tenant context; both read and write raise
+  `TenantContextMissingError` without it.
+- **Storage:** one Redis list per session at key
+  `assistant:session:<salon_id>:<sha256 hex of the session id>`; each
+  item is a JSON object `{role, content}`. `append_turn` pushes the user
+  and assistant messages, trims to the last 20 and sets the 30-minute
+  expiry in one `MULTI`/`EXEC` transaction. `load_history` does not
+  extend the expiry; only a new turn does.
+- **Session id:** `secrets.token_urlsafe(32)`. Only its hash is in the
+  key, like guest tokens, so a Redis snapshot or key listing does not
+  reveal usable ids.
+- **Overlapping messages of one session:** both turns are kept (each pair
+  is written atomically); the widget disables input while a reply streams
+  (Stage 17). No server-side lock.
+- **Tests use a separate Redis DB (15)** through an autouse fixture that
+  overrides `ASSISTANT_REDIS_URL` and flushes only that DB, so running
+  tests never wipes live dev sessions in DB 3.
+- **The § Stage 3 Redis note, the `config/settings/base.py` comment and
+  `.env.example`** are updated in the same code commit (as already
+  required by "Implementation notes").
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
