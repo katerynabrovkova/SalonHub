@@ -470,7 +470,9 @@ describes the mechanisms; the numbers live here, stated once.
 - **DRF throttling needs a shared cache.** `LocMemCache` is per-process, so
   behind N workers the limit silently becomes `rate × N`. Uses
   `RedisCache` on Redis **DB 2** (broker DB 0, result backend DB 1) so
-  throttle keys never collide with Celery's.
+  throttle keys never collide with Celery's. DB 3 holds the AI
+  assistant's chat sessions (`ASSISTANT_REDIS_URL`, Stage 16; see
+  "Sub-step 5 details").
 - **Email verification token: stateless, not single-use, payload includes
   the target email.** `TimestampSigner`-signed `{user_id, email}`, 48h
   expiry. Verifying is idempotent (unlike guest *cancel*), which is why it
@@ -6285,6 +6287,10 @@ Additions for 4c (22.10.2026):
 - **Overlapping messages of one session:** both turns are kept (each pair
   is written atomically); the widget disables input while a reply streams
   (Stage 17). No server-side lock.
+- **The atomicity of `append_turn` (one `MULTI`/`EXEC`) is verified by
+  code review, not by a test.** Mutation M1 (no transaction) survives
+  because tests run sequentially; a threading test was deliberately not
+  added.
 - **Tests use a separate Redis DB (15)** through an autouse fixture that
   overrides `ASSISTANT_REDIS_URL` and flushes only that DB, so running
   tests never wipes live dev sessions in DB 3.

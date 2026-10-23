@@ -1,10 +1,12 @@
 import datetime as dt
+from urllib.parse import urlsplit
 
 import pytest
 from django.core.cache import cache
 from django.utils import timezone
 
 from accounts.models import Account, AccountRole, Customer, User
+from ai_assistant import session_store
 from booking.constants import SLOT_HOLD_DURATION
 from booking.models import Appointment, AppointmentStatus
 from catalog.models import Service, ServiceCategory
@@ -34,6 +36,22 @@ def _clear_cache():
     cache.clear()
     yield
     cache.clear()
+
+
+ASSISTANT_TEST_REDIS_DB = 15
+
+
+@pytest.fixture(autouse=True)
+def _assistant_redis(settings):
+    """Points the assistant session store at Redis DB 15 and flushes only
+    that DB, so a test run never wipes live dev sessions in DB 3
+    (docs/DECISIONS.md § "Sub-step 5 details")."""
+    url = urlsplit(settings.ASSISTANT_REDIS_URL)
+    settings.ASSISTANT_REDIS_URL = url._replace(path=f"/{ASSISTANT_TEST_REDIS_DB}").geturl()
+    client = session_store._client()
+    client.flushdb()
+    yield client
+    client.flushdb()
 
 
 @pytest.fixture

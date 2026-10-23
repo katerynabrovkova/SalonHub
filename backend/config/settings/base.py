@@ -137,13 +137,22 @@ CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 # colliding with Celery's own. LocMemCache (the Django default when CACHES is
 # unset) is per-process: behind multiple gunicorn/uvicorn workers, each one
 # would keep its own counter and the effective rate limit becomes
-# (configured rate × worker count), silently.
+# (configured rate × worker count), silently. DB 3 holds the AI assistant's
+# chat sessions (ASSISTANT_REDIS_URL below), so throttle keys and chat
+# history never share a DB.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": env("REDIS_CACHE_URL"),
     }
 }
+
+# --- AI assistant session store ------------------------------------------------
+#
+# Chat history for ai_assistant.session_store, on its own Redis logical DB
+# (3). A direct redis-py client, not the Django cache: the cache API has no
+# atomic append (docs/DECISIONS.md § "Sub-step 5 details").
+ASSISTANT_REDIS_URL = env("ASSISTANT_REDIS_URL")
 
 # --- DRF / JWT ---------------------------------------------------------------
 
