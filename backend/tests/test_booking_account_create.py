@@ -20,8 +20,8 @@ Fixtures mirror:
   (`test_account_authenticated_for_its_own_salon_gets_rejected_when_querying_another_salons_url`).
 - test_booking_post_endpoint.py's slot machinery: `_working_hours`,
   `_freeze_now`, and `_defeat_slot_validity_check` (the same monkeypatch of
-  the bare module-global `booking_services.compute_candidate_start_times`
-  § Stage 7.C decisions pins for exactly this interception) for the 409
+  the bare module-global `booking_services.is_start_offered`
+  test_booking_create_appointment.py pins for exactly this interception) for the 409
   slot-conflict test.
 - test_auth_me.py's pattern for producing a *verified* Account
   (`account.email_verified_at = timezone.now(); account.save(...)`) --
@@ -98,12 +98,10 @@ def _defeat_slot_validity_check(monkeypatch, start_datetime: dt.datetime) -> Non
     conflicting row trips the application-level overlap re-check
     (SlotUnavailableError -> 409) instead of SlotNotOfferedError (400)."""
 
-    def _fake_compute_candidate_start_times(*args, **kwargs):
-        return [start_datetime]
+    def _fake_is_start_offered(*args, **kwargs):
+        return kwargs["start"] == start_datetime
 
-    monkeypatch.setattr(
-        booking_services, "compute_candidate_start_times", _fake_compute_candidate_start_times
-    )
+    monkeypatch.setattr(booking_services, "is_start_offered", _fake_is_start_offered)
 
 
 def _payload(

@@ -36,7 +36,7 @@ from scheduling.services import (
     compute_candidate_start_times,
     compute_multi_specialist_availability,
 )
-from specialists.models import SpecialistService
+from specialists.services import specialist_offers_service
 from tenants.models import Salon
 
 
@@ -74,12 +74,7 @@ class AvailabilityView(APIView):
             # inactive one keeps its Stage 6.I 200 [] whether or not it is
             # linked (docs/DECISIONS.md § "Fix: the specialist must perform
             # the service").
-            if (
-                specialist.is_active
-                and not SpecialistService.objects.filter(
-                    specialist=specialist, service=service
-                ).exists()
-            ):
+            if specialist.is_active and not specialist_offers_service(specialist, service):
                 raise SpecialistDoesNotOfferServiceError()
             candidates = compute_candidate_start_times(
                 specialist=specialist,

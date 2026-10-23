@@ -12,8 +12,8 @@ real row on the exact requested interval removes that slot from the
 candidate grid entirely and would raise SlotNotOfferedError instead of
 SlotUnavailableError — the same trap test_booking_create_appointment.py's
 own double-booking tests already document. This file reuses that file's
-fix: monkeypatch `booking.services.compute_candidate_start_times` (a bare
-module-global name, pinned for exactly this reason by § Stage 7.C decisions
+fix: monkeypatch `booking.services.is_start_offered` (a bare module-global
+name, pinned for exactly this reason by test_booking_create_appointment.py
 — renaming it silently breaks this test's interception, not just that
 file's) to force the slot-validity check to report the slot as offered,
 then let the real conflicting row trip the real application-level
@@ -105,12 +105,10 @@ def _defeat_slot_validity_check(monkeypatch, start_datetime: dt.datetime) -> Non
     report `start_datetime` as offered, regardless of real DB state — see
     the module docstring for why test 3 needs this."""
 
-    def _fake_compute_candidate_start_times(*args, **kwargs):
-        return [start_datetime]
+    def _fake_is_start_offered(*args, **kwargs):
+        return kwargs["start"] == start_datetime
 
-    monkeypatch.setattr(
-        booking_services, "compute_candidate_start_times", _fake_compute_candidate_start_times
-    )
+    monkeypatch.setattr(booking_services, "is_start_offered", _fake_is_start_offered)
 
 
 # --- 1. Happy path -----------------------------------------------------------

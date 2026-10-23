@@ -8,14 +8,16 @@ Requires tenant context to already be bound (core.tenancy.tenant_context) —
 this function does not bind it itself, same convention as
 scheduling/services.py and specialists/services.py.
 
-`compute_candidate_start_times` is imported here as a bare module-global
-name, and `_has_overlapping_active_appointment` is defined as one, on
-purpose: both are pinned by the double-booking test suite's
-`monkeypatch.setattr(booking.services, "<name>", ...)` calls
-(docs/DECISIONS.md § Stage 7.C decisions, the "two implementation-detail
-names" entry). Do not rename either, or replace the bare import with a
+`is_start_offered` is imported here as a bare module-global name, and
+`_has_overlapping_active_appointment` is defined as one, on purpose: both
+are pinned by the double-booking test suite's
+`monkeypatch.setattr(booking.services, "<name>", ...)` calls (the "two
+implementation-detail names" in tests/test_booking_create_appointment.py's
+module docstring). Do not rename either, or replace the bare import with a
 namespaced module reference, without updating
-tests/test_booking_create_appointment.py in the same change.
+tests/test_booking_create_appointment.py in the same change. Before Stage 16
+sub-step 6a the pinned name was `compute_candidate_start_times`
+(docs/DECISIONS.md § Stage 16 planning, "Sub-step 6 details", 6a).
 """
 
 import datetime as dt
@@ -48,8 +50,9 @@ from notifications.services import record_and_dispatch_notification
 from payments.models import Payment, PaymentStatus
 from payments.providers.base import PaymentProvider
 from payments.services import initiate_refund
-from scheduling.services import compute_candidate_start_times, compute_multi_specialist_availability
-from specialists.models import Specialist, SpecialistService
+from scheduling.services import compute_multi_specialist_availability, is_start_offered
+from specialists.models import Specialist
+from specialists.services import specialist_offers_service
 from tenants.models import Salon
 
 logger = logging.getLogger(__name__)
@@ -94,25 +97,16 @@ def create_appointment(
     the engine does not check the link, and an unlinked pair must not look
     like a slot that could be retried.
     """
-    if not SpecialistService.objects.filter(specialist=specialist, service=service).exists():
+    if not specialist_offers_service(specialist, service):
         raise SpecialistDoesNotOfferServiceError()
 
-    local_date = start_datetime.astimezone(ZoneInfo(salon.timezone)).date()
-    candidates = compute_candidate_start_times(
-        specialist=specialist,
-        service=service,
-        salon=salon,
-        date_from=local_date,
-        date_to=local_date,
-        now=now,
-    )
-    if start_datetime not in candidates:
+    if not is_start_offered(
+        salon=salon, service=service, specialist=specialist, start=start_datetime, now=now
+    ):
         logger.warning(
-            "create_appointment: slot not offered "
-            "(specialist_id=%s, start_datetime=%s, candidate_count=%d)",
+            "create_appointment: slot not offered (specialist_id=%s, start_datetime=%s)",
             specialist.id,
             start_datetime.isoformat(),
-            len(candidates),
         )
         raise SlotNotOfferedError()
 
@@ -226,6 +220,8 @@ def create_appointment_for_any_specialist(
     create_appointment itself is untouched by this — the specific-specialist
     path it already serves keeps its exact existing shape.
     """
+    # Not scheduling.services.is_start_offered: this path needs the list of
+    # specialists free at the start (to order and try them), not a bool.
     local_date = start_datetime.astimezone(ZoneInfo(salon.timezone)).date()
     availability = compute_multi_specialist_availability(
         service=service, salon=salon, date_from=local_date, date_to=local_date, now=now

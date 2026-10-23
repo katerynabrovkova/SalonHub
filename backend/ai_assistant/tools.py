@@ -35,8 +35,8 @@ from scheduling.services import (
     compute_candidate_start_times,
     compute_multi_specialist_availability,
 )
-from specialists.models import Specialist, SpecialistService
-from specialists.services import annotate_rating
+from specialists.models import Specialist
+from specialists.services import annotate_rating, specialist_offers_service
 from tenants.models import FAQItem, Salon
 
 NOT_FOUND: dict[str, Any] = {"error": "not_found"}
@@ -236,7 +236,7 @@ def check_availability(
         )
         if specialist is None:
             return NOT_FOUND
-        if not SpecialistService.objects.filter(specialist=specialist, service=service).exists():
+        if not specialist_offers_service(specialist, service):
             return {"error": "specialist_does_not_offer_service"}
         candidates = compute_candidate_start_times(
             specialist=specialist,

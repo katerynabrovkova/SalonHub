@@ -437,3 +437,40 @@ def compute_multi_specialist_availability(
         for specialist in qualifying_specialists
     ]
     return _merge_specialist_availability(per_specialist)
+
+
+def is_start_offered(
+    *,
+    salon: Salon,
+    service: Service,
+    specialist: Specialist | None,
+    start: dt.datetime,
+    now: dt.datetime,
+) -> bool:
+    """
+    Whether `start` is offered for `service` with `specialist`, or with any
+    qualifying specialist when `specialist` is None (docs/DECISIONS.md §
+    Stage 16 planning, "Sub-step 6 details", 6a).
+
+    The engine is asked for the salon-local date of `start` only, the same
+    single-day call booking makes. Requires tenant context to already be
+    bound, like the engine functions it calls.
+    """
+    if timezone.is_naive(start):
+        raise ValueError("start must be a timezone-aware datetime.")
+
+    local_date = start.astimezone(ZoneInfo(salon.timezone)).date()
+    if specialist is None:
+        availability = compute_multi_specialist_availability(
+            service=service, salon=salon, date_from=local_date, date_to=local_date, now=now
+        )
+        return bool(availability.get(start))
+    candidates = compute_candidate_start_times(
+        specialist=specialist,
+        service=service,
+        salon=salon,
+        date_from=local_date,
+        date_to=local_date,
+        now=now,
+    )
+    return start in candidates

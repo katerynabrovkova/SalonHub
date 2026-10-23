@@ -15,8 +15,9 @@ from django.db.models import Avg, Count, QuerySet
 from django.utils import timezone
 
 from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment
+from catalog.models import Service
 from core.exceptions import SpecialistHasFutureAppointmentsError
-from specialists.models import Specialist
+from specialists.models import Specialist, SpecialistService
 
 
 def _future_appointments(specialist: Specialist) -> QuerySet[Appointment]:
@@ -47,6 +48,15 @@ def annotate_rating(queryset: QuerySet[Specialist]) -> QuerySet[Specialist]:
     specialist with no reviews gets `average_rating=None`, `review_count=0`.
     """
     return queryset.annotate(average_rating=Avg("reviews__rating"), review_count=Count("reviews"))
+
+
+def specialist_offers_service(specialist: Specialist, service: Service) -> bool:
+    """
+    Whether a SpecialistService row links `specialist` to `service`
+    (docs/DECISIONS.md § Stage 16 planning, "Sub-step 6 details", 6a).
+    Tenant-scoped: requires tenant context to already be bound.
+    """
+    return SpecialistService.objects.filter(specialist=specialist, service=service).exists()
 
 
 def soft_delete_specialist(specialist: Specialist) -> None:

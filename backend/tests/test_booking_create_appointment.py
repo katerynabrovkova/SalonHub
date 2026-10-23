@@ -19,14 +19,16 @@ tests (6/7 below) actually exercise the layer they claim to (a short
 docs/DECISIONS.md line recording this as deliberate is a separate,
 follow-up step — not done in this commit):
 
-- `create_appointment` is expected to call the scheduling engine via a
-  bare, module-global `compute_candidate_start_times(...)` reference (i.e.
-  `from scheduling.services import compute_candidate_start_times` at the top
-  of `booking/services.py`), never a namespaced `scheduling_services.compute_...`
-  call — so that `monkeypatch.setattr(booking_services,
-  "compute_candidate_start_times", ...)` actually intercepts it. This
-  mirrors the "from module import name" style `scheduling/services.py`
-  itself already uses for its own cross-app imports.
+- `create_appointment` is expected to call the slot check via a bare,
+  module-global `is_start_offered(...)` reference (i.e.
+  `from scheduling.services import is_start_offered` at the top of
+  `booking/services.py`), never a namespaced `scheduling_services.is_...`
+  call — so that `monkeypatch.setattr(booking_services, "is_start_offered",
+  ...)` actually intercepts it. This mirrors the "from module import name"
+  style `scheduling/services.py` itself already uses for its own cross-app
+  imports. (Until Stage 16 sub-step 6a the pinned name was the engine's
+  `compute_candidate_start_times`; docs/DECISIONS.md § Stage 16 planning,
+  "Sub-step 6 details", 6a.)
 - The private double-booking re-check helper (§ Stage 7.C decisions,
   "Double-booking prevention, two layers") is expected to be named
   `_has_overlapping_active_appointment`, called as a bare module-global
@@ -49,7 +51,7 @@ for the ordinary (non-racing) case, and differ only in *when* they run — the
 re-check exists specifically for the gap between the two. To test each
 double-booking layer in isolation, both tests force the slot-validity check
 to report the slot as offered regardless of real state
-(`compute_candidate_start_times` monkeypatched to return `[start_datetime]`)
+(`is_start_offered` monkeypatched to return True)
 before making the real conflicting row's effect on each of the two deeper
 layers observable:
   - Test 6 (application-level layer): only the engine check is defeated;
@@ -350,12 +352,10 @@ def _defeat_slot_validity_check(monkeypatch, start_datetime: dt.datetime) -> Non
     report `start_datetime` as offered, regardless of real DB state — see
     the module docstring for why the double-booking tests need this."""
 
-    def _fake_compute_candidate_start_times(*args, **kwargs):
-        return [start_datetime]
+    def _fake_is_start_offered(*args, **kwargs):
+        return kwargs["start"] == start_datetime
 
-    monkeypatch.setattr(
-        booking_services, "compute_candidate_start_times", _fake_compute_candidate_start_times
-    )
+    monkeypatch.setattr(booking_services, "is_start_offered", _fake_is_start_offered)
 
 
 def test_create_appointment_double_booking_application_layer_blocks_before_insert(

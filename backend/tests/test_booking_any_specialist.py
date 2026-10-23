@@ -238,7 +238,7 @@ def test_create_appointment_for_any_specialist_retries_next_candidate_after_firs
     # before the double-booking recheck ever runs (same trap documented in
     # test_booking_create_appointment.py's module docstring).
     monkeypatch.setattr(
-        booking_services, "compute_candidate_start_times", lambda **kwargs: [FIRST_CANDIDATE]
+        booking_services, "is_start_offered", lambda **kwargs: kwargs["start"] == FIRST_CANDIDATE
     )
 
     with tenant_context(salon.id):
@@ -291,7 +291,7 @@ def test_create_appointment_for_any_specialist_raises_slot_unavailable_after_all
         lambda candidates, salon, date, rng=None: [a, b],
     )
     monkeypatch.setattr(
-        booking_services, "compute_candidate_start_times", lambda **kwargs: [FIRST_CANDIDATE]
+        booking_services, "is_start_offered", lambda **kwargs: kwargs["start"] == FIRST_CANDIDATE
     )
 
     with tenant_context(salon.id), pytest.raises(SlotUnavailableError):
