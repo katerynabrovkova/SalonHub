@@ -6327,6 +6327,20 @@ existing booking code a second caller.
   `compute_candidate_start_times` / `compute_multi_specialist_availability`
   exactly as booking does. Booking calls it; booking's tests stay
   unchanged and green.
+  - **Refined 23.10.2026, during implementation:** "booking's tests stay
+    unchanged" could not hold together with "booking calls it". Seven
+    existing tests force a start to look offered by monkeypatching the
+    bare name `booking.services.compute_candidate_start_times`; once
+    `create_appointment` goes through `is_start_offered`, that patch no
+    longer reaches the check. The alternative was to keep booking's
+    inline check and give `is_start_offered` only the assistant as a
+    caller. Agreed instead: the seven tests patch
+    `booking.services.is_start_offered` (true only for the forced start)
+    and each still exercises the same conflict path. The pinned name in
+    `tests/test_booking_create_appointment.py`'s module docstring and in
+    `booking/services.py`'s module docstring changes accordingly. The
+    "any" booking path keeps its own `compute_multi_specialist_availability`
+    call: it needs the list of free specialists, not a bool.
 - **Specialist-service link check.** One shared helper, used by booking,
   the slots view and the tools, in place of the three inline
   `SpecialistService` queries.
