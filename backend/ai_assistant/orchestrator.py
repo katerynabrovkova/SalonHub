@@ -19,7 +19,7 @@ import datetime as dt
 import json
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import Any, Literal, cast
 
 from ai_assistant import tools
@@ -87,7 +87,7 @@ def run_turn(
     lang: str,
     now: dt.datetime,
     provider: AssistantProvider,
-) -> Iterator[dict[str, Any]]:
+) -> Generator[dict[str, Any]]:
     salon = tools._current_salon()
     system = build_system_instructions(salon=salon, now=now, lang=lang)
     specs = _tool_specs()
@@ -157,6 +157,10 @@ def run_turn(
     except AssistantProviderError:
         outcome = "provider_error"
         yield {"type": "error", "code": "assistant_provider_error"}
+    except GeneratorExit:
+        # The customer closed the stream: nothing was stored.
+        outcome = "cancelled"
+        raise
     finally:
         logger.info(
             "assistant turn: salon_id=%s outcome=%s provider_calls=%d "

@@ -286,7 +286,15 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 # advertised it as allowed and the browser silently blocked the real
 # request after a 200 OPTIONS — extend, don't replace, the defaults so
 # Content-Type and the rest keep working.
-CORS_ALLOW_HEADERS = [*default_headers, "x-guest-token"]
+#
+# The assistant widget sends and reads X-Assistant-Session (docs/DECISIONS.md
+# § "Sub-step 7 details"), so it is allowed here as well.
+CORS_ALLOW_HEADERS = [*default_headers, "x-guest-token", "x-assistant-session"]
+
+# A cross-origin fetch can read only the safelisted response headers unless
+# others are exposed. The assistant widget must read the new session id from
+# X-Assistant-Session on the response; without this it silently gets null.
+CORS_EXPOSE_HEADERS = ["x-assistant-session"]
 
 # --- CSRF ------------------------------------------------------------------
 #
