@@ -6427,6 +6427,43 @@ Instruction rules added 23.10.2026 (in `ai_assistant/instructions.py`):
   листа-підтвердження." This replaces the earlier wording "give the
   salon's contacts".
 
+### Sub-step 7 details (decided 25.10.2026)
+
+- **URLs** (app `ai_assistant`, included like the other apps):
+  `POST /api/v1/salons/<slug>/assistant/messages/` (name
+  `assistant-message-create`) and
+  `GET /api/v1/salons/<slug>/assistant/history/` (name
+  `assistant-history`). Both use `PublicEndpointMixin` and `AllowAny`.
+  No CSRF surface: neither endpoint uses cookie auth.
+- **Request:** JSON body `{"message": "..."}`; the site language comes
+  from `?lang=`. Validation runs before the stream starts and fails with
+  the normal error envelope: a missing, empty or whitespace-only message
+  → 400; over 2000 characters → 400. Assistant disabled for the salon →
+  404 envelope on both endpoints.
+- **Stream format: NDJSON** (one JSON event per line), content type
+  `application/x-ndjson`. Chosen over SSE because the message must be
+  sent with POST (a GET would put customer text into URLs, server and
+  proxy logs and browser history), and the browser's built-in SSE client
+  supports only GET without custom headers, so the widget reads the
+  stream with `fetch` either way.
+- **Session header `X-Assistant-Session`** in both the request and the
+  response. Added to `CORS_ALLOW_HEADERS` and `CORS_EXPOSE_HEADERS`: a
+  cross-origin `fetch` cannot read a custom response header unless it is
+  exposed, and mocked tests cannot catch this.
+- **POST with no header, or with an unknown, expired or other-salon id:**
+  a new conversation starts silently with a new id in the response
+  header. No error, and no hint whether the old id existed.
+- **GET history:** `{"messages": [{role, content}]}`. No header, or an
+  unknown, expired or other-salon id → `{"messages": []}` (200, not
+  404).
+- **The view's generator binds `tenant_context(salon_id)` itself** and
+  converts any unexpected exception into
+  `{"type": "error", "code": "internal_error"}`. Details go only to the
+  log, never conversation text. `AssistantProviderError` and the turn
+  limit keep their own codes.
+- **The customer closing the tab mid-stream:** nothing is stored; the
+  logged outcome is `cancelled`, not `error`.
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
@@ -6536,3 +6573,7 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   still binds `Service.objects.all()`. Low risk: it only returns linked
   specialists, and booking step 4 already 404s for an inactive service.
   Make it active-only in a separate small fix. Found 22.10.2026.
+- Some public views (guest booking, salon detail, catalog and specialist
+  reads) do not use `PublicEndpointMixin`, so a stale access cookie may
+  give 401 there. Read-only recon after sub-step 7; fix separately if
+  confirmed. Found 23.10.2026.
