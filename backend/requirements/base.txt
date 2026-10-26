@@ -18,3 +18,7 @@ django-cors-headers==4.9.0
 # § "WayForPayProvider: first-time technical conventions". Runtime
 # dependency, not dev-only: this provider runs in production, not just tests.
 requests==2.32.5
+# The AI assistant's OpenAI adapter (Responses API) — see docs/DECISIONS.md
+# § "Sub-step 10 details", "SDK". Newest release on or before 12.10.2026;
+# requires Python >= 3.10. Runtime dependency.
+openai==3.29.0

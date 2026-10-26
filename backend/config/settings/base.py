@@ -156,10 +156,18 @@ ASSISTANT_REDIS_URL = env("ASSISTANT_REDIS_URL")
 
 # --- AI assistant: model provider ---------------------------------------------
 #
+# docs/DECISIONS.md § "Sub-step 10 details", "Settings". ASSISTANT_PROVIDER
+# is "mock" (default) or "openai"; with "openai", the API key and the
+# safety_identifier secret are required (system check in
+# ai_assistant/checks.py). The per-call timeout, retries and
+# max_output_tokens are constants in the adapter, deliberately not here:
+# the timeout is bound by the deadline + timeout < 120 s rule.
+ASSISTANT_PROVIDER = env("ASSISTANT_PROVIDER", default="mock")
+ASSISTANT_OPENAI_API_KEY = env("ASSISTANT_OPENAI_API_KEY", default="")
+ASSISTANT_OPENAI_MODEL = env("ASSISTANT_OPENAI_MODEL", default="gpt-6-luna")
+ASSISTANT_OPENAI_REASONING_EFFORT = env("ASSISTANT_OPENAI_REASONING_EFFORT", default="low")
 # HMAC key for the safety_identifier sent to the model provider
-# (ai_assistant.safety_identifier; docs/DECISIONS.md § "Sub-step 10
-# details"). Its own secret, never SECRET_KEY. Empty is fine with the mock
-# provider, the only one wired so far.
+# (ai_assistant.safety_identifier). Its own secret, never SECRET_KEY.
 ASSISTANT_SAFETY_IDENTIFIER_SECRET = env("ASSISTANT_SAFETY_IDENTIFIER_SECRET", default="")
 
 # --- DRF / JWT ---------------------------------------------------------------
