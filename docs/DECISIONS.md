@@ -6063,9 +6063,11 @@ Each sub-step gets its own red/green/commit cycle.
 7. **Endpoints:** streaming POST, history GET, 404 when disabled, public
    mixin, session header in `CORS_ALLOW_HEADERS`. Key test: a tool called
    mid-stream sees the correct salon.
-8. **Limits:** per session, per salon + IP, per-salon daily limit in the
-   salon's timezone, global cap of 16 streams released even when a stream
-   fails.
+8. **Limits**, split into two sub-steps, each with its own
+   red/green/commit cycle. Details in "Sub-step 8 details".
+   - **8a. Pre-stream limits:** per session, per salon + IP, per-salon
+     daily limit in the salon's timezone.
+   - **8b. Global cap of 16 streams,** released even when a stream fails.
 9. **Analytics counters and `Appointment.source`** (optional, accepted by
    the booking endpoint).
 10. **Real OpenAI provider:** adapter, settings and key via env, tests
@@ -6464,6 +6466,58 @@ Instruction rules added 23.10.2026 (in `ai_assistant/instructions.py`):
 - **The customer closing the tab mid-stream:** nothing is stored; the
   logged outcome is `cancelled`, not `error`.
 
+### Sub-step 8 details (decided 26.10.2026)
+
+**8a. Pre-stream limits.** All of them answer before the stream starts,
+with the normal error envelope.
+
+- **Per session, 10/min, and per salon + IP, 200/hour:** two
+  `SimpleRateThrottle` subclasses in `ai_assistant/throttles.py`, each
+  with its own scope and `get_cache_key`. Applied only to the message
+  POST.
+  - **Session key:** the salon id plus the SHA-256 of the
+    `X-Assistant-Session` header. No header → this throttle does not
+    apply. The salon + IP limit is the backstop; rotating ids can bypass
+    the per-session limit by design.
+  - **Salon + IP key:** the salon id plus DRF's `get_ident()`.
+  - Both use DRF's default cache (DB 2).
+  - **Refusal:** 429 with code `throttled` and `Retry-After`, as
+    elsewhere. Widget text for a throttled assistant message (Stage 17):
+    "Ви пишете швидше, ніж я встигаю думати 😅 Зачекайте, будь ласка,
+    хвилинку."
+- **Daily limit per salon: 1000 accepted messages per salon-local day.**
+  Redis key `assistant:daily:<salon_id>:<local ISO date>` in the
+  assistant DB (3). `INCR` in the view after validation and before
+  streaming; the key expires after the end of that local day.
+  - An accepted message counts even if the reply later fails, and "Try
+    again" counts again: every accepted message costs a provider call.
+  - **A message refused by the cap does not count:** on a 503
+    `assistant_busy` refusal, the view undoes that message's daily
+    increment (`DECR`) before returning.
+  - **Over the limit:** 429 with code `assistant_daily_limit` and
+    `Retry-After` until the salon's local midnight.
+- **History GET is not limited** (a cheap Redis read).
+
+**8b. Global cap of 16 concurrent streams across processes.**
+
+- **A Redis sorted set in the assistant DB.** Each stream adds a random
+  member scored with the current time. Acquiring is atomic (one Lua
+  script): it removes members older than 120 seconds, counts, and adds
+  the member only if there are fewer than 16. Release removes the member
+  and is idempotent.
+- **Acquired in the view before streaming.** Released in the stream's
+  `finally`, by a response closer for a stream that never started, and on
+  any exception between acquiring and returning the response. A crashed
+  process's member expires after 120 seconds instead of blocking a slot
+  forever.
+- **Refusal:** 503 with code `assistant_busy` and a short `Retry-After`.
+  Not 429: the customer did nothing wrong. The message's daily increment
+  is undone first (see 8a).
+
+**Order in the message POST:** throttles (DRF, before the view), then the
+`assistant_enabled` 404, then validation 400, then the daily limit, then
+the cap.
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
@@ -6594,3 +6648,8 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   - Schedule: a separate fix after Stage 16 and before Stage 22. Extend
     `tests/test_public_endpoints_ignore_invalid_cookie.py` to every view
     in the list.
+- `X-Forwarded-For` can be spoofed while `NUM_PROXIES` is unset. This
+  defeats every IP-keyed throttle (login, register, password reset, guest
+  token, and the assistant's salon + IP limit) whenever a client reaches
+  the backend directly. Must be settled in Stage 22 with the proxy layout.
+  Found 26.10.2026.
