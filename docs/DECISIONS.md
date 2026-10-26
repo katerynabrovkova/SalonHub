@@ -6513,6 +6513,13 @@ with the normal error envelope.
 - **Refusal:** 503 with code `assistant_busy` and a short `Retry-After`.
   Not 429: the customer did nothing wrong. The message's daily increment
   is undone first (see 8a).
+- **Mutation results.** The slot has two release paths: the generator's
+  `finally` and `_SlotReleasingStream.close()`. A WSGI server always calls
+  `close()`, and the Django test client does so once the body is read to
+  the end, so M5 and M6 survive by design; a double release is harmless
+  (`ZREM` of the stream's own member). The 120-second stale cutoff is the
+  last safety net. M11 (Lua atomicity) survives because the tests run
+  sequentially.
 
 **Order in the message POST:** throttles (DRF, before the view), then the
 `assistant_enabled` 404, then validation 400, then the daily limit, then

@@ -205,6 +205,20 @@ class AssistantDailyLimitError(DomainError):
         super().__init__()
 
 
+class AssistantBusyError(DomainError):
+    """
+    docs/DECISIONS.md § "Sub-step 8 details", 8b: all 16 concurrent stream
+    slots are taken. Raised by the message view before streaming, after
+    undoing the message's daily count. 503, not 429: the customer did
+    nothing wrong. The view sends `retry_after` as Retry-After.
+    """
+
+    code = "assistant_busy"
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_message = "The assistant is busy. Please try again shortly."
+    retry_after = 10
+
+
 class CategoryHasActiveServicesError(DomainError):
     code = "category_has_active_services"
     status_code = status.HTTP_409_CONFLICT

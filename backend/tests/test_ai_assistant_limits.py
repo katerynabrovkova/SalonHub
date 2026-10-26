@@ -115,6 +115,14 @@ def _event_types(response) -> list[str]:
     return [json.loads(line)["type"] for line in lines if line]
 
 
+def _read_to_end(response) -> None:
+    """Reads a stream to the end, so the test client closes the response as
+    a real server does, freeing its stream slot (8b). A bare
+    response.close() here would fire request_finished outside the test
+    client and close the test's database connection."""
+    b"".join(response.streaming_content)
+
+
 def _error_code(response) -> str | None:
     data = getattr(response, "data", None)
     if isinstance(data, dict) and isinstance(data.get("error"), dict):
@@ -142,7 +150,9 @@ def test_session_throttle_refuses_the_11th_message_with_retry_after(monkeypatch,
     _use_provider(monkeypatch, _reply() * 11)
 
     for _ in range(10):
-        assert _post(enabled_salon.slug, session_id="session-a").status_code == 200
+        sent = _post(enabled_salon.slug, session_id="session-a")
+        assert sent.status_code == 200
+        _read_to_end(sent)
 
     response = _post(enabled_salon.slug, session_id="session-a")
 
@@ -155,7 +165,7 @@ def test_session_throttle_refuses_the_11th_message_with_retry_after(monkeypatch,
 def test_another_session_id_from_the_same_ip_is_not_affected(monkeypatch, enabled_salon):
     _use_provider(monkeypatch, _reply() * 12)
     for _ in range(10):
-        _post(enabled_salon.slug, session_id="session-a")
+        _read_to_end(_post(enabled_salon.slug, session_id="session-a"))
     assert _post(enabled_salon.slug, session_id="session-a").status_code == 429
 
     response = _post(enabled_salon.slug, session_id="session-b")
@@ -176,7 +186,9 @@ def test_session_counts_are_per_salon(monkeypatch, enabled_salon, enabled_other_
 
     for salon in (enabled_salon, enabled_other_salon):
         for _ in range(10):
-            assert _post(salon.slug, session_id="same-raw-value").status_code == 200
+            sent = _post(salon.slug, session_id="same-raw-value")
+            assert sent.status_code == 200
+            _read_to_end(sent)
 
     assert _post(enabled_salon.slug, session_id="same-raw-value").status_code == 429
     assert _post(enabled_other_salon.slug, session_id="same-raw-value").status_code == 429
@@ -191,7 +203,9 @@ def test_salon_ip_throttle_refuses_the_201st_message_per_salon(
     _use_provider(monkeypatch, _reply() * 202)
 
     for _ in range(200):
-        assert _post(enabled_salon.slug).status_code == 200
+        sent = _post(enabled_salon.slug)
+        assert sent.status_code == 200
+        _read_to_end(sent)
 
     refused = _post(enabled_salon.slug)
     other = _post(enabled_other_salon.slug)

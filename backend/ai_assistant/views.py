@@ -17,7 +17,10 @@ X-Assistant-Session header both ways; an id with no history in this salon
 
 Limits (docs/DECISIONS.md § "Sub-step 8 details", 8a) all answer before the
 stream: the per-session and salon + IP throttles run before the view, then
-the 404, the 400, and the per-salon daily count. History is unthrottled.
+the 404, the 400, the per-salon daily count, and the global stream cap
+(8b). The stream slot is freed in the stream's finally, when the response
+is closed (also for a body never iterated), and on any exception before the
+response is returned. History is unthrottled.
 
 The response body is iterated after TenantResolutionMiddleware has already
 unbound the tenant, so the generator binds tenant_context itself. Any
@@ -29,7 +32,7 @@ so the orchestrator logs the turn as cancelled.
 import datetime as dt
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import closing
 from typing import Any
 
@@ -45,8 +48,11 @@ from rest_framework.views import APIView
 from accounts.views import PublicEndpointMixin
 from ai_assistant.limits import (
     DAILY_MESSAGE_LIMIT,
+    acquire_stream_slot,
     count_daily_message,
+    release_stream_slot,
     seconds_until_local_midnight,
+    undo_daily_message,
 )
 from ai_assistant.orchestrator import run_turn
 from ai_assistant.providers import get_assistant_provider
@@ -58,7 +64,7 @@ from ai_assistant.throttles import (
     AssistantSalonIPThrottle,
     AssistantSessionThrottle,
 )
-from core.exceptions import AssistantDailyLimitError
+from core.exceptions import AssistantBusyError, AssistantDailyLimitError
 from core.i18n import resolve_language_code
 from core.tenancy import get_current_salon_id, tenant_context
 from tenants.models import Salon
@@ -87,7 +93,8 @@ def _stream(
     lang: str,
     provider: AssistantProvider,
     now: dt.datetime,
-) -> Iterator[str]:
+    slot: str,
+) -> Generator[str]:
     with tenant_context(salon_id):
         try:
             with closing(
@@ -105,6 +112,34 @@ def _stream(
             # Never the customer text: only the salon and the traceback.
             logger.exception("assistant stream failed: salon_id=%s", salon_id)
             yield _line(INTERNAL_ERROR_EVENT)
+        finally:
+            release_stream_slot(slot)
+
+
+class _SlotReleasingStream:
+    """
+    The stream body, plus a close() that frees the stream slot.
+    StreamingHttpResponse calls close() when the response is closed, also
+    when the body was never iterated; closing a generator that never started
+    skips its finally. Release is idempotent, so when the generator's finally
+    has already freed the slot, this second release is harmless.
+    """
+
+    def __init__(self, events: Generator[str], slot: str) -> None:
+        self._events = events
+        self._slot = slot
+
+    def __iter__(self) -> Iterator[str]:
+        return self
+
+    def __next__(self) -> str:
+        return next(self._events)
+
+    def close(self) -> None:
+        try:
+            self._events.close()
+        finally:
+            release_stream_slot(self._slot)
 
 
 class AssistantMessageCreateView(PublicEndpointMixin, APIView):
@@ -113,9 +148,9 @@ class AssistantMessageCreateView(PublicEndpointMixin, APIView):
 
     def handle_exception(self, exc: Exception) -> Response:
         # Our exception handler builds DomainError responses without
-        # headers, so the daily limit's Retry-After is set here.
+        # headers, so the limits' Retry-After is set here.
         response = super().handle_exception(exc)
-        if isinstance(exc, AssistantDailyLimitError):
+        if isinstance(exc, AssistantDailyLimitError | AssistantBusyError):
             response["Retry-After"] = str(exc.retry_after)
         return response
 
@@ -130,20 +165,40 @@ class AssistantMessageCreateView(PublicEndpointMixin, APIView):
                 retry_after=seconds_until_local_midnight(salon=salon, now=now)
             )
 
+        slot = acquire_stream_slot()
+        if slot is None:
+            # A refused message costs no provider call: it does not count.
+            undo_daily_message(salon=salon, now=now)
+            raise AssistantBusyError()
+        try:
+            return self._stream_response(request, salon, serializer, now, slot)
+        except BaseException:
+            release_stream_slot(slot)
+            raise
+
+    def _stream_response(
+        self,
+        request: Request,
+        salon: Salon,
+        serializer: AssistantMessageSerializer,
+        now: dt.datetime,
+        slot: str,
+    ) -> StreamingHttpResponse:
         session_id = request.headers.get(SESSION_HEADER)
         if not session_id or not load_history(session_id):
             session_id = new_session_id()
 
+        events = _stream(
+            salon_id=salon.id,
+            session_id=session_id,
+            user_text=serializer.validated_data["message"],
+            lang=resolve_language_code(request.query_params.get("lang")),
+            provider=get_assistant_provider(),
+            now=now,
+            slot=slot,
+        )
         response = StreamingHttpResponse(
-            _stream(
-                salon_id=salon.id,
-                session_id=session_id,
-                user_text=serializer.validated_data["message"],
-                lang=resolve_language_code(request.query_params.get("lang")),
-                provider=get_assistant_provider(),
-                now=now,
-            ),
-            content_type="application/x-ndjson",
+            _SlotReleasingStream(events, slot), content_type="application/x-ndjson"
         )
         response[SESSION_HEADER] = session_id
         response["Cache-Control"] = "no-cache"
