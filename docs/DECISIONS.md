@@ -5776,7 +5776,9 @@ cannot be checked in desktop Chrome and still needs a real device.
 
 ## Stage 16 planning
 
-Decided 21.10.2026. Not yet implemented.
+Decided 21.10.2026. Implemented sub-step by sub-step; as of 26.10.2026
+sub-steps 1 to 10a are committed, and 10b (the OpenAI adapter) and the
+closure are open. This line said "Not yet implemented" until 26.10.2026.
 
 ### Scope and tools
 
@@ -6681,7 +6683,8 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
     setting to choose it").
   - `ASSISTANT_OPENAI_API_KEY`: the OpenAI API key, default empty.
   - `ASSISTANT_OPENAI_MODEL` and `ASSISTANT_OPENAI_REASONING_EFFORT` (see
-    "Model and API").
+    "Model and API"), with defaults `gpt-6-luna` and `low` (agreed
+    26.10.2026).
   - `ASSISTANT_SAFETY_IDENTIFIER_SECRET`: the HMAC key for
     `safety_identifier`, default empty. It is its own setting, never
     Django's `SECRET_KEY`.
@@ -6692,11 +6695,27 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   the first customer message. `get_assistant_provider()` also raises
   `ImproperlyConfigured` in that case, as a second guard. With the
   default provider (`mock`) nothing is required.
-- **`max_output_tokens`: 2048.** It is a ceiling, not a budget: we pay
-  for the tokens actually used. It includes reasoning tokens, and a reply
-  cut off by it becomes an error for the customer (`response.incomplete`,
-  see "Errors and refusals"), so the ceiling is set well above a normal
-  short reply.
+  - **Added 26.10.2026:** an unknown `ASSISTANT_PROVIDER` value is also a
+    system check error, and `get_assistant_provider()` raises
+    `ImproperlyConfigured` for it. The check lives in
+    `ai_assistant/checks.py`, registered in `AiAssistantConfig.ready()`;
+    it is the project's first system check.
+  - **Agreed 26.10.2026:** `get_assistant_provider()` imports the OpenAI
+    adapter lazily, only when `ASSISTANT_PROVIDER` is `openai`, and
+    `ai_assistant/checks.py` never imports `openai`. With the mock, the
+    SDK is never loaded. A test checks this in a fresh interpreter.
+  - **Accepted 26.10.2026:** the view calls `get_assistant_provider()`
+    after the daily increment and after taking a stream slot. If the
+    factory raises there, the slot is released, but the daily increment
+    is not undone and the customer gets a 500. The system check is the
+    main guard against this misconfiguration, so the view is not changed.
+- **Constants in the adapter, not settings (agreed 26.10.2026):**
+  `max_output_tokens` 2048, the 30-second per-call timeout and
+  `max_retries=0` (see "Timeouts"). The timeout is bound by the rule
+  "deadline + per-call timeout under 120 seconds", so it must not be
+  changeable from `.env`. This corrects the first version of this entry,
+  which listed `max_output_tokens` under "Settings"; its rationale moved
+  to "Timeouts".
 
 **SDK**
 
@@ -6726,6 +6745,18 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   `ChatMessage` it appends for that call. If `Finish` is missing or the
   field is empty, nothing is replayed. `MockAssistantProvider` is
   unchanged.
+- **Added 26.10.2026:** `provider_items` holds the reasoning items only,
+  as plain dicts (the SDK objects' `model_dump`). The `function_call`
+  items are rebuilt from `ChatMessage.tool_calls` on replay.
+- **`include=["reasoning.encrypted_content"]` is sent on every request
+  (agreed 26.10.2026).** OpenAI's reasoning guide
+  (developers.openai.com/api/docs/guides/reasoning, "Preserve reasoning
+  without stored responses", checked 26.10.2026) says that with
+  `store: false` reasoning items carry `encrypted_content` by default and
+  calls this `include` value legacy, accepted but not required. The API
+  reference for creating a response still describes it as what enables
+  reasoning items in stateless multi-turn use. Sending it costs nothing
+  and keeps `provider_items` from coming back empty if the two disagree.
 - **Rejected:** (b) using effort `none` and dropping the items, because
   the docs do not say whether `none` produces reasoning items or whether
   dropping them is safe; (c) `previous_response_id`, because it needs
@@ -6755,6 +6786,11 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   rule.
   - First set to 90 seconds earlier on 26.10.2026; lowered to 80 the same
     day because 90 + 30 breaks the rule.
+- **`max_output_tokens`: 2048,** a constant in the adapter (see
+  "Settings"). It is a ceiling, not a budget: we pay for the tokens
+  actually used. It includes reasoning tokens, and a reply cut off by it
+  becomes an error for the customer (`response.incomplete`, see "Errors
+  and refusals"), so the ceiling is set well above a normal short reply.
 
 **Errors and refusals**
 
@@ -6766,6 +6802,16 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   including after part of the text was streamed. This was proposed in the
   recon and not discussed point by point. The orchestrator then stores
   nothing, so "Try again" works as decided in "Product decisions".
+- **Details agreed 26.10.2026:**
+  - Tool arguments that are valid JSON but not an object are treated like
+    malformed JSON.
+  - A stream that ends without `response.completed` is an
+    `AssistantProviderError`: the interface says a turn ends with
+    `Finish`.
+  - Only `openai.OpenAIError` subclasses are wrapped. Any other exception
+    passes through and reaches the view's `internal_error`.
+- **Tests inject a fake client** into the adapter, which returns real SDK
+  event types; no network (agreed 26.10.2026).
 
 **`safety_identifier`**
 
