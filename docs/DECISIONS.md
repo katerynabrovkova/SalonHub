@@ -5842,6 +5842,12 @@ Decided 21.10.2026. Not yet implemented.
   against OpenAI docs at implementation time. Anthropic remains possible
   behind the same interface. Before enabling for real customers, run
   10-15 real Ukrainian questions and review quality.
+  - **Corrected 26.10.2026,** see "Sub-step 10 details": "minimal"
+    reasoning effort does not exist for GPT-5.6 Luna; its model page lists
+    `none`, `low`, `medium`, `high`, `xhigh` and `max`. At implementation
+    `gpt-6-luna` with effort `low` was chosen instead: it is on OpenAI's
+    recommended list, cheaper, and has a newer knowledge cutoff. Final
+    quality is judged in the manual check.
 
 ### Session
 
@@ -6163,6 +6169,18 @@ are reachable only in local dev.
   made), `ToolSpec` (name, description, JSON-schema parameters) and the
   three provider events. Vendor formats are translated inside adapters
   only.
+  - **Changed 26.10.2026,** see "Sub-step 10 details": the interface
+    changes in two ways. An assistant `ChatMessage` gets an optional
+    opaque `provider_items` field: vendor data the adapter needs replayed
+    with the tool results (OpenAI's reasoning items). The adapter returns
+    them in a new optional `provider_items` field on `Finish`. The
+    orchestrator replays them only within one customer message and never
+    stores them in the session. `stream()` gets a keyword argument
+    `safety_identifier`, an opaque string computed by the caller, so the
+    provider still knows nothing about salons.
+  - **Refined 26.10.2026,** see "Sub-step 10 details": the OpenAI adapter
+    sends every `ToolSpec` with `strict: false`. The schemas and the
+    orchestrator's own argument check stay as they are.
 - **`AssistantProviderError(DomainError)`**, code
   `assistant_provider_error`, status 502, in `core/exceptions.py` next to
   `PaymentProviderError`. Real adapters wrap vendor exceptions into it;
@@ -6626,6 +6644,155 @@ the cap.
 - **A counter failure is logged (salon id, never message text) and
   swallowed;** the stream is unaffected.
 
+### Sub-step 10 details (decided 26.10.2026)
+
+Decided in discussion after the recon of the same day. The OpenAI facts
+below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
+26.10.2026.
+
+**Model and API**
+
+- **Responses API,** not Chat Completions. OpenAI recommends Responses for
+  new projects, and its typed stream events map directly onto `TextDelta`,
+  `ToolCall` and `Finish`. A `ToolCall`'s id is the Responses `call_id`,
+  not the item id.
+- **Model `gpt-6-luna`, reasoning effort `low`,** both from settings:
+  `ASSISTANT_OPENAI_MODEL` and `ASSISTANT_OPENAI_REASONING_EFFORT`. This
+  replaces the planned GPT-5.6 Luna with minimal effort (see the
+  correction under "Request flow"). Chosen because it is on OpenAI's
+  recommended list, costs less ($0.10 / $0.50 per 1M input / output
+  tokens, against $0.20 / $1.20) and has a newer knowledge cutoff
+  (18.05.2026, against 16.02.2026). Final quality is judged in the manual
+  check.
+- **`store: false` on every request.** Proposed in the recon and not
+  discussed separately; it follows from choosing replay over
+  `previous_response_id` (see "Reasoning items"). OpenAI still keeps
+  abuse-monitoring logs for up to 30 days, so the "Safety and privacy"
+  wording stays correct.
+
+**Settings**
+
+- **Names follow the `WAYFORPAY_*` style** (one env var per Django
+  setting, read with `env()` in `config/settings/base.py`, documented in
+  `.env.example`), with the `ASSISTANT_` prefix of the two settings named
+  above:
+  - `ASSISTANT_PROVIDER`: `mock` (default) or `openai`. This is the
+    setting that `get_assistant_provider()` reads (sub-step 3: "a
+    setting to choose it").
+  - `ASSISTANT_OPENAI_API_KEY`: the OpenAI API key, default empty.
+  - `ASSISTANT_OPENAI_MODEL` and `ASSISTANT_OPENAI_REASONING_EFFORT` (see
+    "Model and API").
+  - `ASSISTANT_SAFETY_IDENTIFIER_SECRET`: the HMAC key for
+    `safety_identifier`, default empty. It is its own setting, never
+    Django's `SECRET_KEY`.
+- **Required settings are checked at startup.** If `ASSISTANT_PROVIDER`
+  is `openai` and `ASSISTANT_OPENAI_API_KEY` or
+  `ASSISTANT_SAFETY_IDENTIFIER_SECRET` is empty, a Django system check
+  reports an error, so the misconfiguration is caught at startup, not on
+  the first customer message. `get_assistant_provider()` also raises
+  `ImproperlyConfigured` in that case, as a second guard. With the
+  default provider (`mock`) nothing is required.
+- **`max_output_tokens`: 2048.** It is a ceiling, not a budget: we pay
+  for the tokens actually used. It includes reasoning tokens, and a reply
+  cut off by it becomes an error for the customer (`response.incomplete`,
+  see "Errors and refusals"), so the ceiling is set well above a normal
+  short reply.
+
+**SDK**
+
+- **`openai==3.29.0`** in `requirements/base.txt` (a runtime dependency).
+  It is the newest release published on or before 12.10.2026 (uploaded
+  11.10.2026); it requires Python >= 3.10 and is not yanked. Its HTTP
+  client is `httpx2`, not `httpx`.
+
+**Tools**
+
+- **`strict: false` is sent explicitly on every tool.** If `strict` is
+  omitted, the Responses API tries to convert the schema to strict mode.
+  Our schemas have optional properties and `anyOf`, so that would either
+  make optional arguments arrive as `null`, which the tools do not expect,
+  or fall back to non-strict silently. The schemas and the
+  orchestrator's argument check stay as they are.
+
+**Reasoning items (option a)**
+
+- OpenAI's docs say reasoning items returned with tool calls must be
+  passed back with the tool results. They are carried in the new opaque
+  `provider_items` field of the assistant `ChatMessage` (see the change
+  under "Sub-step 3 details"), replayed only within one customer message,
+  and never stored in the session.
+- **The adapter returns them in an optional `provider_items` field on
+  `Finish`.** The orchestrator copies them onto the assistant
+  `ChatMessage` it appends for that call. If `Finish` is missing or the
+  field is empty, nothing is replayed. `MockAssistantProvider` is
+  unchanged.
+- **Rejected:** (b) using effort `none` and dropping the items, because
+  the docs do not say whether `none` produces reasoning items or whether
+  dropping them is safe; (c) `previous_response_id`, because it needs
+  stored responses (`store: true`).
+
+**Timeouts**
+
+- **`max_retries=0` and a 30-second timeout per call.** The SDK's timeout
+  for a stream applies between chunks, not to the whole stream.
+- **An overall deadline of 80 seconds per customer message,** checked by
+  the orchestrator around `stream()`, while iterating its events. The
+  provider interface does not change again, and the deadline works for
+  any provider. When it is exceeded, the orchestrator closes the
+  provider's stream (which closes the SDK stream) and the client gets
+  `assistant_provider_error`.
+- **Rule: deadline + per-call timeout must stay under the 120-second
+  stale cutoff of the stream cap (8b).** The orchestrator can only check
+  the deadline between events, so a stall that starts just before the
+  deadline adds up to one per-call timeout (30 seconds) before the SDK
+  raises. 80 + 30 = 110 seconds. Changing either value must keep this
+  rule.
+  - First set to 90 seconds earlier on 26.10.2026; lowered to 80 the same
+    day because 90 + 30 breaks the rule.
+
+**Errors and refusals**
+
+- **Malformed tool-call JSON from the model** → `assistant_provider_error`.
+- **Refusals** are streamed to the customer as normal text.
+- **Everything else from the vendor also becomes `AssistantProviderError`**
+  (`assistant_provider_error`): SDK exceptions at the start or mid-stream,
+  the stream's `error` event, `response.failed`, and `response.incomplete`,
+  including after part of the text was streamed. This was proposed in the
+  recon and not discussed point by point. The orchestrator then stores
+  nothing, so "Try again" works as decided in "Product decisions".
+
+**`safety_identifier`**
+
+- **HMAC-SHA256 of the salon id and the client IP,** keyed with a server
+  secret from settings. Only the hex digest is sent. The IP is the same
+  one the salon + IP throttle uses (DRF's `get_ident()`).
+- **The caller computes it** and passes it to `stream()` as an opaque
+  string. The provider does not compute it and still knows nothing about
+  salons.
+- **Why per customer (salon + IP), not per salon.** OpenAI's safety-checks
+  guide (developers.openai.com/api/docs/guides/safety-checks, checked
+  26.10.2026) says a blocked identifier "is completely blocked from
+  OpenAI model access" and that "OpenAI cannot currently unblock an
+  individual identifier". A per-salon identifier would let one customer
+  get the whole salon's assistant blocked for good.
+- **The blocked error.** The guide names only the message "`identifier
+  blocked`", returned "on all future GPT-5 requests for the same
+  identifier". It gives no HTTP status or error code, and the error-codes
+  guide has no entry for it. The guide speaks of GPT-5 requests; whether
+  the same applies to `gpt-6-luna` is not stated. For now it maps to
+  `assistant_provider_error` like any other vendor error (see "Open items"
+  for Stage 17).
+- **The privacy policy must mention it** (see "Open items").
+- **It inherits the `X-Forwarded-For` issue** recorded in "Open items":
+  while `NUM_PROXIES` is unset, a client that reaches the backend directly
+  chooses the IP, and so the identifier. To be settled in Stage 22 with
+  the proxy layout.
+
+**Manual check**
+
+- Its questions, data and pass criteria are decided after
+  implementation. Katya sets a spending limit on the OpenAI project.
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
@@ -6725,7 +6892,8 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   (threaded workers, no proxy buffering); decide Redis persistence, since
   snapshots could hold conversation text.
 - A privacy policy page must exist before the assistant is enabled for
-  real customers.
+  real customers. It must also mention the `safety_identifier` sent to
+  OpenAI (see "Sub-step 10 details"; added 26.10.2026).
 - Check whether the public slots endpoint and appointment creation verify
   that the specialist performs the service (the availability engine does
   not). Found 21.10.2026. Checked 22.10.2026: they do not; the fix is
@@ -6760,7 +6928,15 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   defeats every IP-keyed throttle (login, register, password reset, guest
   token, and the assistant's salon + IP limit) whenever a client reaches
   the backend directly. Must be settled in Stage 22 with the proxy layout.
-  Found 26.10.2026.
+  Found 26.10.2026. The assistant's `safety_identifier` (sub-step 10) is
+  derived from the same IP and is affected too (added 26.10.2026).
+- Stage 17: a customer whose `safety_identifier` OpenAI has blocked gets
+  `assistant_provider_error` on every message, and the widget's "Try
+  again" can never succeed. Show a clear message instead of an endless
+  "Try again". This needs the backend to tell a blocked identifier apart
+  from other provider errors (today both are `assistant_provider_error`;
+  the guide gives only the message "identifier blocked", no code). Added
+  26.10.2026 (see "Sub-step 10 details").
 - Stage 17: `via=assistant` must be passed along on every internal
   `/booking` link (step 3 week navigation, step 3 → 4, the step 3 retry
   link, the step 4 slot-taken redirect) and sent as `source` by both
