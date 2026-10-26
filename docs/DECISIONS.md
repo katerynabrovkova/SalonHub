@@ -6740,7 +6740,13 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   provider interface does not change again, and the deadline works for
   any provider. When it is exceeded, the orchestrator closes the
   provider's stream (which closes the SDK stream) and the client gets
-  `assistant_provider_error`.
+  `assistant_provider_error`. Nothing is stored.
+  - **Added 26.10.2026, after the 10a tests were written:** the log line's
+    outcome is `deadline_exceeded`, distinct from `provider_error`; the
+    client still gets `assistant_provider_error`. The deadline is also
+    checked before each further provider call, so time spent after a
+    call's last event (for example in tools) starts no new billed call.
+    Exceeded means more than 80 seconds; exactly 80 is still in time.
 - **Rule: deadline + per-call timeout must stay under the 120-second
   stale cutoff of the stream cap (8b).** The orchestrator can only check
   the deadline between events, so a stall that starts just before the
@@ -6769,6 +6775,13 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
 - **The caller computes it** and passes it to `stream()` as an opaque
   string. The provider does not compute it and still knows nothing about
   salons.
+  - **Added 26.10.2026, after the 10a tests were written:**
+    `safety_identifier` is a required keyword argument of both `stream()`
+    and `run_turn()`, so no caller can leave it out. The HMAC message is
+    `"<salon id>:<client IP>"`; the salon id is digits only, so the
+    separator keeps the two apart. The view takes the IP from DRF's
+    `get_ident()` for the request, so the identifier follows the Stage 22
+    proxy fix without a change of its own.
 - **Why per customer (salon + IP), not per salon.** OpenAI's safety-checks
   guide (developers.openai.com/api/docs/guides/safety-checks, checked
   26.10.2026) says a blocked identifier "is completely blocked from
