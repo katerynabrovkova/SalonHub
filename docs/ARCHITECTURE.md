@@ -33,7 +33,7 @@ stage arrives. Proposed app list and responsibility:
 | `payments` | `Payment` (deposit lifecycle), the `PaymentProvider` interface, the mock adapter, webhook ingestion, refunds. |
 | `notifications` | `Notification` (send log / idempotency record), the `NotificationChannel` interface, the email adapter (Telegram adapter added later, same interface). |
 | `reviews` | `Review`, completed-appointment eligibility gating. |
-| `ai_assistant` | Grounding tool functions, propose-only booking handoff. Owns no persistent models — conversation state lives in Redis (see § 10). |
+| `ai_assistant` | Grounding tool functions, propose-only booking handoff, aggregate daily usage counters. Stores no conversation text and nothing about individual customers — conversation state lives in Redis (see § 10). |
 
 Rationale for boundaries: each app maps to one bounded context from the product
 requirements, matching the stage order in `docs/DECISIONS.md` (each app's first

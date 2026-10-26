@@ -5977,6 +5977,8 @@ Agreed after the first planning commit. Mockups: Design canvas boards
   appointment stores it in a new `source` field; the backend accepts it
   as optional, the frontend passes it in Stage 17. Owner dashboard UI
   belongs to Stages 18-21.
+  - **Refined 26.10.2026,** see "Sub-step 9 details": counters are stored
+    in Postgres as daily aggregates per salon.
 - **Unanswered questions are not collected now** (they are conversation
   text).
 
@@ -6112,6 +6114,9 @@ are reachable only in local dev.
   FAQ content describes the salon (parking, payment, rules); `catalog` is
   services only, and `ai_assistant` owns no persistent models. This is
   the first tenant-scoped model in `tenants`.
+  - **Refined 26.10.2026,** see "Sub-step 9 details": the rule is
+    narrowed. `ai_assistant` may own aggregate daily counters; FAQ
+    content still belongs in `tenants`.
 - **Fields:** `TenantScopedModel` + `TimeStamped`. `question`
   `CharField(max_length=200)`, `answer` `CharField(max_length=1000)`,
   `ordering` `PositiveIntegerField(default=0)`, `is_active`
@@ -6144,6 +6149,10 @@ are reachable only in local dev.
   `docs/ARCHITECTURE.md` § apps). Provider code lives in
   `ai_assistant/providers/{__init__,base,mock}.py`, mirroring
   `payments/providers/`.
+  - **Refined 26.10.2026,** see "Sub-step 9 details": `ai_assistant` gets
+    a `models.py` and migrations for two aggregate counter models. It
+    still stores no conversation text and nothing about individual
+    customers.
 - **`AssistantProvider(ABC)`** has one abstract method,
   `stream(*, system, messages, tools) -> Iterator[provider event]`,
   keyword-only, plain values only. A provider is a dumb pipe for one model
@@ -6525,6 +6534,98 @@ with the normal error envelope.
 `assistant_enabled` 404, then validation 400, then the daily limit, then
 the cap.
 
+### Sub-step 9 details (decided 26.10.2026)
+
+**`Appointment.source`**
+
+- **New field** `source`, `CharField(max_length=16)` with choices
+  `direct` (default) and `assistant`. The migration is a single
+  `AddField` with default `"direct"`, so existing rows get `direct`. No
+  index and no `Meta` change.
+- **Both booking endpoints accept an optional body field `source`**
+  (guest `POST bookings/`, account `POST appointments/`). Both `"direct"`
+  and `"assistant"` are accepted. If the field is missing, the booking is
+  `direct`. Any other value → 400, and nothing is created. The value passes through the guest and account services
+  and both creation paths (specific specialist and "any") down to
+  `create_appointment`. It is not returned in booking responses.
+- **No other creation path exists:** `AppointmentAdmin` is read-only, and
+  there are no management commands that create appointments.
+- **`source` comes from the client and is for analytics only.** Anyone
+  can mark a booking as `assistant`; this is accepted. `source` must
+  never affect money (price, deposit, refunds), discounts or access.
+- **Admin:** `AppointmentAdmin` shows `source` in `list_display` and
+  `list_filter`.
+- **Bookings from the assistant have no separate counter:** they are
+  counted from appointments with `source="assistant"`. The booking path
+  writes no counters. Which statuses count is decided with the owner
+  dashboard (Stages 18-21).
+
+**Counters**
+
+- **Stored in Postgres,** because counters are business data and must not
+  be lost. Redis DB 3 was the alternative; its persistence is undecided
+  until Stage 22, so counts could be lost.
+- **The rule "`ai_assistant` owns no persistent models" is narrowed, not
+  dropped:** `ai_assistant` stores no conversation text and nothing about
+  individual customers; aggregate daily counters are allowed.
+- **Two `TenantScopedModel`s in `ai_assistant/models.py`**, `objects`
+  declared before `unscoped_objects`:
+  - `DailyConversationCount`: `salon`, `date`, `count`; unique
+    (`salon`, `date`).
+  - `DailyProposalCount`: `salon`, `date`, `service`, `count`; unique
+    (`salon`, `date`, `service`).
+  - Not one table with a nullable `service`: Postgres treats NULLs as
+    distinct in a unique constraint, so the conversation rows would not
+    be unique.
+  - **`Meta` constraints approved 26.10.2026,** before the models were
+    written. Both models also keep the base `(id, salon)` constraint.
+  - **`service` uses `on_delete=PROTECT`,** following `Appointment.service`
+    (chosen at implementation and reported, 26.10.2026). Services are only
+    soft-deleted (`catalog/services.py`), and a counter row is history.
+    `SpecialistService.service` uses `CASCADE`, but that is a link row,
+    not a record.
+- **`date` is the salon-local date of the turn's `now`.**
+- **Increments are atomic and race-safe, never read-modify-write:** an
+  `UPDATE` with `F("count") + 1`. If no row was updated, the row is
+  created with count 1 inside a savepoint. If that create hits an
+  `IntegrityError` (a concurrent create won), the update is retried
+  exactly once. If the retry still updates 0 rows, the error is raised
+  (the orchestrator logs and swallows it), so a broken state never
+  loops.
+- **The salon passed to a counter function must be the bound tenant
+  context's salon,** otherwise it raises the new
+  `TenantContextMismatchError(RuntimeError)` in `core/tenancy.py`, next
+  to `TenantContextMissingError`, and writes nothing. A new type rather
+  than a `ValueError` matched by message text (agreed 26.10.2026). Another
+  salon's service stays a `ValueError`. Without the
+  check, the tenant-scoped `UPDATE` would match nothing while the create
+  inserted a row for the other salon, and later increments could be lost.
+  Without a bound context it raises `TenantContextMissingError`.
+- **The proposal counter's service must belong to the counter row's
+  salon.** Another salon's service is rejected and nothing is written.
+  Two guards: `record_proposal` raises `ValueError` before writing, and
+  the database rejects the row through a composite tenant FK on
+  (`service_id`, `salon_id`) referencing `catalog_service (id, salon_id)`,
+  appended to `ai_assistant/migrations/0001_initial.py` with
+  `core.db.composite_tenant_fk`, the same pattern as
+  `Appointment.service` (agreed 26.10.2026, after the generated migration
+  was found to lack it).
+- **What is counted:**
+  - **A conversation** is counted once, on the first successfully stored
+    turn of a session (history empty before the turn, and the turn
+    stored). It is not counted where a new session id is issued: a failed
+    first message stores nothing, and the retry gets a new id, so it
+    would be counted twice.
+  - **A proposal** is counted for every emitted `proposal` event,
+    including cards with 0 slots, under the card's service. `not_found`,
+    invalid calls and a refused second proposal emit no card, so they are
+    not counted. The count is written just before the event is yielded,
+    not after: when the customer follows the booking link and the stream
+    is closed at that yield, code after it never runs (agreed
+    26.10.2026).
+- **A counter failure is logged (salon id, never message text) and
+  swallowed;** the stream is unaffected.
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
@@ -6660,3 +6761,9 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   token, and the assistant's salon + IP limit) whenever a client reaches
   the backend directly. Must be settled in Stage 22 with the proxy layout.
   Found 26.10.2026.
+- Stage 17: `via=assistant` must be passed along on every internal
+  `/booking` link (step 3 week navigation, step 3 → 4, the step 3 retry
+  link, the step 4 slot-taken redirect) and sent as `source` by both
+  booking forms. Open: whether `via` survives if the customer goes back
+  and changes the specialist. Recorded 26.10.2026 (sub-step 9 is backend
+  only).
