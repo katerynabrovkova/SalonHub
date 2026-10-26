@@ -154,6 +154,14 @@ CACHES = {
 # atomic append (docs/DECISIONS.md § "Sub-step 5 details").
 ASSISTANT_REDIS_URL = env("ASSISTANT_REDIS_URL")
 
+# --- AI assistant: model provider ---------------------------------------------
+#
+# HMAC key for the safety_identifier sent to the model provider
+# (ai_assistant.safety_identifier; docs/DECISIONS.md § "Sub-step 10
+# details"). Its own secret, never SECRET_KEY. Empty is fine with the mock
+# provider, the only one wired so far.
+ASSISTANT_SAFETY_IDENTIFIER_SECRET = env("ASSISTANT_SAFETY_IDENTIFIER_SECRET", default="")
+
 # --- DRF / JWT ---------------------------------------------------------------
 
 REST_FRAMEWORK = {

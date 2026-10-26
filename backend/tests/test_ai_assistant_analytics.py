@@ -56,6 +56,7 @@ LATE_UTC_NOW = dt.datetime(2026, 8, 16, 21, 30, tzinfo=dt.UTC)
 LATE_UTC_LOCAL_DATE = dt.date(2026, 8, 17)
 
 USER_TEXT = "Secret customer words 7f3a"
+SAFETY_IDENTIFIER = "5a" * 32
 
 
 def _models() -> ModuleType:
@@ -340,7 +341,12 @@ def _run(salon, script: list[ScriptTurn], *, session_id: str = SESSION_ID) -> li
     with tenant_context(salon.id):
         return list(
             run_turn(
-                session_id=session_id, user_text=USER_TEXT, lang="en", now=NOW, provider=provider
+                session_id=session_id,
+                user_text=USER_TEXT,
+                lang="en",
+                now=NOW,
+                provider=provider,
+                safety_identifier=SAFETY_IDENTIFIER,
             )
         )
 
@@ -418,7 +424,12 @@ def test_proposal_is_counted_when_the_stream_is_closed_right_after_it(
 
     with tenant_context(tbilisi_salon.id):
         events = run_turn(
-            session_id=SESSION_ID, user_text=USER_TEXT, lang="en", now=NOW, provider=provider
+            session_id=SESSION_ID,
+            user_text=USER_TEXT,
+            lang="en",
+            now=NOW,
+            provider=provider,
+            safety_identifier=SAFETY_IDENTIFIER,
         )
         for event in events:
             if event["type"] == "proposal":

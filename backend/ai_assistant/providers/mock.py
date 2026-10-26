@@ -42,11 +42,19 @@ class MockAssistantProvider(AssistantProvider):
         system: str,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolSpec],
+        safety_identifier: str,
     ) -> Iterator[ProviderEvent]:
         # Snapshots, not references: the caller keeps appending to its own
         # message list between turns, and the record must show what this
         # call actually received.
-        self.calls.append({"system": system, "messages": tuple(messages), "tools": tuple(tools)})
+        self.calls.append(
+            {
+                "system": system,
+                "messages": tuple(messages),
+                "tools": tuple(tools),
+                "safety_identifier": safety_identifier,
+            }
+        )
 
         if self._script is None:
             yield TextDelta(text=_DEFAULT_REPLY)

@@ -19,13 +19,23 @@ successfully stored turn of a session, and a proposal for every emitted
 `proposal` event. A counter failure is logged without text and swallowed.
 `record_conversation_started` and `record_proposal` are imported as bare
 names so tests can replace them here.
+
+Sub-step 10 (docs/DECISIONS.md § "Sub-step 10 details"): every provider
+call gets the caller's `safety_identifier`. The `provider_items` of a
+call's Finish ride on that call's assistant message, so later calls of the
+same customer message replay them; they are never stored. A deadline of
+80 seconds per customer message is checked on every provider event and
+before each further provider call; exceeded means more than 80 seconds.
+Then the provider's stream is closed, nothing is stored, the client gets
+`assistant_provider_error` and the log outcome is `deadline_exceeded`.
+`monotonic` is imported as a bare name so tests can replace the clock.
 """
 
 import datetime as dt
 import json
 import logging
-import time
 from collections.abc import Callable, Generator
+from time import monotonic
 from typing import Any, Literal, cast
 
 from django.db import transaction
@@ -49,6 +59,10 @@ from tenants.models import Salon
 logger = logging.getLogger(__name__)
 
 MAX_PROVIDER_CALLS = 5
+
+# Deadline + the provider's per-call timeout must stay under the stream
+# cap's 120-second stale cutoff (docs/DECISIONS.md § "Sub-step 10 details").
+DEADLINE_SECONDS = 80
 
 INVALID_TOOL_CALL: dict[str, Any] = {"error": "invalid_tool_call"}
 ONE_PROPOSAL_PER_REPLY: dict[str, Any] = {"error": "one_proposal_per_reply"}
@@ -90,6 +104,10 @@ def _run_tool(call: ToolCall, *, lang: str, now: dt.datetime) -> dict[str, Any]:
     return function(**kwargs)
 
 
+class _DeadlineExceeded(Exception):
+    """The customer message ran past DEADLINE_SECONDS."""
+
+
 def _count(counter: str, record: Callable[..., None], *, salon: Salon, **kwargs: Any) -> None:
     """Runs one counter write; a failure is logged (never text) and
     swallowed. Its own atomic block, so a failed write cannot break an
@@ -108,6 +126,7 @@ def run_turn(
     lang: str,
     now: dt.datetime,
     provider: AssistantProvider,
+    safety_identifier: str,
 ) -> Generator[dict[str, Any]]:
     salon = tools._current_salon()
     system = build_system_instructions(salon=salon, now=now, lang=lang)
@@ -115,7 +134,8 @@ def run_turn(
     history = _history_messages(session_id)
     messages = [*history, ChatMessage(role="user", content=user_text)]
 
-    started = time.monotonic()
+    started = monotonic()
+    deadline = started + DEADLINE_SECONDS
     input_tokens = 0
     output_tokens = 0
     provider_calls = 0
@@ -124,19 +144,37 @@ def run_turn(
     card: dict[str, Any] | None = None
     try:
         while True:
+            if monotonic() > deadline:
+                # Time ran out after the last call's final event (e.g. in
+                # tools): start no further provider call.
+                raise _DeadlineExceeded
             provider_calls += 1
             call_text: list[str] = []
             tool_calls: list[ToolCall] = []
-            for event in provider.stream(system=system, messages=messages, tools=specs):
-                if isinstance(event, TextDelta):
-                    call_text.append(event.text)
-                    reply_parts.append(event.text)
-                    yield {"type": "text", "text": event.text}
-                elif isinstance(event, ToolCall):
-                    tool_calls.append(event)
-                elif isinstance(event, Finish):
-                    input_tokens += event.input_tokens
-                    output_tokens += event.output_tokens
+            provider_items: tuple[Any, ...] = ()
+            stream = provider.stream(
+                system=system, messages=messages, tools=specs, safety_identifier=safety_identifier
+            )
+            try:
+                for event in stream:
+                    if monotonic() > deadline:
+                        raise _DeadlineExceeded
+                    if isinstance(event, TextDelta):
+                        call_text.append(event.text)
+                        reply_parts.append(event.text)
+                        yield {"type": "text", "text": event.text}
+                    elif isinstance(event, ToolCall):
+                        tool_calls.append(event)
+                    elif isinstance(event, Finish):
+                        input_tokens += event.input_tokens
+                        output_tokens += event.output_tokens
+                        provider_items = event.provider_items
+            finally:
+                # Closed now, not at garbage collection, so the vendor stops
+                # generating (deadline, customer gone, or any failure).
+                close = getattr(stream, "close", None)
+                if callable(close):
+                    close()
 
             if not tool_calls:
                 if card is not None:
@@ -165,7 +203,10 @@ def run_turn(
 
             messages.append(
                 ChatMessage(
-                    role="assistant", content="".join(call_text), tool_calls=tuple(tool_calls)
+                    role="assistant",
+                    content="".join(call_text),
+                    tool_calls=tuple(tool_calls),
+                    provider_items=provider_items,
                 )
             )
             for call in tool_calls:
@@ -190,6 +231,10 @@ def run_turn(
     except AssistantProviderError:
         outcome = "provider_error"
         yield {"type": "error", "code": "assistant_provider_error"}
+    except _DeadlineExceeded:
+        # Its own log outcome; the client sees an ordinary provider error.
+        outcome = "deadline_exceeded"
+        yield {"type": "error", "code": "assistant_provider_error"}
     except GeneratorExit:
         # The customer closed the stream: nothing was stored.
         outcome = "cancelled"
@@ -203,5 +248,5 @@ def run_turn(
             provider_calls,
             input_tokens,
             output_tokens,
-            (time.monotonic() - started) * 1000,
+            (monotonic() - started) * 1000,
         )

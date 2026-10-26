@@ -8,12 +8,17 @@ nothing here is @pytest.mark.django_db or uses fixtures from conftest.py.
 Signature under test:
 
     AssistantProvider.stream(*, system: str, messages: Sequence[ChatMessage],
-                             tools: Sequence[ToolSpec]) -> Iterator[ProviderEvent]
+                             tools: Sequence[ToolSpec],
+                             safety_identifier: str) -> Iterator[ProviderEvent]
 
 Provider events are TextDelta(text), ToolCall(id, name, arguments) and
-Finish(input_tokens, output_tokens). The mock is built with a script, a
-list of turns; each stream() call plays the next turn, and an exception in
-a turn is raised at that point. A call after the last turn raises
+Finish(input_tokens, output_tokens, provider_items). `provider_items` (on
+Finish and on an assistant ChatMessage) and `safety_identifier` are the
+sub-step 10 changes (docs/DECISIONS.md § "Sub-step 10 details"); both are
+opaque to the mock, which plays its script unchanged.
+
+The mock is built with a script, a list of turns; each stream() call plays
+the next turn, and an exception in a turn is raised at that point. A call after the last turn raises
 MockScriptExhaustedError.
 """
 
@@ -62,8 +67,17 @@ class _Boom(Exception):
     """Stand-in for a provider failure in the middle of a stream."""
 
 
-def _stream(provider, *, system=SYSTEM, messages=MESSAGES, tools=TOOLS):
-    return list(provider.stream(system=system, messages=messages, tools=tools))
+SAFETY_IDENTIFIER = "0f" * 32
+
+
+def _stream(
+    provider, *, system=SYSTEM, messages=MESSAGES, tools=TOOLS, safety_identifier=SAFETY_IDENTIFIER
+):
+    return list(
+        provider.stream(
+            system=system, messages=messages, tools=tools, safety_identifier=safety_identifier
+        )
+    )
 
 
 # --- Interface shape -------------------------------------------------------
@@ -80,9 +94,11 @@ def test_assistant_provider_abstract_methods_is_exactly_stream():
 
 def test_stream_signature_is_keyword_only():
     params = inspect.signature(AssistantProvider.stream).parameters
-    assert set(params) - {"self"} == {"system", "messages", "tools"}
-    for name in ("system", "messages", "tools"):
+    assert set(params) - {"self"} == {"system", "messages", "tools", "safety_identifier"}
+    for name in ("system", "messages", "tools", "safety_identifier"):
         assert params[name].kind == inspect.Parameter.KEYWORD_ONLY
+    # Required: a real provider must never be called without it.
+    assert params["safety_identifier"].default is inspect.Parameter.empty
 
 
 def test_dataclasses_are_frozen():
@@ -93,6 +109,19 @@ def test_dataclasses_are_frozen():
     message = ChatMessage(role="user", content="hi")
     with pytest.raises(dataclasses.FrozenInstanceError):
         message.content = "changed"
+
+
+def test_finish_provider_items_default_to_empty():
+    assert Finish(input_tokens=1, output_tokens=2).provider_items == ()
+    items = ({"type": "reasoning", "encrypted_content": "opaque"},)
+    assert Finish(input_tokens=1, output_tokens=2, provider_items=items).provider_items == items
+
+
+def test_chat_message_provider_items_default_to_empty():
+    assert ChatMessage(role="assistant", content="hi").provider_items == ()
+    items = ({"type": "reasoning", "encrypted_content": "opaque"},)
+    message = ChatMessage(role="assistant", content="", provider_items=items)
+    assert message.provider_items == items
 
 
 # --- MockAssistantProvider: scripted turns ---------------------------------
@@ -118,11 +147,27 @@ def test_mock_records_each_call():
     ]
 
     _stream(provider)
-    _stream(provider, system="Second system", messages=second_messages, tools=[])
+    _stream(
+        provider,
+        system="Second system",
+        messages=second_messages,
+        tools=[],
+        safety_identifier="ab" * 32,
+    )
 
     assert provider.calls == [
-        {"system": SYSTEM, "messages": tuple(MESSAGES), "tools": tuple(TOOLS)},
-        {"system": "Second system", "messages": tuple(second_messages), "tools": ()},
+        {
+            "system": SYSTEM,
+            "messages": tuple(MESSAGES),
+            "tools": tuple(TOOLS),
+            "safety_identifier": SAFETY_IDENTIFIER,
+        },
+        {
+            "system": "Second system",
+            "messages": tuple(second_messages),
+            "tools": (),
+            "safety_identifier": "ab" * 32,
+        },
     ]
 
 
@@ -142,7 +187,9 @@ def test_mock_raises_scripted_exception_mid_stream():
 
     received = []
     with pytest.raises(_Boom) as excinfo:
-        for event in provider.stream(system=SYSTEM, messages=MESSAGES, tools=TOOLS):
+        for event in provider.stream(
+            system=SYSTEM, messages=MESSAGES, tools=TOOLS, safety_identifier=SAFETY_IDENTIFIER
+        ):
             received.append(event)
 
     assert excinfo.value is boom
@@ -170,6 +217,17 @@ def test_mock_without_script_gives_one_text_delta_then_finish():
     assert isinstance(events[0], TextDelta)
     assert events[0].text
     assert isinstance(events[1], Finish)
+    assert events[1].provider_items == ()
+
+
+def test_mock_plays_scripted_provider_items_unchanged():
+    items = ({"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"},)
+    turn = [
+        ToolCall(id="call_1", name="list_services", arguments={}),
+        Finish(input_tokens=10, output_tokens=5, provider_items=items),
+    ]
+
+    assert _stream(MockAssistantProvider(script=[turn])) == turn
 
 
 # --- MockAssistantProvider: no network -------------------------------------

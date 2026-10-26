@@ -8,20 +8,39 @@ received is read back from `provider.calls` snapshots. The salon runs on
 Asia/Tbilisi (UTC+04:00 all year) and `now` is a fixed tz-aware literal,
 never `timezone.now()`. Session history goes to Redis DB 15 through
 conftest's autouse `_assistant_redis` fixture.
+
+Sub-step 10a (docs/DECISIONS.md § "Sub-step 10 details"): `run_turn` takes
+a `safety_identifier` and passes it to every provider call; `provider_items`
+from a call's Finish are replayed on that call's assistant message, within
+one customer message only; and an 80-second deadline per customer message
+is checked against `orchestrator.monotonic`, which the deadline tests
+replace with a fake clock (never real sleeps). Exceeded means more than 80
+seconds; exactly 80 is still in time.
 """
 
 import datetime as dt
 import json
 import logging
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
+from ai_assistant import orchestrator as orchestrator_module
 from ai_assistant import tools as tools_module
 from ai_assistant.instructions import build_system_instructions
 from ai_assistant.orchestrator import run_turn
 from ai_assistant.proposals import PROPOSE_BOOKING_SPEC
-from ai_assistant.providers.base import ChatMessage, Finish, TextDelta, ToolCall
+from ai_assistant.providers.base import (
+    AssistantProvider,
+    ChatMessage,
+    Finish,
+    ProviderEvent,
+    TextDelta,
+    ToolCall,
+    ToolSpec,
+)
 from ai_assistant.providers.mock import MockAssistantProvider, ScriptTurn
 from ai_assistant.session_store import append_turn, load_history
 from catalog.models import Service, ServiceCategory
@@ -37,6 +56,7 @@ SESSION_ID = "orchestrator-test-session-0123456789abcdefghijklmnop"
 MONDAY = dt.date(2026, 8, 17)
 NOW = dt.datetime(2026, 8, 16, 0, 0, tzinfo=dt.UTC)
 SLOT_0900 = "2026-08-17T09:00:00+04:00"
+SAFETY_IDENTIFIER = "5a" * 32
 
 
 @pytest.fixture
@@ -69,13 +89,30 @@ def _run(
     now: dt.datetime = NOW,
 ) -> tuple[list[dict[str, Any]], MockAssistantProvider]:
     provider = MockAssistantProvider(script)
+    events = _run_provider(salon, provider, user_text=user_text, lang=lang, now=now)
+    return events, provider
+
+
+def _run_provider(
+    salon,
+    provider: AssistantProvider,
+    *,
+    user_text: str = "Hello",
+    lang: str = "en",
+    now: dt.datetime = NOW,
+    safety_identifier: str = SAFETY_IDENTIFIER,
+) -> list[dict[str, Any]]:
     with tenant_context(salon.id):
-        events = list(
+        return list(
             run_turn(
-                session_id=SESSION_ID, user_text=user_text, lang=lang, now=now, provider=provider
+                session_id=SESSION_ID,
+                user_text=user_text,
+                lang=lang,
+                now=now,
+                provider=provider,
+                safety_identifier=safety_identifier,
             )
         )
-    return events, provider
 
 
 def _history(salon) -> list[dict[str, str]]:
@@ -394,7 +431,12 @@ def test_without_tenant_context_raises_before_calling_the_provider():
     with pytest.raises(TenantContextMissingError):
         list(
             run_turn(
-                session_id=SESSION_ID, user_text="Hello", lang="en", now=NOW, provider=provider
+                session_id=SESSION_ID,
+                user_text="Hello",
+                lang="en",
+                now=NOW,
+                provider=provider,
+                safety_identifier=SAFETY_IDENTIFIER,
             )
         )
 
@@ -423,3 +465,321 @@ def test_tool_results_keep_non_ascii_characters(tbilisi_salon, service_category)
     [tool_message] = _tool_messages(provider, 1)
     assert "Манікюр" in tool_message.content
     assert "\\u" not in tool_message.content
+
+
+# --- Sub-step 10a: safety_identifier ---------------------------------------
+
+
+def test_safety_identifier_reaches_every_provider_call(tbilisi_salon):
+    provider = MockAssistantProvider(
+        [
+            [ToolCall(id="call-1", name="get_faq", arguments={}), _finish()],
+            [TextDelta(text="No FAQ yet."), _finish()],
+        ]
+    )
+
+    _run_provider(tbilisi_salon, provider, safety_identifier="c3" * 32)
+
+    assert [call["safety_identifier"] for call in provider.calls] == ["c3" * 32, "c3" * 32]
+
+
+# --- Sub-step 10a: provider_items ------------------------------------------
+
+REASONING_MARKER = "opaque-reasoning-7f3a"
+ITEMS_1 = ({"type": "reasoning", "id": "rs_1", "encrypted_content": REASONING_MARKER},)
+ITEMS_2 = ({"type": "reasoning", "id": "rs_2", "encrypted_content": REASONING_MARKER + "-2"},)
+
+
+def _assistant_messages(provider: MockAssistantProvider, call_index: int) -> list[ChatMessage]:
+    messages = provider.calls[call_index]["messages"]
+    assert isinstance(messages, tuple)
+    return [message for message in messages if message.role == "assistant"]
+
+
+def _faq_call(call_id: str) -> ToolCall:
+    return ToolCall(id=call_id, name="get_faq", arguments={})
+
+
+def test_provider_items_from_finish_reach_the_next_call(tbilisi_salon):
+    _events, provider = _run(
+        tbilisi_salon,
+        [
+            [_faq_call("call-1"), Finish(input_tokens=10, output_tokens=5, provider_items=ITEMS_1)],
+            [TextDelta(text="Here it is."), _finish()],
+        ],
+    )
+
+    [assistant] = _assistant_messages(provider, 1)
+    assert assistant.tool_calls == (_faq_call("call-1"),)
+    assert assistant.provider_items == ITEMS_1
+
+
+def test_provider_items_of_each_call_stay_on_its_own_assistant_message(tbilisi_salon):
+    _events, provider = _run(
+        tbilisi_salon,
+        [
+            [_faq_call("call-1"), Finish(input_tokens=1, output_tokens=1, provider_items=ITEMS_1)],
+            [_faq_call("call-2"), Finish(input_tokens=1, output_tokens=1, provider_items=ITEMS_2)],
+            [TextDelta(text="Done."), _finish()],
+        ],
+    )
+
+    assert [m.provider_items for m in _assistant_messages(provider, 2)] == [ITEMS_1, ITEMS_2]
+
+
+@pytest.mark.parametrize(
+    "first_turn",
+    [
+        [_faq_call("call-1"), Finish(input_tokens=1, output_tokens=1)],
+        [_faq_call("call-1")],
+    ],
+    ids=["finish_without_items", "no_finish"],
+)
+def test_nothing_is_replayed_without_provider_items(tbilisi_salon, first_turn):
+    _events, provider = _run(tbilisi_salon, [first_turn, [TextDelta(text="Ok."), _finish()]])
+
+    [assistant] = _assistant_messages(provider, 1)
+    assert assistant.provider_items == ()
+
+
+def test_provider_items_are_never_stored_in_the_session(tbilisi_salon, _assistant_redis):
+    events, _provider = _run(
+        tbilisi_salon,
+        [
+            [_faq_call("call-1"), Finish(input_tokens=1, output_tokens=1, provider_items=ITEMS_1)],
+            [
+                TextDelta(text="Here it is."),
+                Finish(input_tokens=1, output_tokens=1, provider_items=ITEMS_2),
+            ],
+        ],
+        user_text="Is there parking?",
+    )
+
+    assert events[-1] == {"type": "done"}
+    assert _history(tbilisi_salon) == [
+        {"role": "user", "content": "Is there parking?"},
+        {"role": "assistant", "content": "Here it is."},
+    ]
+    stored = b"".join(
+        item for key in _assistant_redis.keys("*") for item in _assistant_redis.lrange(key, 0, -1)
+    )
+    assert stored
+    assert REASONING_MARKER.encode() not in stored
+
+
+def test_provider_items_are_not_carried_into_the_next_customer_message(tbilisi_salon):
+    _run(
+        tbilisi_salon,
+        [
+            [_faq_call("call-1"), Finish(input_tokens=1, output_tokens=1, provider_items=ITEMS_1)],
+            [TextDelta(text="Here it is."), _finish()],
+        ],
+        user_text="Is there parking?",
+    )
+
+    _events, provider = _run(
+        tbilisi_salon, [[TextDelta(text="Yes."), _finish()]], user_text="And at night?"
+    )
+
+    messages = provider.calls[0]["messages"]
+    assert isinstance(messages, tuple)
+    assert all(message.provider_items == () for message in messages)
+    assert REASONING_MARKER not in repr(messages)
+
+
+# --- Sub-step 10a: 80-second deadline per customer message -----------------
+
+
+@dataclass(frozen=True)
+class _Advance:
+    """A script step that moves the fake clock instead of yielding."""
+
+    seconds: float
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class _ClockedProvider(AssistantProvider):
+    """Plays scripted turns like the mock, but an _Advance step moves the
+    fake clock, and a call whose generator is closed early is recorded."""
+
+    def __init__(self, clock: _FakeClock, script: list[list[ProviderEvent | _Advance]]) -> None:
+        self._clock = clock
+        self._script = script
+        self.calls: list[dict[str, Any]] = []
+        self.closed_calls: list[int] = []
+
+    def stream(
+        self,
+        *,
+        system: str,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolSpec],
+        safety_identifier: str,
+    ) -> Iterator[ProviderEvent]:
+        self.calls.append({"messages": tuple(messages), "safety_identifier": safety_identifier})
+        index = len(self.calls) - 1
+        try:
+            for item in self._script[index]:
+                if isinstance(item, _Advance):
+                    self._clock.now += item.seconds
+                else:
+                    yield item
+        except GeneratorExit:
+            self.closed_calls.append(index)
+            raise
+
+
+@pytest.fixture
+def clock(monkeypatch) -> _FakeClock:
+    fake = _FakeClock()
+    monkeypatch.setattr(orchestrator_module, "monotonic", fake)
+    return fake
+
+
+PROVIDER_ERROR = {"type": "error", "code": "assistant_provider_error"}
+
+
+def test_deadline_exceeded_mid_stream_stops_and_stores_nothing(tbilisi_salon, clock):
+    provider = _ClockedProvider(
+        clock,
+        [[TextDelta(text="Let me "), _Advance(81), TextDelta(text="late text"), _finish()]],
+    )
+
+    events = _run_provider(tbilisi_salon, provider)
+
+    assert events == [{"type": "text", "text": "Let me "}, PROVIDER_ERROR]
+    assert _history(tbilisi_salon) == []
+
+
+def test_deadline_counts_across_all_provider_calls_of_one_message(tbilisi_salon, clock):
+    provider = _ClockedProvider(
+        clock,
+        [
+            [TextDelta(text="Checking. "), _faq_call("call-1"), _Advance(50), _finish()],
+            [_Advance(31), TextDelta(text="late text"), _finish()],
+        ],
+    )
+
+    events = _run_provider(tbilisi_salon, provider)
+
+    assert len(provider.calls) == 2
+    assert events == [{"type": "text", "text": "Checking. "}, PROVIDER_ERROR]
+    assert _history(tbilisi_salon) == []
+
+
+def test_deadline_closes_the_provider_stream_before_the_error_event(tbilisi_salon, clock):
+    provider = _ClockedProvider(
+        clock, [[TextDelta(text="Let me "), _Advance(81), TextDelta(text="late"), _finish()]]
+    )
+
+    with tenant_context(tbilisi_salon.id):
+        events = run_turn(
+            session_id=SESSION_ID,
+            user_text="Hello",
+            lang="en",
+            now=NOW,
+            provider=provider,
+            safety_identifier=SAFETY_IDENTIFIER,
+        )
+        for event in events:
+            if event["type"] == "error":
+                # run_turn is paused at the error yield: the provider's
+                # stream must already be closed, not left for garbage
+                # collection.
+                assert provider.closed_calls == [0]
+                break
+        else:
+            pytest.fail("no error event")
+        events.close()
+
+
+def test_exactly_80_seconds_is_still_in_time(tbilisi_salon, clock):
+    provider = _ClockedProvider(
+        clock,
+        [
+            [_faq_call("call-1"), _Advance(40), _finish()],
+            [_Advance(40), TextDelta(text="Just in time."), _finish()],
+        ],
+    )
+
+    events = _run_provider(tbilisi_salon, provider, user_text="Parking?")
+
+    assert events == [{"type": "text", "text": "Just in time."}, {"type": "done"}]
+    assert _history(tbilisi_salon) == [
+        {"role": "user", "content": "Parking?"},
+        {"role": "assistant", "content": "Just in time."},
+    ]
+
+
+def test_exactly_80_seconds_before_the_next_call_still_starts_it(tbilisi_salon, clock):
+    provider = _ClockedProvider(
+        clock,
+        [
+            [_faq_call("call-1"), _finish(), _Advance(80)],
+            [TextDelta(text="Just in time."), _finish()],
+        ],
+    )
+
+    events = _run_provider(tbilisi_salon, provider)
+
+    assert len(provider.calls) == 2
+    assert events == [{"type": "text", "text": "Just in time."}, {"type": "done"}]
+
+
+def test_deadline_passed_after_a_calls_last_event_starts_no_further_call(tbilisi_salon, clock):
+    provider = _ClockedProvider(
+        clock,
+        [
+            [_faq_call("call-1"), _finish(), _Advance(81)],
+            [TextDelta(text="late text"), _finish()],
+        ],
+    )
+
+    events = _run_provider(tbilisi_salon, provider)
+
+    assert events == [PROVIDER_ERROR]
+    assert len(provider.calls) == 1
+    assert _history(tbilisi_salon) == []
+
+
+def test_deadline_is_logged_as_deadline_exceeded_not_provider_error(caplog, tbilisi_salon, clock):
+    provider = _ClockedProvider(
+        clock, [[TextDelta(text="Let me "), _Advance(81), TextDelta(text="late"), _finish()]]
+    )
+
+    with caplog.at_level(logging.INFO):
+        events = _run_provider(tbilisi_salon, provider)
+
+    assert events[-1] == PROVIDER_ERROR
+    [record] = [r for r in caplog.records if r.name == "ai_assistant.orchestrator"]
+    assert "outcome=deadline_exceeded " in record.getMessage()
+
+
+def test_deadline_drops_a_pending_proposal_and_counts_nothing(
+    monkeypatch, tbilisi_salon, service, specialist, clock
+):
+    _monday_hours(tbilisi_salon, specialist)
+    recorded: list[Any] = []
+    monkeypatch.setattr(
+        orchestrator_module, "record_proposal", lambda **kwargs: recorded.append(kwargs)
+    )
+    provider = _ClockedProvider(
+        clock,
+        [
+            [_propose_call("call-1", service, specialist), _finish()],
+            [_Advance(81), TextDelta(text="Here is a card."), _finish()],
+        ],
+    )
+
+    events = _run_provider(tbilisi_salon, provider)
+
+    assert events == [PROVIDER_ERROR]
+    assert recorded == []
+    assert _history(tbilisi_salon) == []

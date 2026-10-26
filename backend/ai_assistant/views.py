@@ -8,7 +8,9 @@ Stage 16 sub-step 7 — the assistant endpoints (docs/DECISIONS.md §
 Both are public and never authenticate (PublicEndpointMixin), and both
 answer 404 when the salon has the assistant switched off. The provider comes
 from get_assistant_provider(), looked up here so tests can patch it in this
-module.
+module. The view computes the provider's safety_identifier from the salon
+and the client IP DRF's get_ident() returns (docs/DECISIONS.md § "Sub-step
+10 details").
 
 POST validates the message before anything streams, then answers an NDJSON
 stream of the orchestrator's client events. The session id travels in the
@@ -43,6 +45,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 
 from accounts.views import PublicEndpointMixin
@@ -57,6 +60,7 @@ from ai_assistant.limits import (
 from ai_assistant.orchestrator import run_turn
 from ai_assistant.providers import get_assistant_provider
 from ai_assistant.providers.base import AssistantProvider
+from ai_assistant.safety_identifier import compute_safety_identifier
 from ai_assistant.serializers import AssistantMessageSerializer
 from ai_assistant.session_store import load_history, new_session_id
 from ai_assistant.throttles import (
@@ -92,6 +96,7 @@ def _stream(
     user_text: str,
     lang: str,
     provider: AssistantProvider,
+    safety_identifier: str,
     now: dt.datetime,
     slot: str,
 ) -> Generator[str]:
@@ -104,6 +109,7 @@ def _stream(
                     lang=lang,
                     now=now,
                     provider=provider,
+                    safety_identifier=safety_identifier,
                 )
             ) as events:
                 for event in events:
@@ -194,6 +200,10 @@ class AssistantMessageCreateView(PublicEndpointMixin, APIView):
             user_text=serializer.validated_data["message"],
             lang=resolve_language_code(request.query_params.get("lang")),
             provider=get_assistant_provider(),
+            # The same IP the salon + IP throttle keys on (DRF's get_ident()).
+            safety_identifier=compute_safety_identifier(
+                salon_id=salon.id, client_ip=BaseThrottle().get_ident(request)
+            ),
             now=now,
             slot=slot,
         )

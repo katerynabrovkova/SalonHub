@@ -20,11 +20,13 @@ from typing import Any
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
+from rest_framework.throttling import BaseThrottle
 from rest_framework_simplejwt.tokens import AccessToken
 
 from ai_assistant import tools as tools_module
 from ai_assistant.providers.base import ChatMessage, Finish, TextDelta, ToolCall
 from ai_assistant.providers.mock import MockAssistantProvider, ScriptTurn
+from ai_assistant.safety_identifier import compute_safety_identifier
 from ai_assistant.session_store import append_turn, load_history, new_session_id
 from catalog.models import Service, ServiceCategory
 from core.exceptions import AssistantProviderError
@@ -437,6 +439,36 @@ def test_lang_query_parameter_reaches_the_orchestrator(monkeypatch, enabled_salo
     _events(response)
 
     assert 'The site language is "uk".' in provider.calls[0]["system"]
+
+
+# --- Sub-step 10a: safety_identifier --------------------------------------
+
+
+def test_post_sends_the_salon_and_client_ip_safety_identifier(monkeypatch, settings, enabled_salon):
+    settings.ASSISTANT_SAFETY_IDENTIFIER_SECRET = "endpoint-test-secret"
+    provider = _use_provider(monkeypatch, _reply())
+
+    _events(_post(enabled_salon.slug, {"message": "Hi"}, REMOTE_ADDR="203.0.113.7"))
+
+    assert provider.calls[0]["safety_identifier"] == compute_safety_identifier(
+        salon_id=enabled_salon.id, client_ip="203.0.113.7"
+    )
+
+
+def test_safety_identifier_uses_the_ip_get_ident_returns(monkeypatch, settings, enabled_salon):
+    """The identifier is built from whatever DRF's get_ident() returns for
+    the request, the same IP the salon + IP throttle uses, so it follows the
+    Stage 22 proxy fix (docs/DECISIONS.md § "Open items") without a change
+    here. get_ident() is made to return an IP that is not REMOTE_ADDR."""
+    settings.ASSISTANT_SAFETY_IDENTIFIER_SECRET = "endpoint-test-secret"
+    provider = _use_provider(monkeypatch, _reply())
+    monkeypatch.setattr(BaseThrottle, "get_ident", lambda self, request: "192.0.2.77")
+
+    _events(_post(enabled_salon.slug, {"message": "Hi"}, REMOTE_ADDR="203.0.113.7"))
+
+    assert provider.calls[0]["safety_identifier"] == compute_safety_identifier(
+        salon_id=enabled_salon.id, client_ip="192.0.2.77"
+    )
 
 
 # --- 14. client disconnect ------------------------------------------------

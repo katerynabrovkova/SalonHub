@@ -40,10 +40,16 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class Finish:
-    """The model turn ended. Token counts are for logging only."""
+    """
+    The model turn ended. Token counts are for logging only.
+    `provider_items` is opaque vendor data the adapter needs replayed with
+    the tool results (OpenAI's reasoning items, docs/DECISIONS.md §
+    "Sub-step 10 details"); empty for providers that need none.
+    """
 
     input_tokens: int
     output_tokens: int
+    provider_items: tuple[Any, ...] = ()
 
 
 ProviderEvent = TextDelta | ToolCall | Finish
@@ -54,13 +60,16 @@ class ChatMessage:
     """
     One message of the conversation sent to the model. A "tool" message
     carries a tool result and the `tool_call_id` it answers; an "assistant"
-    message carries the `tool_calls` the model made in that turn, if any.
+    message carries the `tool_calls` the model made in that turn, if any,
+    and the `provider_items` from that turn's Finish. Those are replayed
+    only within one customer message and never stored in the session.
     """
 
     role: Literal["user", "assistant", "tool"]
     content: str
     tool_call_id: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
+    provider_items: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -80,9 +89,11 @@ class AssistantProvider(ABC):
         system: str,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolSpec],
+        safety_identifier: str,
     ) -> Iterator[ProviderEvent]:
         """
         Yields the events of one model turn, ending with Finish. A real
         adapter wraps any vendor failure, including one mid-stream, into
-        core.exceptions.AssistantProviderError.
+        core.exceptions.AssistantProviderError. `safety_identifier` is an
+        opaque string computed by the caller; the provider only forwards it.
         """
