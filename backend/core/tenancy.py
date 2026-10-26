@@ -26,6 +26,15 @@ class TenantContextMissingError(RuntimeError):
     """
 
 
+class TenantContextMismatchError(RuntimeError):
+    """
+    Raised when a function given an explicit salon runs under a different
+    bound tenant context. A programming mistake, like
+    TenantContextMissingError: tenant-scoped queries would silently use
+    the bound salon while writes used the given one.
+    """
+
+
 @contextmanager
 def tenant_context(salon_id: int) -> Iterator[None]:
     """Bind the current tenant for the duration of the block. Also usable as a decorator."""

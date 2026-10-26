@@ -34,7 +34,13 @@ from accounts.models import Account, Customer
 from accounts.services import get_or_create_guest_customer
 from booking.constants import SLOT_HOLD_DURATION
 from booking.guest_tokens import issue_guest_token
-from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus, CancelledBy
+from booking.models import (
+    ACTIVE_APPOINTMENT_STATUSES,
+    Appointment,
+    AppointmentSource,
+    AppointmentStatus,
+    CancelledBy,
+)
 from catalog.models import Service
 from core.exceptions import (
     AccountLinkUnavailableError,
@@ -83,6 +89,7 @@ def create_appointment(
     customer: Customer,
     start_datetime: dt.datetime,
     now: dt.datetime,
+    source: AppointmentSource = AppointmentSource.DIRECT,
 ) -> Appointment:
     """
     docs/DECISIONS.md § Stage 7.C decisions. Raises SlotNotOfferedError if
@@ -96,6 +103,10 @@ def create_appointment(
     (docs/DECISIONS.md § "Fix: the specialist must perform the service"):
     the engine does not check the link, and an unlinked pair must not look
     like a slot that could be retried.
+
+    `source` is stored as given; it is analytics only and never affects
+    money or access (docs/DECISIONS.md § Stage 16 planning, "Sub-step 9
+    details").
     """
     if not specialist_offers_service(specialist, service):
         raise SpecialistDoesNotOfferServiceError()
@@ -131,6 +142,7 @@ def create_appointment(
                 deposit_percentage_at_booking=salon.deposit_percentage,
                 hold_expires_at=now + SLOT_HOLD_DURATION,
                 status=AppointmentStatus.PENDING_PAYMENT,
+                source=source,
             )
         except IntegrityError as exc:
             if isinstance(exc.__cause__, psycopg.errors.ExclusionViolation):
@@ -205,6 +217,7 @@ def create_appointment_for_any_specialist(
     start_datetime: dt.datetime,
     now: dt.datetime,
     rng: random.Random | None = None,
+    source: AppointmentSource = AppointmentSource.DIRECT,
 ) -> Appointment:
     """
     docs/DECISIONS.md § Stage 14 scope revision + tie-break clarification.
@@ -246,6 +259,7 @@ def create_appointment_for_any_specialist(
                 customer=customer,
                 start_datetime=start_datetime,
                 now=now,
+                source=source,
             )
         except SlotUnavailableError as exc:
             last_error = exc
@@ -263,6 +277,7 @@ def create_guest_appointment(
     customer_email: str,
     customer_phone: str,
     rng: random.Random | None = None,
+    source: AppointmentSource = AppointmentSource.DIRECT,
 ) -> tuple[Appointment, str]:
     """
     docs/DECISIONS.md § Stage 7.C-bis decisions. Guest path only. The outer
@@ -291,6 +306,7 @@ def create_guest_appointment(
                 start_datetime=start_datetime,
                 now=now,
                 rng=rng,
+                source=source,
             )
         else:
             appointment = create_appointment(
@@ -300,6 +316,7 @@ def create_guest_appointment(
                 customer=customer,
                 start_datetime=start_datetime,
                 now=now,
+                source=source,
             )
         raw_token, _token_row = issue_guest_token(appointment)
         record_and_dispatch_notification(
@@ -323,6 +340,7 @@ def create_account_appointment(
     customer_name: str | None,
     customer_phone: str | None,
     rng: random.Random | None = None,
+    source: AppointmentSource = AppointmentSource.DIRECT,
 ) -> Appointment:
     """
     docs/DECISIONS.md § Stage 15 planning, item 5, "Cycle B — account
@@ -406,6 +424,7 @@ def create_account_appointment(
                 start_datetime=start_datetime,
                 now=now,
                 rng=rng,
+                source=source,
             )
         else:
             appointment = create_appointment(
@@ -415,6 +434,7 @@ def create_account_appointment(
                 customer=customer,
                 start_datetime=start_datetime,
                 now=now,
+                source=source,
             )
         record_and_dispatch_notification(
             salon=salon,

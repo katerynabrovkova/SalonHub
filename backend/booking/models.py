@@ -27,6 +27,17 @@ class CancelledBy(models.TextChoices):
     SYSTEM = "system", "System"
 
 
+class AppointmentSource(models.TextChoices):
+    """
+    Where a booking came from (docs/DECISIONS.md § Stage 16 planning,
+    "Sub-step 9 details"). Client-supplied and for analytics only: it must
+    never affect money, discounts or access.
+    """
+
+    DIRECT = "direct", "Direct"
+    ASSISTANT = "assistant", "Assistant"
+
+
 class Appointment(TenantScopedModel, TimeStamped):
     """
     docs/ARCHITECTURE.md § 2, § 7, and the "State machines" section.
@@ -64,6 +75,10 @@ class Appointment(TenantScopedModel, TimeStamped):
         max_length=16, choices=CancelledBy.choices, null=True, blank=True
     )
     cancellation_reason = models.TextField(blank=True)
+
+    source = models.CharField(
+        max_length=16, choices=AppointmentSource.choices, default=AppointmentSource.DIRECT
+    )
 
     class Meta(TenantScopedModel.Meta):
         abstract = False

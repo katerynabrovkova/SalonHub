@@ -36,7 +36,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from booking.models import Appointment, CancelledBy
+from booking.models import Appointment, AppointmentSource, CancelledBy
 from booking.serializers import (
     AccountBookingRequestSerializer,
     AppointmentAccountSerializer,
@@ -406,6 +406,7 @@ class GuestBookingCreateView(APIView):
             customer_name=body.validated_data["customer_name"],
             customer_email=body.validated_data["customer_email"],
             customer_phone=body.validated_data["customer_phone"],
+            source=body.validated_data.get("source", AppointmentSource.DIRECT),
         )
 
         return Response(
@@ -476,6 +477,7 @@ class AccountBookingCreateView(APIView):
             now=now,
             customer_name=body.validated_data.get("customer_name"),
             customer_phone=body.validated_data.get("customer_phone"),
+            source=body.validated_data.get("source", AppointmentSource.DIRECT),
         )
 
         return Response(

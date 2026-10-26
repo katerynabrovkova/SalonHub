@@ -13,16 +13,25 @@ Text deltas are forwarded as they arrive. The proposal, if any, is sent
 after all text, right before `done`. The customer message and the full
 reply text are stored only on success. One log line per message carries the
 salon id, summed token counts, latency and outcome, never any text.
+
+Daily counters (sub-step 9): a conversation is counted on the first
+successfully stored turn of a session, and a proposal for every emitted
+`proposal` event. A counter failure is logged without text and swallowed.
+`record_conversation_started` and `record_proposal` are imported as bare
+names so tests can replace them here.
 """
 
 import datetime as dt
 import json
 import logging
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from typing import Any, Literal, cast
 
+from django.db import transaction
+
 from ai_assistant import tools
+from ai_assistant.analytics import record_conversation_started, record_proposal
 from ai_assistant.instructions import build_system_instructions
 from ai_assistant.proposals import PROPOSE_BOOKING_SPEC, handle_propose_booking
 from ai_assistant.providers.base import (
@@ -35,6 +44,7 @@ from ai_assistant.providers.base import (
 )
 from ai_assistant.session_store import append_turn, load_history
 from core.exceptions import AssistantProviderError
+from tenants.models import Salon
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +90,17 @@ def _run_tool(call: ToolCall, *, lang: str, now: dt.datetime) -> dict[str, Any]:
     return function(**kwargs)
 
 
+def _count(counter: str, record: Callable[..., None], *, salon: Salon, **kwargs: Any) -> None:
+    """Runs one counter write; a failure is logged (never text) and
+    swallowed. Its own atomic block, so a failed write cannot break an
+    enclosing transaction."""
+    try:
+        with transaction.atomic():
+            record(salon=salon, **kwargs)
+    except Exception:
+        logger.exception("assistant counter failed: salon_id=%s counter=%s", salon.id, counter)
+
+
 def run_turn(
     *,
     session_id: str,
@@ -91,7 +112,8 @@ def run_turn(
     salon = tools._current_salon()
     system = build_system_instructions(salon=salon, now=now, lang=lang)
     specs = _tool_specs()
-    messages = [*_history_messages(session_id), ChatMessage(role="user", content=user_text)]
+    history = _history_messages(session_id)
+    messages = [*history, ChatMessage(role="user", content=user_text)]
 
     started = time.monotonic()
     input_tokens = 0
@@ -118,8 +140,19 @@ def run_turn(
 
             if not tool_calls:
                 if card is not None:
+                    # Counted before the yield: if the stream is closed while
+                    # paused at it, code after the yield never runs.
+                    _count(
+                        "proposal",
+                        record_proposal,
+                        salon=salon,
+                        service_id=card["service"]["id"],
+                        now=now,
+                    )
                     yield {"type": "proposal", "card": card}
                 append_turn(session_id, user_text, "".join(reply_parts))
+                if not history:
+                    _count("conversation", record_conversation_started, salon=salon, now=now)
                 outcome = "ok"
                 yield {"type": "done"}
                 return

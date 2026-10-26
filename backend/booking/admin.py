@@ -22,8 +22,9 @@ class AppointmentAdmin(ReadOnlySalonScopedAdmin):
         "start_datetime",
         "status",
         "cancelled_by",
+        "source",
     )
-    list_filter = (*ReadOnlySalonScopedAdmin.list_filter, "status")
+    list_filter = (*ReadOnlySalonScopedAdmin.list_filter, "status", "source")
 
 
 @admin.register(GuestAccessToken)
