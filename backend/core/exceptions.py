@@ -187,6 +187,24 @@ class AssistantProviderError(DomainError):
     default_message = "The assistant provider could not process this request."
 
 
+class AssistantDailyLimitError(DomainError):
+    """
+    docs/DECISIONS.md § "Sub-step 8 details", 8a: the salon's assistant has
+    taken its 1000 messages for the salon-local day. Raised by the message
+    view before streaming. `retry_after` is the whole seconds until the
+    salon's local midnight; the view sends it as Retry-After, because the
+    handler below builds DomainError responses without headers.
+    """
+
+    code = "assistant_daily_limit"
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    default_message = "The assistant has reached today's message limit."
+
+    def __init__(self, *, retry_after: int) -> None:
+        self.retry_after = retry_after
+        super().__init__()
+
+
 class CategoryHasActiveServicesError(DomainError):
     code = "category_has_active_services"
     status_code = status.HTTP_409_CONFLICT

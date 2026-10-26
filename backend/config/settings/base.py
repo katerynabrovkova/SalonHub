@@ -195,6 +195,10 @@ REST_FRAMEWORK = {
         # sessions": keyed by the account, every request counts.
         "password_change": "5/hour",
         "guest_token": "20/min",
+        # docs/DECISIONS.md § "Sub-step 8 details", 8a: the assistant's
+        # message POST (ai_assistant/throttles.py).
+        "assistant_session": "10/min",
+        "assistant_salon_ip": "200/hour",
     },
     "EXCEPTION_HANDLER": "core.exceptions.exception_handler",
 }

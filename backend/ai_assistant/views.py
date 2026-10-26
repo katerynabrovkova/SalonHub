@@ -15,6 +15,10 @@ stream of the orchestrator's client events. The session id travels in the
 X-Assistant-Session header both ways; an id with no history in this salon
 (unknown, expired or another salon's) silently starts a new conversation.
 
+Limits (docs/DECISIONS.md § "Sub-step 8 details", 8a) all answer before the
+stream: the per-session and salon + IP throttles run before the view, then
+the 404, the 400, and the per-salon daily count. History is unthrottled.
+
 The response body is iterated after TenantResolutionMiddleware has already
 unbound the tenant, so the generator binds tenant_context itself. Any
 unexpected exception becomes an `internal_error` event; the details go to
@@ -39,18 +43,28 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.views import PublicEndpointMixin
+from ai_assistant.limits import (
+    DAILY_MESSAGE_LIMIT,
+    count_daily_message,
+    seconds_until_local_midnight,
+)
 from ai_assistant.orchestrator import run_turn
 from ai_assistant.providers import get_assistant_provider
 from ai_assistant.providers.base import AssistantProvider
 from ai_assistant.serializers import AssistantMessageSerializer
 from ai_assistant.session_store import load_history, new_session_id
+from ai_assistant.throttles import (
+    SESSION_HEADER,
+    AssistantSalonIPThrottle,
+    AssistantSessionThrottle,
+)
+from core.exceptions import AssistantDailyLimitError
 from core.i18n import resolve_language_code
 from core.tenancy import get_current_salon_id, tenant_context
 from tenants.models import Salon
 
 logger = logging.getLogger(__name__)
 
-SESSION_HEADER = "X-Assistant-Session"
 INTERNAL_ERROR_EVENT: dict[str, Any] = {"type": "error", "code": "internal_error"}
 
 
@@ -95,11 +109,26 @@ def _stream(
 
 class AssistantMessageCreateView(PublicEndpointMixin, APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [AssistantSessionThrottle, AssistantSalonIPThrottle]
+
+    def handle_exception(self, exc: Exception) -> Response:
+        # Our exception handler builds DomainError responses without
+        # headers, so the daily limit's Retry-After is set here.
+        response = super().handle_exception(exc)
+        if isinstance(exc, AssistantDailyLimitError):
+            response["Retry-After"] = str(exc.retry_after)
+        return response
 
     def post(self, request: Request, *args: object, **kwargs: object) -> StreamingHttpResponse:
         salon = _enabled_salon()
         serializer = AssistantMessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        now = timezone.now()
+        if count_daily_message(salon=salon, now=now) > DAILY_MESSAGE_LIMIT:
+            raise AssistantDailyLimitError(
+                retry_after=seconds_until_local_midnight(salon=salon, now=now)
+            )
 
         session_id = request.headers.get(SESSION_HEADER)
         if not session_id or not load_history(session_id):
@@ -112,7 +141,7 @@ class AssistantMessageCreateView(PublicEndpointMixin, APIView):
                 user_text=serializer.validated_data["message"],
                 lang=resolve_language_code(request.query_params.get("lang")),
                 provider=get_assistant_provider(),
-                now=timezone.now(),
+                now=now,
             ),
             content_type="application/x-ndjson",
         )
@@ -124,6 +153,9 @@ class AssistantMessageCreateView(PublicEndpointMixin, APIView):
 
 class AssistantHistoryView(PublicEndpointMixin, APIView):
     permission_classes = [AllowAny]
+    # A cheap Redis read, deliberately unthrottled (docs/DECISIONS.md §
+    # "Sub-step 8 details", 8a).
+    throttle_classes: list[type] = []
 
     def get(self, request: Request, *args: object, **kwargs: object) -> Response:
         _enabled_salon()
