@@ -6573,7 +6573,24 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   still binds `Service.objects.all()`. Low risk: it only returns linked
   specialists, and booking step 4 already 404s for an inactive service.
   Make it active-only in a separate small fix. Found 22.10.2026.
-- Some public views (guest booking, salon detail, catalog and specialist
-  reads) do not use `PublicEndpointMixin`, so a stale access cookie may
-  give 401 there. Read-only recon after sub-step 7; fix separately if
-  confirmed. Found 23.10.2026.
+- Public views without `PublicEndpointMixin` (found 23.10.2026; recon
+  25.10.2026):
+  - Confirmed: 16 guest-reachable endpoints answer 401 `token_not_valid`
+    when a garbage or expired access cookie is sent: salon detail;
+    categories, services and specialists lists and details; availability
+    and availability/specialists; reviews list; guest booking POST; guest
+    appointment detail, cancel and pay; review create; payment webhook.
+  - No live impact today: server components fetch without cookies, and
+    the browser calls to guest booking and guest appointments go
+    cross-origin without credentials. It becomes live if hosting turns
+    these calls same-origin or a credentialed caller is added.
+  - The Stage 15 fix (`authentication_classes = ()`) cannot be applied
+    blindly: catalog and specialist views share one class for public
+    reads and staff writes (`IsSalonStaff`, `include_inactive`), and
+    review create needs the account. Safe candidates for the mixin: salon
+    detail, both availability endpoints, reviews list, guest booking,
+    guest appointment views, webhook. The mixed views need a different
+    approach (e.g. treat an invalid cookie as anonymous).
+  - Schedule: a separate fix after Stage 16 and before Stage 22. Extend
+    `tests/test_public_endpoints_ignore_invalid_cookie.py` to every view
+    in the list.
