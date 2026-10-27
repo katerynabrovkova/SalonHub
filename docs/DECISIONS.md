@@ -6927,6 +6927,136 @@ proposed instruction text):
   offer the closest alternative", "offer nearby free times") are replaced
   by the alternatives rule. All other rules are unchanged.
 
+### Sub-step 10c: `check_availability` explains empty results (decided 27.10.2026)
+
+**Problem** (second manual check, 27.10.2026). An empty result carried no
+reason, so the model could not tell "the specialist does not work then"
+from "fully booked" and probed one window after another, sometimes until
+`assistant_turn_limit`. The 20-slot cap with 15-minute slots also covers
+only about a day and a half, so even one wide call could not show the
+nearest days.
+
+**Approved design**
+
+- **`reason`, only when `slots` is empty:** `not_working`,
+  `fully_booked` or `outside_booking_window`. With `"any"`,
+  `not_working` means no qualified specialist works those days.
+- **`alternatives`, only when `slots` is empty.** The search starts at
+  `date_from` and keeps the 14-day cap. Soft wishes are relaxed in this
+  order: the same time of day on other days, other times on the
+  requested days, any time. The first step that finds slots is returned,
+  with `relaxed` naming what was dropped.
+- **Optional argument `hard: ["day", "time"]`,** set by the model only
+  when the customer says "тільки". The service and the specialist are
+  always kept; falling back to `"any"` stays the model's decision under
+  the specialist rule.
+- **Spread:** at most 3 slots per day over the first 3 days that have
+  any.
+  - **Refined 27.10.2026 (Katya):** which 3 slots of a day. Up to 3
+    free slots of the day's window, as far apart from each other as
+    possible: the smallest gap between chosen slots is maximised. With
+    free time this gives gaps of an hour or more; gaps of 30 or 15
+    minutes appear only when the customer's window is narrow or the day
+    is almost fully booked. The window is the customer's time wish, or
+    the working hours when there is none. This applies everywhere
+    `check_availability` returns slots: found slots (up to 3 per day,
+    first 3 days that have any) and alternatives alike. The response
+    shape stays the same; only which slots are returned changes. It
+    replaces "the 3 slots of a day are its earliest 3" and the
+    20-earliest cap of 4c.
+  - **Rejected 27.10.2026:** splitting the window into 3 equal parts and
+    taking the earliest free slot of each part (decided earlier the same
+    day). In the tests it gave 09:00, 11:00, 11:15 and 09:00, 15:00,
+    15:15: two slots 15 minutes apart while the day had room for wider
+    gaps.
+  - **Acceptance examples** (60-minute service, 15-minute grid), asserted
+    by smallest gap and coverage, exact times only where forced:
+    1. A free 09:00-18:00 day, no time wish: 3 slots, smallest gap at
+       least 3 hours, the first in the morning, the last in the evening.
+    2. "Any", Jane 09:00-12:00 and Mary 15:00-18:00: the 3 slots include
+       both specialists' hours, smallest gap at least 1 hour.
+    3. As 2 with 11:00 booked: still both, smallest gap at least 1 hour.
+    4. Window 09:00-10:00: 3 slots inside it; small gaps are fine. With
+       the tie-break below: 09:00, 09:30, 09:45.
+    5. Only 09:00, 09:15, 09:30 free: exactly those three.
+    6. Morning 09:00-12:00 with 10:00-11:00 booked: 09:00, 11:00, 11:45.
+       Only one free start precedes the booking, so two of the three fall
+       in 11:00-11:45; 45 minutes is the widest possible smallest gap.
+- **The reason logic is a read-only helper in `scheduling/services.py`,**
+  not in `tools.py`: the tool keeps no availability logic of its own
+  (4c).
+- **The response shape is unchanged when slots exist.**
+- The existing test that expects `{"slots": [], "has_more": False}` is
+  updated to the new shape (approved 27.10.2026).
+- Not in 10c (they are 10d): the specialists' weekly hours in
+  `get_specialist_info`, the tool-call debug log line (tool names, slot
+  counts passed and dropped, no text) and the instruction changes.
+
+**Chosen while writing the RED tests, approved 27.10.2026:**
+
+- **Helper** `no_free_start_reason(*, salon, service, specialist, date_from,
+  date_to, weekdays, time_from, time_to, now)` with `specialist=None` for
+  "any". It returns `None` when a free start exists, so its contract
+  holds on its own.
+- **The requested window** is the days in the range that match
+  `weekdays`, with a start in `[time_from, time_to)`, as the slot filter
+  already does.
+- **Reasons, checked in this order:**
+  - `outside_booking_window`: no part of the requested window lies within
+    the booking window (lead time, maximum days in advance);
+  - `not_working`: with appointments ignored, no start fits, that is
+    working hours minus time off, with the service's duration and buffer
+    and the salon's granularity. So "the window is too short for the
+    service" is also `not_working`;
+  - `fully_booked`: otherwise.
+- **Which steps run.** A day wish exists when `weekdays` is given or the
+  range is shorter than 14 days; a time wish exists when `time_from` or
+  `time_to` is given. A step that would relax a missing or a hard wish is
+  skipped.
+- **When no step finds slots,** `alternatives` is
+  `{"slots": [], "relaxed": []}`. It is always present when `slots` is
+  empty.
+- **A `hard` value that is not a list of `"day"` / `"time"`** returns
+  `{"error": "invalid_filter"}`. `hard` is declared in the `ToolSpec`, so
+  the orchestrator's schema check accepts it.
+- "The 3 slots of a day are its earliest 3" was also chosen here; it was
+  replaced by the spread rule above.
+
+**Chosen while writing the spread tests, approved 27.10.2026** (the
+tie-break changed by Katya the same day, see below):
+
+- **`has_more`** is true when free slots exist that were not returned.
+  Before, it meant more than the 20 earliest.
+- **Tie-break** (added with the farthest-apart rule): the day's first and
+  last free slots are always chosen, and the third is the free slot
+  nearest the middle between them. Some best choice always contains the
+  first and the last free slot (moving an outer slot outward never
+  shrinks a gap), so this rule never loses spread. It is deterministic
+  and shows the whole free span of the day. With 3 or fewer free slots,
+  all of them are returned. The day's slots are returned in time order.
+  - **Changed 27.10.2026 (Katya):** of two candidates equally near the
+    middle, a whole hour is preferred, then a half hour, then the
+    earlier one (salon-local time). First chosen: always the earlier.
+    Example 4 (window 09:00-10:00) becomes 09:00, 09:30, 09:45 instead
+    of 09:00, 09:15, 09:45.
+- The window details recorded with the equal-parts rule (one time bound
+  completed from the working hours, the "any" window from the first
+  start to the last end) are dropped with it: choosing the farthest-apart
+  free slots needs no window bounds beyond the time filter that already
+  exists.
+
+**Mutation results (27.10.2026).** Each of these fails at least one test:
+the earliest 3 instead of the farthest apart, relaxation steps 1 and 2
+swapped, `hard` ignored, a 15-day alternatives search, and no `reason`
+key. Dropping the salon filter for "any" in `no_free_start_reason`
+(`Specialist.unscoped_objects.filter(services=service, is_active=True)`)
+survives by design: the composite tenant FKs on `SpecialistService`
+already make a link to another salon's service impossible, so the
+mutant is equivalent. Dropping the service link as well (all active
+specialists, unscoped) fails three "any" reason tests. Even then another
+salon's specialist adds nothing, because the engine reads working hours
+through the tenant-scoped manager.
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
