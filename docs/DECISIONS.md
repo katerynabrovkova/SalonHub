@@ -7057,6 +7057,82 @@ specialists, unscoped) fails three "any" reason tests. Even then another
 salon's specialist adds nothing, because the engine reads working hours
 through the tenant-scoped manager.
 
+### Sub-step 10d details (decided 27.10.2026)
+
+Follow-up to the second manual check and 10c, as proposed on 27.10.2026.
+
+- **`get_specialist_info` returns each specialist's weekly working
+  hours,** per weekday, from `WorkingHours`. A day can have several
+  ranges; days without hours are simply absent. Weekly schedule only, no
+  time off: the model says "Анна працює з понеділка по п'ятницю" from
+  these hours, and checks a specific date with `check_availability`.
+- **One log line per tool call, at INFO:** the salon id, the tool name,
+  the outcome, and counts only. For `check_availability` the number of
+  slots returned, and the reason when there are none. For
+  `propose_booking` the number of slots passed, dropped and shown. No
+  message text, no argument values, no session id. This closes the gap
+  found in the second manual check: the turn log had no tool names, so
+  the empty proposal card could not be traced.
+- **Instructions (Availability and Booking):**
+  - call `check_availability` once with all the customer's wishes; set
+    `hard` only when the customer says "тільки" (or the equivalent);
+  - if there are no slots, explain the reason the way the salon would
+    (not working that day versus fully booked), offer the alternatives
+    and say which wish was relaxed; never call the tool again just to
+    find alternatives;
+  - if the reply names free times, pass up to 3 of them to
+    `propose_booking` exactly as `check_availability` returned them;
+  - call `propose_booking` only after the availability results are in,
+    never in the same step;
+  - "without times" applies only when no times were named;
+  - for questions about working days, use the hours from
+    `get_specialist_info`.
+- **The reason is explained in the salon's words,** never as the code:
+  `not_working` means the specialist does not work then, `fully_booked`
+  that the time is taken, `outside_booking_window` that booking for that
+  time is not open (too soon or too far ahead).
+- **Two separate time windows** ("evening or morning") stay the only
+  exception to "call once": one call per window, because a window cannot
+  cross midnight.
+- **"Preferably <name>":** if the preferred specialist has no slots in
+  the requested window, the model makes exactly one extra
+  `check_availability` call with specialist `"any"` for that window and
+  offers both: the preferred specialist's alternatives and another
+  specialist at the requested time. Never for "тільки <name>". This
+  refines the specialist rule in "Product decisions" ("Preferably
+  <name>" allows a compromise with another specialist).
+- Instruction behaviour is verified by the manual check, not by
+  automated tests (as in "Tone and manner"). The hours and the log line
+  are tested.
+
+**Chosen while writing the RED tests, approved 27.10.2026:**
+
+- **Hours shape:** `"working_hours": {"monday": [{"start": "09:00",
+  "end": "18:00"}], ...}`. Keys are the lowercase English weekday names
+  that `check_availability` already uses, in Monday-to-Sunday order;
+  each day's ranges are sorted by start, as stored (not merged). A
+  specialist without hours gets `{}`.
+- **Logger:** `ai_assistant.orchestrator.tools`, a child of the
+  orchestrator's logger. The existing per-message line keeps its own
+  logger name, so its "exactly one line" test stays as it is, and the
+  tool lines can be filtered or silenced on their own.
+- **Line format:** `assistant tool: salon_id=<id> tool=<name>
+  outcome=<outcome>`, then `slots=<n>` and, when empty,
+  `reason=<reason>` for `check_availability`, or `passed=<n>
+  dropped=<n> shown=<n>` for `propose_booking`. The outcome is `ok`, or
+  the tool's error code (`not_found`, `invalid_range`,
+  `invalid_tool_call`, `one_proposal_per_reply`, ...). Counts are
+  logged only when the tool returned its normal result.
+- **An unknown tool name is logged as `tool=unknown`:** the name comes
+  from the model, so logging it would log a model-chosen value.
+
+**Mutation results (27.10.2026).** Each fails at least one test: another
+specialist's hours under the first (the same-salon hours test); an
+argument value in the log line, also when placed mid-line so the format
+checks still pass (the privacy test); the model's name for an unknown
+tool (the unknown-tool test); no reason on an empty `check_availability`
+line (the empty-result log test).
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
