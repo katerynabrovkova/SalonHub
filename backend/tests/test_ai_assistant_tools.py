@@ -498,32 +498,33 @@ def test_check_availability_time_filter_uses_salon_local_time_half_open(
     assert result == {"slots": [_local(7, 10), _local(7, 11)], "has_more": False}
 
 
-def test_check_availability_more_than_20_matches_returns_the_20_earliest(
-    tbilisi_salon, hour_service
-):
+def test_check_availability_spreads_each_days_slots_and_reports_more(tbilisi_salon, hour_service):
+    """Was ..._more_than_20_matches_returns_the_20_earliest; the 20-earliest
+    cap was replaced by the spread on 27.10.2026 (sub-step 10c). Free starts
+    09:00-20:00: the first, the last, and the one nearest the middle (14:00
+    and 15:00 tie; the earlier wins)."""
     jane = _make_specialist(tbilisi_salon, name="Jane", services=[hour_service])
     _hours(tbilisi_salon, jane, DayOfWeek.MONDAY, 9, 21)
     _hours(tbilisi_salon, jane, DayOfWeek.TUESDAY, 9, 21)
 
     result = _check(tbilisi_salon, service_id=hour_service.id, specialist_id=jane.id)
 
-    expected = [_local(7, hour) for hour in range(9, 21)] + [
-        _local(8, hour) for hour in range(9, 17)
-    ]
-    assert len(expected) == 20
+    expected = [_local(day, hour) for day in (7, 8) for hour in (9, 14, 20)]
     assert result == {"slots": expected, "has_more": True}
 
 
-def test_check_availability_exactly_20_matches_has_no_more(tbilisi_salon, hour_service):
+def test_check_availability_found_slots_cover_the_first_3_days_with_any(
+    tbilisi_salon, hour_service
+):
+    """Was ..._exactly_20_matches_has_no_more; replaced with the spread's
+    day limit on 27.10.2026 (sub-step 10c)."""
     jane = _make_specialist(tbilisi_salon, name="Jane", services=[hour_service])
-    _hours(tbilisi_salon, jane, DayOfWeek.MONDAY, 9, 19)
-    _hours(tbilisi_salon, jane, DayOfWeek.TUESDAY, 9, 19)
+    for day in (DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY):
+        _hours(tbilisi_salon, jane, day, 9, 10)
 
     result = _check(tbilisi_salon, service_id=hour_service.id, specialist_id=jane.id)
 
-    expected = [_local(day, hour) for day in (7, 8) for hour in range(9, 19)]
-    assert len(expected) == 20
-    assert result == {"slots": expected, "has_more": False}
+    assert result == {"slots": [_local(7, 9), _local(8, 9), _local(9, 9)], "has_more": True}
 
 
 def test_check_availability_14_days_inclusive_is_accepted_15_is_too_long(
@@ -682,6 +683,8 @@ def test_check_availability_returns_the_requested_specialists_slots(tbilisi_salo
 
 
 def test_check_availability_no_matching_slots_is_an_empty_list(tbilisi_salon, hour_service):
+    """Updated in sub-step 10c (approved 27.10.2026): an empty result now
+    carries the reason and alternatives (test_ai_assistant_availability_alternatives.py)."""
     jane = _make_specialist(tbilisi_salon, name="Jane", services=[hour_service])
     _hours(tbilisi_salon, jane, DayOfWeek.MONDAY, 9, 12)
 
@@ -689,7 +692,16 @@ def test_check_availability_no_matching_slots_is_an_empty_list(tbilisi_salon, ho
         tbilisi_salon, service_id=hour_service.id, specialist_id=jane.id, weekdays=["sunday"]
     )
 
-    assert result == {"slots": [], "has_more": False}
+    assert result == {
+        "slots": [],
+        "has_more": False,
+        "reason": "not_working",
+        "alternatives": {
+            "slots": [_local(7, 9), _local(7, 10), _local(7, 11)]
+            + [_local(14, 9), _local(14, 10), _local(14, 11)],
+            "relaxed": ["day"],
+        },
+    }
 
 
 def test_check_availability_output_is_json_serializable(tbilisi_salon, hour_service):

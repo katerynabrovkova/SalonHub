@@ -46,10 +46,16 @@ compute_open_windows). Re-validates `now` on its own first line rather than
 relying on compute_candidate_start_times's inner guard, because zero
 qualifying specialists would otherwise skip that inner call entirely
 (docs/DECISIONS.md § Stage 6.H decisions).
+
+Stage 16 sub-step 10c (docs/DECISIONS.md § "Sub-step 10c") adds the
+read-only no_free_start_reason and start_in_window for the assistant's
+check_availability. compute_open_windows and compute_candidate_start_times
+are split into _open_windows (with an include_appointments switch) and
+_bookable_starts, behaviour unchanged, so the reason reuses the engine.
 """
 
 import datetime as dt
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
@@ -203,6 +209,22 @@ def compute_open_windows(
     Excludes duration, buffer, granularity, lead time, and the advance
     window entirely — those are later substages.
     """
+    return _open_windows(specialist, date_from, date_to, salon_timezone, include_appointments=True)
+
+
+def _open_windows(
+    specialist: Specialist,
+    date_from: dt.date,
+    date_to: dt.date,
+    salon_timezone: str,
+    *,
+    include_appointments: bool,
+) -> list[Window]:
+    """
+    compute_open_windows's body. include_appointments=False leaves existing
+    appointments in the windows, so no_free_start_reason can tell "not
+    working" from "fully booked" (docs/DECISIONS.md § "Sub-step 10c").
+    """
     if date_from > date_to:
         raise InvalidDateRangeError(
             f"date_from ({date_from}) must not be after date_to ({date_to})."
@@ -227,10 +249,10 @@ def compute_open_windows(
         date_to + dt.timedelta(days=1), dt.time(0, 0), dt.time(0, 0), tz
     ).start
     time_off_rows = list(_fetch_time_off(specialist, range_start_utc, range_end_utc))
-    appointment_rows = list(_fetch_appointments(specialist, range_start_utc, range_end_utc))
-    blocking_intervals = _time_off_to_blocking_intervals(
-        time_off_rows
-    ) + _appointments_to_blocking_intervals(appointment_rows)
+    blocking_intervals = _time_off_to_blocking_intervals(time_off_rows)
+    if include_appointments:
+        appointment_rows = list(_fetch_appointments(specialist, range_start_utc, range_end_utc))
+        blocking_intervals += _appointments_to_blocking_intervals(appointment_rows)
 
     return _subtract_intervals(open_windows, blocking_intervals)
 
@@ -352,6 +374,14 @@ def compute_candidate_start_times(
         date_to=date_to,
         salon_timezone=salon.timezone,
     )
+    return _bookable_starts(windows, service=service, salon=salon, now=now)
+
+
+def _bookable_starts(
+    windows: Sequence[Window], *, service: Service, salon: Salon, now: dt.datetime
+) -> list[dt.datetime]:
+    """Steps windows into start times and keeps those in the booking window:
+    compute_candidate_start_times's tail, shared with no_free_start_reason."""
     occupied_minutes = service.duration_minutes + service.buffer_minutes
     granularity_minutes = salon.slot_granularity_minutes
     candidates = _step_windows(
@@ -474,3 +504,116 @@ def is_start_offered(
         now=now,
     )
     return start in candidates
+
+
+NOT_WORKING = "not_working"
+FULLY_BOOKED = "fully_booked"
+OUTSIDE_BOOKING_WINDOW = "outside_booking_window"
+
+
+def start_in_window(
+    start: dt.datetime,
+    *,
+    tz: ZoneInfo,
+    date_from: dt.date,
+    date_to: dt.date,
+    weekdays: Collection[int] | None,
+    time_from: dt.time | None,
+    time_to: dt.time | None,
+) -> bool:
+    """
+    Whether `start` falls in a requested window: a salon-local date in
+    [date_from, date_to] whose weekday is in `weekdays` (None: any), with a
+    salon-local time in [time_from, time_to) (None: unbounded). Shared by
+    the assistant's check_availability and no_free_start_reason.
+    """
+    local = start.astimezone(tz)
+    return (
+        date_from <= local.date() <= date_to
+        and (weekdays is None or local.weekday() in weekdays)
+        and (time_from is None or time_from <= local.time())
+        and (time_to is None or local.time() < time_to)
+    )
+
+
+def no_free_start_reason(
+    *,
+    salon: Salon,
+    service: Service,
+    specialist: Specialist | None,
+    date_from: dt.date,
+    date_to: dt.date,
+    weekdays: Collection[int] | None,
+    time_from: dt.time | None,
+    time_to: dt.time | None,
+    now: dt.datetime,
+) -> str | None:
+    """
+    Why a requested window (see start_in_window) has no free start for
+    `service` with `specialist`, or with any qualifying specialist when
+    `specialist` is None (docs/DECISIONS.md § Stage 16 planning, "Sub-step
+    10c"). Read-only. None when a free start exists; otherwise, in this
+    order:
+
+    - OUTSIDE_BOOKING_WINDOW: no part of the window lies within the
+      booking window (lead time, max days in advance);
+    - NOT_WORKING: no start fits even with appointments ignored (working
+      hours minus time off, with duration, buffer and granularity);
+    - FULLY_BOOKED: otherwise.
+
+    Requires tenant context to already be bound, like the engine functions
+    it calls.
+    """
+    if timezone.is_naive(now):
+        raise ValueError("now must be a timezone-aware datetime.")
+
+    tz = ZoneInfo(salon.timezone)
+
+    def in_window(start: dt.datetime) -> bool:
+        return start_in_window(
+            start,
+            tz=tz,
+            date_from=date_from,
+            date_to=date_to,
+            weekdays=weekdays,
+            time_from=time_from,
+            time_to=time_to,
+        )
+
+    specialists = (
+        [specialist] if specialist is not None else list(_fetch_qualifying_specialists(service))
+    )
+
+    def any_start(*, include_appointments: bool) -> bool:
+        for each in specialists:
+            windows = _open_windows(
+                each, date_from, date_to, salon.timezone, include_appointments=include_appointments
+            )
+            starts = _bookable_starts(windows, service=service, salon=salon, now=now)
+            if any(in_window(start) for start in starts):
+                return True
+        return False
+
+    if any_start(include_appointments=True):
+        return None
+
+    lower_bound = now + dt.timedelta(hours=salon.min_lead_time_hours)
+    upper_bound = _max_advance_boundary(now, salon.max_advance_days, tz)
+    requested = [
+        Window(
+            dt.datetime.combine(date, time_from or dt.time(0), tzinfo=tz).astimezone(dt.UTC),
+            (
+                dt.datetime.combine(date, time_to, tzinfo=tz)
+                if time_to is not None
+                else dt.datetime.combine(date + dt.timedelta(days=1), dt.time(0), tzinfo=tz)
+            ).astimezone(dt.UTC),
+        )
+        for date in _dates_in_range(date_from, date_to)
+        if weekdays is None or date.weekday() in weekdays
+    ]
+    if not any(window.start < upper_bound and window.end > lower_bound for window in requested):
+        return OUTSIDE_BOOKING_WINDOW
+
+    if any_start(include_appointments=False):
+        return FULLY_BOOKED
+    return NOT_WORKING

@@ -11,7 +11,11 @@ as strings like the API ("40.00"). An unknown or another salon's id returns
 NOT_FOUND; tools never raise on bad model input.
 
 check_availability (4c) also takes `now` from the orchestrator and reads
-availability only from scheduling.services.
+availability only from scheduling.services. Sub-step 10c (docs/DECISIONS.md
+§ "Sub-step 10c: `check_availability` explains empty results"): it returns
+at most 3 slots per day, as far apart as possible, for the first 3 days
+with any; an empty result adds the reason and alternatives found by
+relaxing the customer's soft wishes.
 
 TOOLS maps each tool name to its ToolSpec (what the model sees) and its
 function.
@@ -34,6 +38,8 @@ from payments.services import compute_deposit_breakdown
 from scheduling.services import (
     compute_candidate_start_times,
     compute_multi_specialist_availability,
+    no_free_start_reason,
+    start_in_window,
 )
 from specialists.models import Specialist
 from specialists.services import annotate_rating, specialist_offers_service
@@ -43,7 +49,9 @@ NOT_FOUND: dict[str, Any] = {"error": "not_found"}
 
 ANY_SPECIALIST = "any"
 MAX_RANGE_DAYS = 14
-MAX_SLOTS = 20
+SLOTS_PER_DAY = 3
+MAX_DAYS = 3
+HARD_WISHES = ("day", "time")
 # Index matches dt.date.weekday() and specialists.models.DayOfWeek.
 WEEKDAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
@@ -188,6 +196,7 @@ def check_availability(
     weekdays: list[str] | None = None,
     time_from: str | None = None,
     time_to: str | None = None,
+    hard: list[str] | None = None,
 ) -> dict[str, Any]:
     salon = _current_salon()
 
@@ -211,6 +220,10 @@ def check_availability(
         return {"error": "invalid_filter"}
     if start_time is not None and end_time is not None and start_time >= end_time:
         return {"error": "invalid_filter"}
+    if hard is not None and (
+        not isinstance(hard, list) or not all(wish in HARD_WISHES for wish in hard)
+    ):
+        return {"error": "invalid_filter"}
 
     parsed_service_id = _parse_id(service_id)
     service = (
@@ -221,10 +234,13 @@ def check_availability(
     if service is None:
         return NOT_FOUND
 
+    # One engine call covers the requested range and the alternatives search.
+    search_end = start_date + dt.timedelta(days=MAX_RANGE_DAYS - 1)
+    specialist: Specialist | None = None
     if specialist_id == ANY_SPECIALIST:
         candidates = list(
             compute_multi_specialist_availability(
-                service=service, salon=salon, date_from=start_date, date_to=end_date, now=now
+                service=service, salon=salon, date_from=start_date, date_to=search_end, now=now
             ).keys()
         )
     else:
@@ -243,22 +259,113 @@ def check_availability(
             service=service,
             salon=salon,
             date_from=start_date,
-            date_to=end_date,
+            date_to=search_end,
             now=now,
         )
 
     salon_tz = ZoneInfo(salon.timezone)
-    matches = [
-        local_start
-        for local_start in sorted(candidate.astimezone(salon_tz) for candidate in candidates)
-        if (weekday_numbers is None or local_start.weekday() in weekday_numbers)
-        and (start_time is None or start_time <= local_start.time())
-        and (end_time is None or local_start.time() < end_time)
+    starts = sorted(candidate.astimezone(salon_tz) for candidate in candidates)
+
+    def matching(
+        *, date_to: dt.date, weekdays: set[int] | None, use_time: bool
+    ) -> list[dt.datetime]:
+        return [
+            start
+            for start in starts
+            if start_in_window(
+                start,
+                tz=salon_tz,
+                date_from=start_date,
+                date_to=date_to,
+                weekdays=weekdays,
+                time_from=start_time if use_time else None,
+                time_to=end_time if use_time else None,
+            )
+        ]
+
+    matches = matching(date_to=end_date, weekdays=weekday_numbers, use_time=True)
+    if matches:
+        shown = _spread(matches)
+        return {
+            "slots": [start.isoformat() for start in shown],
+            "has_more": len(matches) > len(shown),
+        }
+
+    reason = no_free_start_reason(
+        salon=salon,
+        service=service,
+        specialist=specialist,
+        date_from=start_date,
+        date_to=end_date,
+        weekdays=weekday_numbers,
+        time_from=start_time,
+        time_to=end_time,
+        now=now,
+    )
+
+    # Relaxation steps in order (DECISIONS § "Sub-step 10c"): the same time
+    # on other days, other times on the requested days, any time. A step
+    # that would relax a missing or a hard wish is skipped.
+    hard_wishes = set(hard or ())
+    day_wish = weekday_numbers is not None or end_date < search_end
+    time_wish = start_time is not None or end_time is not None
+    may_move_day = day_wish and "day" not in hard_wishes
+    may_move_time = time_wish and "time" not in hard_wishes
+    steps: list[tuple[list[str], dt.date, set[int] | None, bool]] = []
+    if may_move_day:
+        steps.append((["day"], search_end, None, True))
+    if may_move_time:
+        steps.append((["time"], end_date, weekday_numbers, False))
+    if may_move_day and may_move_time:
+        steps.append((["day", "time"], search_end, None, False))
+
+    alternatives: dict[str, Any] = {"slots": [], "relaxed": []}
+    for relaxed, step_date_to, step_weekdays, use_time in steps:
+        found = matching(date_to=step_date_to, weekdays=step_weekdays, use_time=use_time)
+        if found:
+            alternatives = {
+                "slots": [start.isoformat() for start in _spread(found)],
+                "relaxed": relaxed,
+            }
+            break
+
+    return {"slots": [], "has_more": False, "reason": reason, "alternatives": alternatives}
+
+
+def _tie_rank(start: dt.datetime) -> int:
+    """Whole hour first, then half hour, then anything else (salon-local)."""
+    return {0: 0, 30: 1}.get(start.minute, 2)
+
+
+def _farthest_apart(day_starts: list[dt.datetime]) -> list[dt.datetime]:
+    """
+    Up to SLOTS_PER_DAY starts of one day, as far apart as possible (the
+    smallest gap maximised). The first and last are always kept, since some
+    best choice always contains them; the third is the start nearest the
+    middle, ties going to a whole hour, then a half hour, then the earlier.
+    """
+    if len(day_starts) <= SLOTS_PER_DAY:
+        return day_starts
+    first, last = day_starts[0], day_starts[-1]
+    middle = first + (last - first) / 2
+    third = min(
+        day_starts[1:-1],
+        key=lambda start: (abs(start - middle), _tie_rank(start), start),
+    )
+    return [first, third, last]
+
+
+def _spread(starts: list[dt.datetime]) -> list[dt.datetime]:
+    """Sorted salon-local starts → the farthest-apart starts of each of the
+    first MAX_DAYS days that have any."""
+    by_day: dict[dt.date, list[dt.datetime]] = {}
+    for start in starts:
+        by_day.setdefault(start.date(), []).append(start)
+    return [
+        start
+        for day_starts in list(by_day.values())[:MAX_DAYS]
+        for start in _farthest_apart(day_starts)
     ]
-    return {
-        "slots": [local_start.isoformat() for local_start in matches[:MAX_SLOTS]],
-        "has_more": len(matches) > MAX_SLOTS,
-    }
 
 
 TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
@@ -321,8 +428,13 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
                 "Free start times for one service, with one specialist or any "
                 "specialist, between two salon-local dates (at most 14 days). "
                 "Optionally keep only some weekdays and a time-of-day window "
-                "(time_from inclusive, time_to exclusive). Returns at most the 20 "
-                "earliest times in salon-local ISO 8601 and has_more when more exist."
+                "(time_from inclusive, time_to exclusive). Returns up to 3 times per "
+                "day, spread out, for the first 3 days with any, in salon-local ISO "
+                "8601, and has_more when more free times exist. When nothing "
+                "matches, it also returns the reason (not_working, fully_booked or "
+                "outside_booking_window) and alternatives: the nearest free times "
+                "within 14 days of date_from, with relaxed naming the wishes that "
+                "were dropped (day, time). Wishes listed in hard are never dropped."
             ),
             parameters={
                 "type": "object",
@@ -369,6 +481,15 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
                         "description": (
                             "Salon-local start time limit, HH:MM, exclusive. Must be after "
                             "time_from, within the same day."
+                        ),
+                    },
+                    "hard": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(HARD_WISHES)},
+                        "description": (
+                            'Wishes the customer insists on ("only"): "day" keeps the '
+                            'requested days, "time" keeps the time-of-day window, when '
+                            "looking for alternatives. Omit for soft wishes."
                         ),
                     },
                 },
