@@ -5776,9 +5776,10 @@ cannot be checked in desktop Chrome and still needs a real device.
 
 ## Stage 16 planning
 
-Decided 21.10.2026. Implemented sub-step by sub-step; as of 26.10.2026
-sub-steps 1 to 10a are committed, and 10b (the OpenAI adapter) and the
-closure are open. This line said "Not yet implemented" until 26.10.2026.
+Decided 21.10.2026. Implemented sub-step by sub-step; as of 27.10.2026
+sub-steps 1 to 10 are committed, including 10b (the OpenAI adapter), and
+the closure is open. This line said "Not yet implemented" until
+26.10.2026, and that 10b was open until 27.10.2026.
 
 ### Scope and tools
 
@@ -6852,6 +6853,80 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
 - Its questions, data and pass criteria are decided after
   implementation. Katya sets a spending limit on the OpenAI project.
 
+### Tone and manner (decided 26.10.2026, after the manual check)
+
+The manual check with the real OpenAI provider found that the assistant
+sounds like a database, not a salon administrator. Katya decided these
+rules on 26.10.2026. They apply in every reply language: the Ukrainian
+wording is the reference, and other languages use the equivalent.
+
+- **Greet only in the first reply** of a conversation ("Вітаю!" in
+  Ukrainian), never again later.
+- **Speak as the salon** ("у нашому салоні", "ми"). Never talk about
+  "data", the "menu", something "not specified", a "rating not formed"
+  or any other internals. If something is unknown, suggest checking with
+  the salon.
+- **A "no" starts with "На жаль"** (or the equivalent) and always comes
+  with a concrete next step.
+- **No free slots at the requested time:** search for the nearest
+  alternatives right away and offer them, instead of asking whether to
+  search. Use one `check_availability` call with a date range (up to the
+  next 14 days), never one call per day.
+- **Another salon:** say politely that the assistant can help only with
+  this salon. Never present this salon's data as the answer about
+  another salon.
+- **No Markdown** (no asterisks, no bullet syntax). Prices are written
+  like "109 USD", without ".00" for whole amounts.
+- **Natural, warm, varied phrasing;** no repeated template sentences.
+  The formal "Ви" stays.
+- **Reference examples (Ukrainian):**
+  - "Вітаю! На жаль, у нашому салоні немає послуги нарощування вій, але
+    я можу допомогти підібрати послугу з наявних."
+  - "Вітаю! На жаль, на суботу 31.10 вільних віконець на манікюр немає.
+    Найближчий вільний час у понеділок 2.11 о 9:00 або 11:00. Підібрати
+    щось із цього?"
+- **Tone is model behaviour.** It is verified by the manual check, not
+  by automated tests.
+
+Details decided 27.10.2026 (Katya's answers to the open questions on the
+proposed instruction text):
+
+- **The greeting rule is instruction text only.** The model tells the
+  first reply from the conversation history; no code change and no new
+  tests. The alternative was a backend flag: the orchestrator adds a
+  header line when the history is empty. If the manual check shows
+  greetings mid-conversation, switch to the flag.
+- **Alternatives keep every customer wish first.** The search range
+  starts at the requested date and is at most 14 days long. If nothing
+  matches, only wishes the customer marked as soft ("бажано", "краще")
+  are relaxed, never hard ones ("тільки"), and the reply says which wish
+  was relaxed. This follows the existing specialist rule ("Product
+  decisions").
+  - **Changed 27.10.2026, after the second manual check:** the requested
+    day and time are soft by default. When they have no free slots, the
+    assistant offers the nearest other days and times. They become hard
+    only when the customer says "тільки" (or the equivalent). This
+    replaces "relax only wishes marked as soft" for day and time. The
+    specialist rule stays as it is.
+- **The first reference example is replaced** by one that names no
+  service: "Вітаю! На жаль, такої послуги в нашому салоні немає, але я
+  можу допомогти підібрати щось із наявних." The lash example could
+  lead the model to claim that a salon with a lashes category does not
+  offer lash extensions. The date example stays. The instructions say
+  that the facts in the examples are not real.
+- **Currency is written as the code after the amount** ("109 UAH"),
+  accepted for now (see "Open items").
+- **A specialist with no reviews:** no rating is mentioned. If the
+  customer asks about reviews, the assistant says there are none yet.
+- **Wording changes to existing instruction rules,** proposed because
+  they conflicted with the rules above and agreed with the text: amounts are quoted as returned except
+  that ".00" is left out of whole amounts; "say so" when the tools cannot
+  answer becomes "suggest checking with the salon" with the contacts;
+  "the closest service on the menu" becomes "the closest of the salon's
+  services, if there is one"; the two availability rules ("say so and
+  offer the closest alternative", "offer nearby free times") are replaced
+  by the alternatives rule. All other rules are unchanged.
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
@@ -7002,3 +7077,7 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   booking forms. Open: whether `via` survives if the customer goes back
   and changes the specialist. Recorded 26.10.2026 (sub-step 9 is backend
   only).
+- Design pass (Stages 18-21): the assistant and the frontend's
+  `formatPrice` must write currency the same way. Today the assistant
+  writes the code after the amount ("109 UAH"; see "Tone and manner").
+  Recorded 27.10.2026.
