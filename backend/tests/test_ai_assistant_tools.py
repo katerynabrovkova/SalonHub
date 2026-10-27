@@ -697,7 +697,7 @@ def test_check_availability_no_matching_slots_is_an_empty_list(tbilisi_salon, ho
     assert result == {
         "slots": [],
         "has_more": False,
-        "reason": "not_working",
+        "reason": "day_off",
         "alternatives": {
             "slots": [_local(7, 9), _local(7, 10), _local(7, 11)]
             + [_local(14, 9), _local(14, 10), _local(14, 11)],

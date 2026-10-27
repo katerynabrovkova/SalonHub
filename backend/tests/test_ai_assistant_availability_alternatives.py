@@ -150,7 +150,7 @@ def test_empty_result_carries_reason_and_alternatives(tbilisi_salon, hour_servic
     assert result == {
         "slots": [],
         "has_more": False,
-        "reason": "not_working",
+        "reason": "day_off",
         "alternatives": {
             "slots": [_local(day, hour) for day in (14, 15, 16) for hour in (18, 19, 20)],
             "relaxed": ["day"],
@@ -206,7 +206,7 @@ def _max_advance(salon, service, customer):
     return {"specialist_id": jane.id}
 
 
-def _any_not_working(salon, service, customer):
+def _any_day_off(salon, service, customer):
     jane = _specialist(salon, "Jane", [service])
     _hours(salon, jane, DayOfWeek.MONDAY, 9, 12)
     unlinked = _specialist(salon, "Unlinked")
@@ -217,12 +217,12 @@ def _any_not_working(salon, service, customer):
 @pytest.mark.parametrize(
     ("build", "reason"),
     [
-        (_no_hours, "not_working"),
-        (_time_off, "not_working"),
+        (_no_hours, "day_off"),
+        (_time_off, "day_off"),
         (_booked, "fully_booked"),
         (_lead_time, "outside_booking_window"),
         (_max_advance, "outside_booking_window"),
-        (_any_not_working, "not_working"),
+        (_any_day_off, "day_off"),
     ],
     ids=["no_hours_that_weekday", "time_off", "fully_booked", "lead_time", "max_advance", "any"],
 )
@@ -338,7 +338,13 @@ def test_hard_day_and_time_give_no_alternatives(tbilisi_salon, hour_service):
     assert result == {
         "slots": [],
         "has_more": False,
-        "reason": "not_working",
+        # Jane works Saturday, just not in the evening (sub-step 10e).
+        "reason": "outside_hours",
+        "hours": {
+            "date": SATURDAY,
+            "ranges": [{"start": "09:00", "end": "12:00"}],
+            "last_start": "11:00",
+        },
         "alternatives": {"slots": [], "relaxed": []},
     }
 
@@ -570,7 +576,7 @@ def test_any_ignores_another_salons_specialists(tbilisi_salon, other_salon, hour
     assert result == {
         "slots": [],
         "has_more": False,
-        "reason": "not_working",
+        "reason": "day_off",
         "alternatives": {"slots": [_local(14, 9), _local(21, 9)], "relaxed": ["day"]},
     }
 
@@ -589,6 +595,6 @@ def test_another_specialist_does_not_change_the_requested_specialists_result(
     assert result == {
         "slots": [],
         "has_more": False,
-        "reason": "not_working",
+        "reason": "day_off",
         "alternatives": {"slots": [_local(14, 9), _local(21, 9)], "relaxed": ["day"]},
     }

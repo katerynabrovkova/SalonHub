@@ -4,7 +4,7 @@ Stage 16 sub-step 6c — the conversation orchestrator (docs/DECISIONS.md §
 
 `run_turn` handles one customer message: it sends the stored history, the
 new message, the system instructions and the tool specs to the provider,
-runs the model/tool loop (at most 5 provider calls), and yields client
+runs the model/tool loop (at most 10 provider calls), and yields client
 events: {"type": "text", "text"}, {"type": "proposal", "card"},
 {"type": "error", "code"} and {"type": "done"}. It needs a bound tenant
 context; the endpoint's generator binds it (sub-step 7).
@@ -65,7 +65,10 @@ logger = logging.getLogger(__name__)
 # One line per tool call (sub-step 10d), on its own child logger.
 tool_logger = logging.getLogger(f"{__name__}.tools")
 
-MAX_PROVIDER_CALLS = 5
+# Raised from 5 in sub-step 10e: a normal turn already needs 5 calls; the
+# 80-second deadline still bounds runaway turns (docs/DECISIONS.md §
+# "Sub-step 10e details").
+MAX_PROVIDER_CALLS = 10
 
 # Deadline + the provider's per-call timeout must stay under the stream
 # cap's 120-second stale cutoff (docs/DECISIONS.md § "Sub-step 10 details").

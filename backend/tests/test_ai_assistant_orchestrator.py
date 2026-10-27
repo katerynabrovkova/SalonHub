@@ -305,17 +305,39 @@ def test_second_propose_booking_in_one_message_is_refused(tbilisi_salon, service
     assert events[-1] == {"type": "done"}
 
 
-def test_turn_limit_after_five_provider_calls(tbilisi_salon):
-    script: list[ScriptTurn] = [
-        [ToolCall(id=f"call-{i}", name="get_faq", arguments={}), _finish()] for i in range(5)
+def _faq_rounds(count: int) -> list[ScriptTurn]:
+    return [
+        [ToolCall(id=f"call-{i}", name="get_faq", arguments={}), _finish()] for i in range(count)
     ]
 
-    events, provider = _run(tbilisi_salon, script)
 
-    assert len(provider.calls) == 5
+def test_turn_limit_is_ten_provider_calls():
+    """Raised from 5 in sub-step 10e (docs/DECISIONS.md § "Sub-step 10e details")."""
+    assert orchestrator_module.MAX_PROVIDER_CALLS == 10
+
+
+def test_turn_limit_after_ten_provider_calls(tbilisi_salon):
+    """Was test_turn_limit_after_five_provider_calls; the limit is 10 since 10e.
+    The 10th call still asks for tools, so the turn stops there."""
+    events, provider = _run(tbilisi_salon, _faq_rounds(10))
+
+    assert len(provider.calls) == 10
     assert events[-1] == {"type": "error", "code": "assistant_turn_limit"}
     assert {"type": "done"} not in events
     assert _history(tbilisi_salon) == []
+
+
+@pytest.mark.parametrize("tool_rounds", [5, 9], ids=["six_calls", "ten_calls"])
+def test_turn_with_room_left_finishes(tbilisi_salon, tool_rounds):
+    """Five tool rounds plus the final text is the normal turn that hit the
+    old limit; nine plus the final text is the most the limit allows."""
+    script = [*_faq_rounds(tool_rounds), [TextDelta(text="Here you go."), _finish()]]
+
+    events, provider = _run(tbilisi_salon, script)
+
+    assert len(provider.calls) == tool_rounds + 1
+    assert events[-1] == {"type": "done"}
+    assert _history(tbilisi_salon)[-1] == {"role": "assistant", "content": "Here you go."}
 
 
 def test_provider_error_mid_stream_keeps_the_text_and_stores_nothing(tbilisi_salon):
@@ -360,10 +382,11 @@ def test_system_instructions_use_the_salon_local_date(tbilisi_salon):
     assert isinstance(system, str)
     assert system == build_system_instructions(salon=tbilisi_salon, now=late_now, lang="uk")
     assert "Bella Demo Salon" in system
-    assert "2026-08-17" in system
-    assert "Monday" in system
+    # Checked on the "Today is" line: since sub-step 10e the rules themselves
+    # mention "Sunday" in an example.
+    assert "Today is Monday, 2026-08-17," in system
     assert "2026-08-16" not in system
-    assert "Sunday" not in system
+    assert "Today is Sunday" not in system
     assert "uk" in system
 
 

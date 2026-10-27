@@ -157,7 +157,32 @@ def test_empty_check_availability_logs_the_reason(
         )
 
     [line] = _lines(caplog)
-    assert line.endswith("tool=check_availability outcome=ok slots=0 reason=not_working")
+    assert line.endswith("tool=check_availability outcome=ok slots=0 reason=day_off")
+
+
+def test_outside_hours_check_availability_logs_that_reason(
+    caplog, tbilisi_salon, service, monday_specialist
+):
+    """Sub-step 10e: the specialist works Monday until 18:00; 18:00-20:00 fits nowhere."""
+    with caplog.at_level(logging.INFO, logger=LOGGER):
+        _run(
+            tbilisi_salon,
+            [
+                _tool_turn(
+                    ToolCall(
+                        id="call-1",
+                        name="check_availability",
+                        arguments=_availability(
+                            service, monday_specialist, time_from="18:00", time_to="20:00"
+                        ),
+                    )
+                ),
+                [TextDelta(text="Too late on Monday."), _finish()],
+            ],
+        )
+
+    [line] = _lines(caplog)
+    assert line.endswith("tool=check_availability outcome=ok slots=0 reason=outside_hours")
 
 
 def test_propose_booking_logs_passed_dropped_and_shown(

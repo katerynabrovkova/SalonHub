@@ -36,8 +36,10 @@ from core.i18n import resolve_translation
 from core.tenancy import TenantContextMissingError, get_current_salon_id
 from payments.services import compute_deposit_breakdown
 from scheduling.services import (
+    OUTSIDE_HOURS,
     compute_candidate_start_times,
     compute_multi_specialist_availability,
+    day_schedule,
     no_free_start_reason,
     start_in_window,
 )
@@ -349,7 +351,52 @@ def check_availability(
             }
             break
 
-    return {"slots": [], "has_more": False, "reason": reason, "alternatives": alternatives}
+    empty: dict[str, Any] = {"slots": [], "has_more": False, "reason": reason}
+    if reason == OUTSIDE_HOURS:
+        empty["hours"] = _first_working_day_hours(
+            salon=salon,
+            service=service,
+            specialist=specialist,
+            date_from=start_date,
+            date_to=end_date,
+            weekdays=weekday_numbers,
+        )
+    empty["alternatives"] = alternatives
+    return empty
+
+
+def _clock(value: dt.time) -> str:
+    return value.strftime("%H:%M")
+
+
+def _first_working_day_hours(
+    *,
+    salon: Salon,
+    service: Service,
+    specialist: Specialist | None,
+    date_from: dt.date,
+    date_to: dt.date,
+    weekdays: set[int] | None,
+) -> dict[str, Any] | None:
+    """For `outside_hours` (sub-step 10e): the first requested day someone
+    works, with its ranges and last possible start."""
+    day = date_from
+    while day <= date_to:
+        if weekdays is None or day.weekday() in weekdays:
+            schedule = day_schedule(salon=salon, service=service, specialist=specialist, date=day)
+            if schedule is not None:
+                return {
+                    "date": day.isoformat(),
+                    "ranges": [
+                        {"start": _clock(start), "end": _clock(end)}
+                        for start, end in schedule.ranges
+                    ],
+                    "last_start": (
+                        _clock(schedule.last_start) if schedule.last_start is not None else None
+                    ),
+                }
+        day += dt.timedelta(days=1)
+    return None
 
 
 def _tie_rank(start: dt.datetime) -> int:
@@ -408,7 +455,9 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
                 "List the salon's specialists with their bio, the services each one "
                 "performs, average rating, review count, and weekly working hours "
                 "per weekday (the regular schedule; days off and bookings are not in "
-                "it). Pass specialist_id to get one specialist."
+                "it). Without specialist_id it returns all of the salon's active "
+                "specialists: the list is complete. Pass specialist_id to get one "
+                "specialist."
             ),
             parameters={
                 "type": "object",
@@ -452,8 +501,10 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
                 "(time_from inclusive, time_to exclusive). Returns up to 3 times per "
                 "day, spread out, for the first 3 days with any, in salon-local ISO "
                 "8601, and has_more when more free times exist. When nothing "
-                "matches, it also returns the reason (not_working, fully_booked or "
-                "outside_booking_window) and alternatives: the nearest free times "
+                "matches, it also returns the reason (day_off, outside_hours, "
+                "fully_booked or outside_booking_window; with outside_hours also hours: "
+                "that day's working ranges and the last possible start for this "
+                "service) and alternatives: the nearest free times "
                 "within 14 days of date_from, with relaxed naming the wishes that "
                 "were dropped (day, time). Wishes listed in hard are never dropped."
             ),

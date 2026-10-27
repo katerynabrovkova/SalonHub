@@ -6,9 +6,11 @@ results").
 Why a requested window has no free start, for one specialist or for "any"
 (specialist=None): None when a free start exists; otherwise, in this order,
 "outside_booking_window" (no part of the window lies within lead time and
-max days in advance), "not_working" (no start fits even with appointments
-ignored: working hours minus time off, with duration, buffer and
-granularity), "fully_booked".
+max days in advance), "day_off" (no working time on any requested day:
+no hours, or all of it time off), "outside_hours" (works on a requested
+day, but no start fits even with appointments ignored: working hours minus
+time off, with duration, buffer and granularity), "fully_booked". Sub-step
+10e split the former "not_working" into day_off and outside_hours.
 
 The salon runs on Asia/Tbilisi (UTC+4, no DST) with 60-minute slots and a
 60-minute service without buffer. NOW is Tuesday 2030-01-01 00:00 UTC
@@ -102,7 +104,7 @@ def test_none_when_a_free_start_exists(tbilisi_salon, hour_service):
     assert _reason(tbilisi_salon, hour_service, jane) is None
 
 
-def test_not_working_when_no_hours_on_the_requested_weekday(tbilisi_salon, hour_service):
+def test_day_off_when_no_hours_on_the_requested_weekday(tbilisi_salon, hour_service):
     jane = _specialist(tbilisi_salon, "Jane", [hour_service])
     for day in (DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY):
         _hours(tbilisi_salon, jane, day, dt.time(9), dt.time(18))
@@ -116,10 +118,10 @@ def test_not_working_when_no_hours_on_the_requested_weekday(tbilisi_salon, hour_
         weekdays=frozenset({DayOfWeek.SATURDAY}),
     )
 
-    assert reason == "not_working"
+    assert reason == "day_off"
 
 
-def test_not_working_when_time_off_covers_the_working_hours(tbilisi_salon, hour_service):
+def test_day_off_when_time_off_covers_the_working_hours(tbilisi_salon, hour_service):
     jane = _specialist(tbilisi_salon, "Jane", [hour_service])
     _hours(tbilisi_salon, jane, DayOfWeek.SATURDAY, dt.time(9), dt.time(12))
     make_time_off(
@@ -129,25 +131,25 @@ def test_not_working_when_time_off_covers_the_working_hours(tbilisi_salon, hour_
         end_datetime=_at(SATURDAY, 13),
     )
 
-    assert _reason(tbilisi_salon, hour_service, jane) == "not_working"
+    assert _reason(tbilisi_salon, hour_service, jane) == "day_off"
 
 
-def test_not_working_when_the_time_window_is_outside_working_hours(tbilisi_salon, hour_service):
+def test_outside_hours_when_the_time_window_is_outside_working_hours(tbilisi_salon, hour_service):
     jane = _specialist(tbilisi_salon, "Jane", [hour_service])
     _hours(tbilisi_salon, jane, DayOfWeek.SATURDAY, dt.time(9), dt.time(12))
 
     reason = _reason(tbilisi_salon, hour_service, jane, time_from=dt.time(18), time_to=dt.time(21))
 
-    assert reason == "not_working"
+    assert reason == "outside_hours"
 
 
-def test_not_working_when_the_working_hours_are_too_short_for_the_service(
+def test_outside_hours_when_the_working_hours_are_too_short_for_the_service(
     tbilisi_salon, hour_service
 ):
     jane = _specialist(tbilisi_salon, "Jane", [hour_service])
     _hours(tbilisi_salon, jane, DayOfWeek.SATURDAY, dt.time(9), dt.time(9, 30))
 
-    assert _reason(tbilisi_salon, hour_service, jane) == "not_working"
+    assert _reason(tbilisi_salon, hour_service, jane) == "outside_hours"
 
 
 def test_fully_booked_when_appointments_fill_the_working_hours(
@@ -195,7 +197,7 @@ def test_outside_booking_window_after_max_days_in_advance(tbilisi_salon, hour_se
     assert _reason(tbilisi_salon, hour_service, jane) == "outside_booking_window"
 
 
-def test_any_not_working_when_no_qualified_specialist_works(tbilisi_salon, hour_service):
+def test_any_day_off_when_no_qualified_specialist_works(tbilisi_salon, hour_service):
     jane = _specialist(tbilisi_salon, "Jane", [hour_service])
     _hours(tbilisi_salon, jane, DayOfWeek.MONDAY, dt.time(9), dt.time(18))
     unlinked = _specialist(tbilisi_salon, "Unlinked")
@@ -203,7 +205,7 @@ def test_any_not_working_when_no_qualified_specialist_works(tbilisi_salon, hour_
     former = _specialist(tbilisi_salon, "Former", [hour_service], is_active=False)
     _hours(tbilisi_salon, former, DayOfWeek.SATURDAY, dt.time(9), dt.time(18))
 
-    assert _reason(tbilisi_salon, hour_service, None) == "not_working"
+    assert _reason(tbilisi_salon, hour_service, None) == "day_off"
 
 
 def test_any_fully_booked_when_the_only_qualified_specialist_is_booked(
@@ -231,5 +233,5 @@ def test_another_specialists_hours_do_not_change_the_reason(tbilisi_salon, hour_
     _hours(tbilisi_salon, anna, DayOfWeek.MONDAY, dt.time(9), dt.time(18))
     _hours(tbilisi_salon, bella, DayOfWeek.SATURDAY, dt.time(9), dt.time(12))
 
-    assert _reason(tbilisi_salon, hour_service, anna) == "not_working"
+    assert _reason(tbilisi_salon, hour_service, anna) == "day_off"
     assert _reason(tbilisi_salon, hour_service, None) is None

@@ -52,6 +52,8 @@ read-only no_free_start_reason and start_in_window for the assistant's
 check_availability. compute_open_windows and compute_candidate_start_times
 are split into _open_windows (with an include_appointments switch) and
 _bookable_starts, behaviour unchanged, so the reason reuses the engine.
+Sub-step 10e adds day_schedule (a day's working ranges and last possible
+start) and splits the "not working" reason into DAY_OFF and OUTSIDE_HOURS.
 """
 
 import datetime as dt
@@ -506,9 +508,60 @@ def is_start_offered(
     return start in candidates
 
 
-NOT_WORKING = "not_working"
+DAY_OFF = "day_off"
+OUTSIDE_HOURS = "outside_hours"
 FULLY_BOOKED = "fully_booked"
 OUTSIDE_BOOKING_WINDOW = "outside_booking_window"
+
+
+class DaySchedule(NamedTuple):
+    """One salon-local day: working ranges and the last start that fits."""
+
+    ranges: list[tuple[dt.time, dt.time]]
+    last_start: dt.time | None
+
+
+def _specialists_for(service: Service, specialist: Specialist | None) -> list[Specialist]:
+    return [specialist] if specialist is not None else list(_fetch_qualifying_specialists(service))
+
+
+def day_schedule(
+    *,
+    salon: Salon,
+    service: Service,
+    specialist: Specialist | None,
+    date: dt.date,
+) -> DaySchedule | None:
+    """
+    The working ranges of one salon-local day for `service` with
+    `specialist`, or merged across the qualifying specialists when
+    `specialist` is None (WorkingHours minus time off), and the last start
+    on the slot grid whose duration plus buffer still ends within a range,
+    or None when the service fits nowhere (docs/DECISIONS.md § Stage 16
+    planning, "Sub-step 10e details"). None when nobody works that day.
+    Appointments and the booking window are ignored: this is the day's
+    schedule, not its availability. Read-only; requires tenant context to
+    already be bound.
+    """
+    tz = ZoneInfo(salon.timezone)
+    windows: list[Window] = []
+    starts: list[dt.datetime] = []
+    for each in _specialists_for(service, specialist):
+        own = _open_windows(each, date, date, salon.timezone, include_appointments=False)
+        windows += own
+        starts += _step_windows(
+            own,
+            granularity_minutes=salon.slot_granularity_minutes,
+            occupied_minutes=service.duration_minutes + service.buffer_minutes,
+        )
+    if not windows:
+        return None
+    ranges = [
+        (window.start.astimezone(tz).time(), window.end.astimezone(tz).time())
+        for window in _merge_intervals(windows)
+    ]
+    last_start = max(starts).astimezone(tz).time() if starts else None
+    return DaySchedule(ranges=ranges, last_start=last_start)
 
 
 def start_in_window(
@@ -557,9 +610,13 @@ def no_free_start_reason(
 
     - OUTSIDE_BOOKING_WINDOW: no part of the window lies within the
       booking window (lead time, max days in advance);
-    - NOT_WORKING: no start fits even with appointments ignored (working
-      hours minus time off, with duration, buffer and granularity);
-    - FULLY_BOOKED: otherwise.
+    - FULLY_BOOKED: a start fits once appointments are ignored;
+    - OUTSIDE_HOURS: no start fits even then, but there is working time
+      (hours minus time off) on a requested day;
+    - DAY_OFF: no working time on any requested day.
+
+    Sub-step 10e split the former "not_working" into DAY_OFF and
+    OUTSIDE_HOURS.
 
     Requires tenant context to already be bound, like the engine functions
     it calls.
@@ -580,9 +637,7 @@ def no_free_start_reason(
             time_to=time_to,
         )
 
-    specialists = (
-        [specialist] if specialist is not None else list(_fetch_qualifying_specialists(service))
-    )
+    specialists = _specialists_for(service, specialist)
 
     def any_start(*, include_appointments: bool) -> bool:
         for each in specialists:
@@ -616,4 +671,16 @@ def no_free_start_reason(
 
     if any_start(include_appointments=False):
         return FULLY_BOOKED
-    return NOT_WORKING
+
+    requested_days = {
+        date
+        for date in _dates_in_range(date_from, date_to)
+        if weekdays is None or date.weekday() in weekdays
+    }
+    for each in specialists:
+        windows = _open_windows(
+            each, date_from, date_to, salon.timezone, include_appointments=False
+        )
+        if any(window.start.astimezone(tz).date() in requested_days for window in windows):
+            return OUTSIDE_HOURS
+    return DAY_OFF
