@@ -198,6 +198,8 @@ def test_get_specialist_info_lists_active_specialists_with_active_services_and_r
             "services": [{"id": service.id, "name": "Manicure"}],
             "average_rating": 4.0,
             "review_count": 1,
+            # Sub-step 10d: weekly hours (test_ai_assistant_specialist_hours.py).
+            "working_hours": {},
         }
     ]
 

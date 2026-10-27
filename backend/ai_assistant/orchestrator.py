@@ -29,6 +29,11 @@ before each further provider call; exceeded means more than 80 seconds.
 Then the provider's stream is closed, nothing is stored, the client gets
 `assistant_provider_error` and the log outcome is `deadline_exceeded`.
 `monotonic` is imported as a bare name so tests can replace the clock.
+
+Sub-step 10d (docs/DECISIONS.md § "Sub-step 10d details"): every tool call
+also gets one INFO line on the `ai_assistant.orchestrator.tools` logger
+with the salon id, tool name, outcome and counts, never text or argument
+values.
 """
 
 import datetime as dt
@@ -57,6 +62,8 @@ from core.exceptions import AssistantProviderError
 from tenants.models import Salon
 
 logger = logging.getLogger(__name__)
+# One line per tool call (sub-step 10d), on its own child logger.
+tool_logger = logging.getLogger(f"{__name__}.tools")
 
 MAX_PROVIDER_CALLS = 5
 
@@ -102,6 +109,31 @@ def _run_tool(call: ToolCall, *, lang: str, now: dt.datetime) -> dict[str, Any]:
     if call.name in _TOOLS_TAKING_NOW:
         kwargs["now"] = now
     return function(**kwargs)
+
+
+def _log_tool_call(salon: Salon, call: ToolCall, result: dict[str, Any]) -> None:
+    """
+    One INFO line per tool call: salon id, tool name, outcome and counts
+    only (docs/DECISIONS.md § "Sub-step 10d details"). Never message text,
+    argument values or the session id. A name that is not a known tool came
+    from the model and is logged as "unknown".
+    """
+    known = call.name in tools.TOOLS or call.name == PROPOSE_BOOKING_SPEC.name
+    name = call.name if known else "unknown"
+    outcome = result.get("error", "ok")
+    counts = ""
+    if outcome == "ok" and name == "check_availability":
+        counts = f" slots={len(result['slots'])}"
+        if not result["slots"]:
+            counts += f" reason={result['reason']}"
+    elif outcome == "ok" and name == PROPOSE_BOOKING_SPEC.name:
+        counts = (
+            f" passed={len(call.arguments.get('slots', []))}"
+            f" dropped={len(result['dropped'])} shown={len(result['slots'])}"
+        )
+    tool_logger.info(
+        "assistant tool: salon_id=%s tool=%s outcome=%s%s", salon.id, name, outcome, counts
+    )
 
 
 class _DeadlineExceeded(Exception):
@@ -221,6 +253,7 @@ def run_turn(
                         )
                 else:
                     result = _run_tool(call, lang=lang, now=now)
+                _log_tool_call(salon, call, result)
                 messages.append(
                     ChatMessage(
                         role="tool",

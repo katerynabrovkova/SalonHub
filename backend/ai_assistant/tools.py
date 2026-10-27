@@ -41,7 +41,7 @@ from scheduling.services import (
     no_free_start_reason,
     start_in_window,
 )
-from specialists.models import Specialist
+from specialists.models import Specialist, WorkingHours
 from specialists.services import annotate_rating, specialist_offers_service
 from tenants.models import FAQItem, Salon
 
@@ -127,11 +127,30 @@ def list_services(*, lang: str) -> dict[str, Any]:
     return {"currency": salon.currency, "services": items}
 
 
+def _weekly_hours(specialist: Specialist) -> dict[str, list[dict[str, str]]]:
+    """
+    The specialist's weekly WorkingHours (sub-step 10d): {"monday": [{"start":
+    "09:00", "end": "18:00"}], ...} in weekday order, each day's ranges by
+    start; days without hours are absent. Reads the prefetched, already
+    ordered rows. Time off is not reflected.
+    """
+    hours: dict[str, list[dict[str, str]]] = {}
+    for row in specialist.working_hours.all():
+        hours.setdefault(WEEKDAY_NAMES[row.day_of_week], []).append(
+            {"start": row.start_time.strftime("%H:%M"), "end": row.end_time.strftime("%H:%M")}
+        )
+    return hours
+
+
 def get_specialist_info(*, lang: str, specialist_id: int | str | None = None) -> dict[str, Any]:
     _current_salon()
     specialists = annotate_rating(
         Specialist.objects.filter(is_active=True).prefetch_related(
-            Prefetch("services", queryset=Service.objects.filter(is_active=True))
+            Prefetch("services", queryset=Service.objects.filter(is_active=True)),
+            Prefetch(
+                "working_hours",
+                queryset=WorkingHours.objects.order_by("day_of_week", "start_time"),
+            ),
         )
     ).order_by("created_at", "id")
     if specialist_id is not None:
@@ -150,6 +169,7 @@ def get_specialist_info(*, lang: str, specialist_id: int | str | None = None) ->
             ],
             "average_rating": specialist.average_rating,  # type: ignore[attr-defined]
             "review_count": specialist.review_count,  # type: ignore[attr-defined]
+            "working_hours": _weekly_hours(specialist),
         }
         for specialist in specialists
     ]
@@ -386,8 +406,9 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
             name="get_specialist_info",
             description=(
                 "List the salon's specialists with their bio, the services each one "
-                "performs, average rating and review count. Pass specialist_id to get "
-                "one specialist."
+                "performs, average rating, review count, and weekly working hours "
+                "per weekday (the regular schedule; days off and bookings are not in "
+                "it). Pass specialist_id to get one specialist."
             ),
             parameters={
                 "type": "object",
