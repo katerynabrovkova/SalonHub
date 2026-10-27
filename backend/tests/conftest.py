@@ -38,6 +38,16 @@ def _clear_cache():
     cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _assistant_mock_provider(settings):
+    """The mock provider and no OpenAI key, whatever the developer's .env
+    says, so no test depends on it or can reach the real OpenAI provider.
+    Tests that need the openai provider set it explicitly, after this
+    fixture has run."""
+    settings.ASSISTANT_PROVIDER = "mock"
+    settings.ASSISTANT_OPENAI_API_KEY = ""
+
+
 ASSISTANT_TEST_REDIS_DB = 15
 
 

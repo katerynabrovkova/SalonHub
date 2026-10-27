@@ -132,6 +132,6 @@ def test_providers_and_checks_do_not_import_openai_with_the_mock():
         capture_output=True,
         text=True,
         check=True,
-        env={**os.environ, "ASSISTANT_PROVIDER": "mock"},
+        env={**os.environ, "ASSISTANT_PROVIDER": "mock", "ASSISTANT_OPENAI_API_KEY": ""},
     )
     assert result.stdout.strip() == "[]"
