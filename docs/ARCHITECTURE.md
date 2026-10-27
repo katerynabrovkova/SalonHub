@@ -118,7 +118,8 @@ Domain entities, all modeled in code (field-level detail lives in the models):
   snapshots, never the live `Service`/`Salon` values), `hold_expires_at` (set at
   creation for `PENDING_PAYMENT` appointments — see § lifecycle), status (see §
   lifecycle), audit fields (`created_at`, `cancelled_at`, `cancelled_by`,
-  `cancellation_reason`).
+  `cancellation_reason`), `source` (`direct` or `assistant`: supplied by the client
+  for analytics only, so it never affects money or access; Stage 16).
 - **GuestAccessToken** — salon FK, appointment FK, `token_hash` (SHA-256 of the
   signed token, never the raw value), `expires_at`, `cancelled_via_token_at`
   (nullable — separate from `expires_at` so cancelling doesn't revoke view access;
@@ -136,6 +137,10 @@ Domain entities, all modeled in code (field-level detail lives in the models):
 - **FAQItem** — salon FK, question, answer, ordering, is_active. Salon-authored
   questions and answers (one language, not translatable) that the AI assistant reads
   as grounding (§ 10).
+- **DailyConversationCount**, **DailyProposalCount** — salon FK, salon-local date,
+  count; the proposal counter also carries a service FK. Aggregate daily usage
+  counters for the AI assistant (§ 10), owned by `ai_assistant`. No conversation text
+  and nothing about individual customers.
 - **AI assistant conversation state is not a persisted entity at all** — held in
   Redis with a TTL, not a database table. See § 10.
 
@@ -510,6 +515,35 @@ but it has no tool that calls the appointment-creation service function directly
 turning a proposal into a real appointment always goes through the normal booking
 flow and its service layer (§ 7). This is a firm decision: a hallucinated or
 malformed parameter must never be able to produce a real, paid appointment.
+
+**Provider abstraction.** The model is reached through an `AssistantProvider`
+interface, following the payments pattern (§ 8): a mock adapter for tests and local
+development, and an OpenAI adapter behind the same interface, chosen by a setting
+(Stage 16). A provider is a pipe for one model turn: it streams text and tool-call
+events, never executes tools, never logs content, and knows nothing about salons or
+tenant context. Vendor formats and vendor errors are translated inside the adapter, so
+nothing else in the assistant depends on the vendor's SDK. Tests never need the
+network.
+
+**Orchestration.** One customer message runs a bounded loop: the model is called,
+the tools it asks for run against tenant-scoped data under the bound tenant context
+(§ 5), and their results go back to the model until it answers in text. The loop is
+capped by a number of model calls and an overall deadline (values in
+`docs/DECISIONS.md` § Stage 16). Text is streamed to the client as typed events as it
+arrives; tool calls and their results are never shown to the customer and never
+stored in the session. The proposal tool is intercepted by the orchestrator: it
+validates the ids and slots and computes the card data, with money from the same
+functions as booking, and books nothing. Usage limits are checked before a reply
+starts streaming: per session, per salon and client IP, a daily quota per salon, and
+a cap on concurrent streams shared across processes.
+
+**Usage counters and logging: counts only, never conversation text.** Conversations
+started and proposals per service are stored as aggregate daily rows per salon in
+PostgreSQL (§ 2); bookings made from a proposal are counted from
+`Appointment.source`, not from a counter. The log has one line per customer message
+(salon, token counts, latency, outcome) and one line per tool call (salon, tool name,
+outcome, result counts). Neither ever contains message text, tool argument values or
+the session id.
 
 ## 11. Reviews: eligibility gating
 

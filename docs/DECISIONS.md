@@ -39,7 +39,7 @@ current stage. `Stage N` references elsewhere point at this list.
 13. Frontend catalog / service / specialists / reviews ✓
 14. Frontend booking flow + payment + confirmation ✓
 15. Frontend customer account + guest token management ✓ (20.10.2026)
-16. AI assistant backend
+16. AI assistant backend ✓ (27.10.2026)
 17. AI assistant frontend widget
 18. Admin shell + dashboard + appointments list
 19. Admin calendar + appointment create/edit
@@ -3304,6 +3304,16 @@ the migration containing the resulting `AlterField`) is written.
 Noted 18.09.2026, during the tenants Salon-info endpoint work above — found
 failing in a full-suite run unrelated to that change.
 
+**Resolved 19.09.2026 by commit `7bb714d`** (recorded 27.10.2026, after
+checking the code and the git log). The test freezes `timezone.now` to
+`SAFE_NOW` with `monkeypatch`; `validate_guest_token` reads it through
+`django.utils.timezone`, so the patch reaches the expiry check.
+`booking/guest_tokens.py` is unchanged: the fix took neither of the two
+options named below (`freezegun`, an injectable clock). The same commit
+fixed the same pattern in `tests/test_guest_token_derive.py`. On
+27.10.2026, well past the token's original expiry, the test passes when
+run on its own by node id.
+
 - `tests/test_booking_create_guest_appointment.py` hardcodes a fixed past
   `SAFE_NOW` (2026-08-16) as the `now` passed into token issuance. The
   issued token's `expires_at` is frozen relative to that fixed clock
@@ -5776,10 +5786,12 @@ cannot be checked in desktop Chrome and still needs a real device.
 
 ## Stage 16 planning
 
-Decided 21.10.2026. Implemented sub-step by sub-step; as of 27.10.2026
-sub-steps 1 to 10 are committed, including 10b (the OpenAI adapter), and
-the closure is open. This line said "Not yet implemented" until
-26.10.2026, and that 10b was open until 27.10.2026.
+Decided 21.10.2026. Implemented sub-step by sub-step. **Closed
+27.10.2026:** sub-steps 1 to 10e are committed, and the real OpenAI
+provider passed four manual checks. What moves on to Stage 17 is listed
+in "Stage 16 closure" at the end of this section. This line said "Not
+yet implemented" until 26.10.2026, that 10b was open until 27.10.2026,
+and that the closure was open until it was closed on 27.10.2026.
 
 ### Scope and tools
 
@@ -6086,7 +6098,10 @@ Each sub-step gets its own red/green/commit cycle.
     questions, including the specialist-preference and name-translation
     cases.
 
-Closure: docs update and a manual stream check.
+Closure: docs update and a manual stream check. Closed 27.10.2026, see
+"Stage 16 closure". The stream check passed on 26.10.2026 (recorded
+27.10.2026): a raw `curl -N` run against the streaming endpoint showed
+text events arriving one by one.
 
 **The real provider is wired only after sub-step 8 is committed.** Until
 then only the mock exists, so endpoints without limits cost nothing and
@@ -7371,3 +7386,143 @@ all. Site navigation belongs to the design pass (Stages 18-21).
 - Stages 18-21: a starter FAQ template (health, payment, cancellation,
   preparation) that a new salon owner edits. Recorded 27.10.2026 (see
   "Sub-step 10e details").
+
+### Stage 16 closure (27.10.2026)
+
+- **Closed 27.10.2026.** Sub-steps 1 to 10e are committed. The real
+  OpenAI provider passed four manual checks. Marked ✓ in "Agreed stage
+  order".
+- **Manual stream check passed on 26.10.2026** (recorded 27.10.2026): a
+  raw `curl -N` run against the streaming endpoint showed text events
+  arriving one by one.
+- **Not changed by the closure:** the assistant stays disabled for real
+  customers until the conditions already recorded are met: the manual
+  review of real Ukrainian questions ("Request flow", "Product
+  decisions") and the privacy policy page ("Open items").
+
+**Carried to Stage 17.** One checklist for the stage. The backlog triage
+comes first, then the items found in the last manual check, then the
+items already assigned to Stage 17 elsewhere in this section.
+
+- **Backlog triage at the start of Stage 17 planning:** assign a target
+  stage, or mark "deliberately not scheduled", for every untargeted item
+  listed in the Stage 16 closure report (27.10.2026). The list, grouped
+  as reported:
+  - Stage 16 "Open items":
+    - the privacy policy page: "before the assistant is enabled for real
+      customers", a condition, not a stage;
+    - `SpecialistsAtTimeQuerySerializer` active-only: "a separate small
+      fix";
+    - public views without `PublicEndpointMixin`: "after Stage 16 and
+      before Stage 22", a window, not a stage.
+  - Stage 16 "Deferred" (in "Product decisions"):
+    - human handoff and a knowledge base that learns from staff answers;
+    - the Anthropic fallback model ("after the OpenAI provider works");
+    - `Specialist.languages`;
+    - ASGI (a trigger, "when the concurrency cap is actually being hit",
+      but no stage).
+  - Known issues:
+    - pre-existing `ruff` findings ("whenever convenient"); possibly
+      already covered by the 20.10.2026 cleanup, not checked;
+    - `OutstandingToken.user` holds the wrong row;
+    - password-reset request is not timing-identical (accepted by Katya,
+      "not scheduled for a fix");
+    - `Salon.deposit_percentage` is unbounded ("fix later", together
+      with the 0% deposit flow);
+    - `initiate_payment` writes the Payment outside its lock
+      ("investigate later");
+    - the `flag_stuck_refunds` race test uses a savepoint;
+    - `WayForPayProvider` cleanup ("before WayForPay is wired", an event,
+      not a stage).
+  - Deferred list under "Agreed stage order":
+    - refuse to start with `MockPaymentProvider` in production ("the
+      stage that wires a real payment provider", no stage number);
+    - guest `Customer.email` case normalization;
+    - a `salon_id` guard on the registration verification token
+      ("later");
+    - `no_show` cards have no badge and no money line ("decide later");
+    - redirecting an authenticated user away from `/login` (option E;
+      implied by the design pass, not stated).
+  - Other sections:
+    - verification and password-reset emails bypass the Notification
+      journal ("unscheduled work, not covered by any currently-numbered
+      stage");
+    - emailed links still use the path-based frontend shape and must move
+      to the subdomain shape ("tracked open follow-up");
+    - whether a salon admin may book or pay as a customer ("still open");
+    - refresh-token rotation is not atomic (the Web Locks API is "a
+      possible later fix"), and `auth/refresh` has no throttle.
+  - "Open questions" whose target stage has passed:
+    - tenant resolution by custom domain ("before the public frontend
+      stage");
+    - specialist experience as a structured field ("~Stage 13");
+    - salon profile API ("Stage 12/13");
+    - "Resume payment" ("Stage 14+").
+  - "Open questions" with no stage:
+    - business model: one-off site sale vs. recurring subscription;
+    - `Salon.timezone` write-time validation;
+    - the `compute_candidate_start_times` salon guard;
+    - local-time presentation across a DST transition ("the local-time
+      formatting substage", not a numbered stage);
+    - the max-advance boundary at a DST transition at local midnight;
+    - per-specialist service duration vs. the "any" union rule
+      (conditional: "if overrides are ever added").
+
+Found in the last manual check of Stage 16:
+
+- **Overall tone.** Katya is not yet satisfied with the assistant's
+  overall tone. A full quality pass happens at the end of Stage 17, once
+  the widget allows realistic testing as a customer.
+- **"Any" with only one specialist.** The reply says "майстрині
+  працюють" (plural); it should name the specialist (see "Sub-step 10e
+  details": "у нас працює одна майстриня, Анна").
+- **"Ви працюєте в неділю?"** The assistant offers to help choose a day
+  instead of proposing the nearest working day right away (see "Known
+  answers are given, not deferred" in "Sub-step 10e details").
+- **"After 17" when the last start is 16:15.** The reply explains it via
+  the last start, but does not say plainly that it is not possible (see
+  the wording rule in "Sub-step 10e details").
+- **More FAQ items for BellaBeauty:** health, preparation, payment and
+  other topics. Salon content written by Katya, not code.
+- **Show that the assistant is working** before the first word arrives
+  (for example "Перевіряю вільний час…"). A normal turn takes about 3-9
+  seconds, mostly tool calls. Open: whether a generic indicator in the
+  widget is enough, or the backend should send a status event during
+  tool calls. Today the client events are only `text`, `proposal`,
+  `error` and `done`, and the customer never sees tool calls ("Sub-step
+  3 details").
+
+Already assigned to Stage 17:
+
+- **Proposal card** rendering, with the button shapes by slot count
+  ("Product decisions", refined in "Sub-step 6 details").
+- **`via=assistant`** passed along on every internal `/booking` link and
+  sent as `source` by both booking forms; open whether `via` survives a
+  change of specialist ("Open items"; "Sub-step 9 details").
+- **Blocked `safety_identifier`:** a clear message instead of an endless
+  "Try again"; needs the backend to tell a blocked identifier apart from
+  other provider errors ("Open items"; "Sub-step 10 details").
+- **Voice input** in the widget; browser-side versus server-side
+  recognition to be researched ("Product decisions", Deferred).
+- **AI processing notice** in the widget ("Safety and privacy").
+- **Widget texts** for `assistant_daily_limit` and `assistant_busy`, with
+  a "go to booking" button where relevant ("Limits"); for a throttled
+  message ("Sub-step 8 details"); for `assistant_turn_limit` ("Sub-step 6
+  details", 6c).
+- **Input disabled while a reply streams** ("Sub-step 5 details").
+
+Widget behaviour decided in Stage 16 without a stage label, which only
+the widget can deliver:
+
+- Not rendered when `assistant_enabled` is `false`; starter suggestions
+  from `assistant_starters` ("Scope and tools", "Product decisions",
+  "Sub-step 1 details").
+- Session id kept in `sessionStorage` and sent and read in
+  `X-Assistant-Session`; history restored with the GET endpoint after a
+  reload ("Session", "Sub-step 7 details").
+- "Try again" resends the last message after `assistant_busy` or a
+  mid-stream error ("Product decisions", Retry).
+- The NDJSON stream read with `fetch` ("Sub-step 7 details").
+- A real browser check that `X-Assistant-Session` is allowed and exposed
+  by CORS; mocked tests cannot catch it ("Implementation notes",
+  "Sub-step 7 details").
