@@ -7133,6 +7133,87 @@ checks still pass (the privacy test); the model's name for an unknown
 tool (the unknown-tool test); no reason on an empty `check_availability`
 line (the empty-result log test).
 
+### Sub-step 10e details (decided 27.10.2026, after the third manual check)
+
+Decided by Katya on 27.10.2026.
+
+- **The empty-result reason `not_working` is split:**
+  - `day_off`: the specialist does not work that day;
+  - `outside_hours`: the specialist works that day, but no start fits the
+    requested time. The result also carries that day's working hours and
+    the last possible start for this service (duration plus buffer);
+  - `fully_booked` and `outside_booking_window` are unchanged.
+- **Wording:** "ми не працюємо" (the salon) only when no specialist works
+  that day; otherwise the assistant names the specialist ("Анна у
+  вихідні не працює", "Анна працює до 18:00, тож останній запис на
+  манікюр о 16:15"). When a requested time is impossible every day (for
+  example after the last possible start), the assistant says so once,
+  clearly, and does not keep offering the same times.
+- **Known answers are given, not deferred.** The assistant never tells
+  the customer to call or check with the salon when the answer is known
+  (for example "do you work on Sunday": answer from the hours and offer
+  the nearest working day). It suggests contacting the salon only when
+  the information truly is not available. This narrows the "Tone and
+  manner" rule "if something is unknown, suggest checking with the
+  salon".
+- **`get_specialist_info` without an id returns all active specialists
+  of the salon** (already the behaviour). Its description and the
+  instructions say the list is complete, so the assistant can say "у нас
+  працює одна майстриня, Анна".
+- **Turn limit raised from 5 to 10 provider calls** (`MAX_PROVIDER_CALLS`).
+  The logs of the third manual check showed that a normal turn
+  (`list_services`, `get_specialist_info`, `check_availability`,
+  `propose_booking`, final text) needs exactly 5 calls, so one extra step
+  ended in `assistant_turn_limit` even after free slots were found. The
+  80-second deadline (sub-step 10a) still bounds runaway turns. This
+  changes "At most 5 model calls per customer message" in "Sub-step 6
+  details" (6c). The instructions also tell the model to call
+  independent tools together in one step (for example `list_services`
+  and `get_specialist_info`).
+- **Open item for Stages 18-21:** a starter FAQ template (see "Open
+  items").
+
+- **`not_working` is replaced, with no alias** (decided 27.10.2026). The
+  model is its only reader, and an alias would keep the ambiguity the
+  split removes. Every test, the log line, the tool description and the
+  instructions use the new reasons.
+- **Turn-limit tests:** 10 calls ending in text finish; when the 10th
+  call still asks for tools, the turn stops.
+
+**Chosen while writing the RED tests, approved 27.10.2026:**
+
+- **`day_off`** also covers a day whose working hours are entirely
+  covered by time off: the specialist does not work that day.
+  `outside_hours` needs working time left that day after time off.
+- **A range of several days:** `day_off` only when the specialist works
+  on none of the requested days; otherwise `outside_hours` (if no start
+  fits on any of them).
+- **Shape of the `outside_hours` extra:** `"hours": {"date":
+  "YYYY-MM-DD", "ranges": [{"start": "09:00", "end": "18:00"}],
+  "last_start": "16:15"}`, for the first requested day the specialist
+  works. `ranges` are that day's working hours minus time off;
+  `last_start` is the last start on the slot grid whose duration plus
+  buffer still ends within a range, or `null` when the service fits
+  nowhere that day (the "hours too short for the service" case). Other
+  reasons carry no `hours` key.
+- **With `"any"`,** `ranges` merge the qualified specialists' hours that
+  day and `last_start` is the latest among them.
+- **Helper:** `scheduling.services.day_schedule(*, salon, service,
+  specialist, date)` returns the ranges and last start, or `None` when
+  nobody works that day; read-only, like `no_free_start_reason`.
+
+**Found at GREEN (27.10.2026):** `test_system_instructions_use_the_salon_local_date`
+asserted that "Sunday" appears nowhere in the system instructions, to prove
+the date header shows Monday. The approved rule now quotes "do you work on
+Sunday", so the test checks the "Today is Monday, 2026-08-17," line
+instead. The alternative was rewording the approved example.
+
+**Mutation results (27.10.2026).** Each fails at least one test:
+`last_start` without the buffer (6 tests); `day_off` where
+`outside_hours` is correct (6); for "any", only the first specialist's
+hours (the "any" day-schedule test); the turn limit off by one, allowing
+an 11th call (the ten-call limit test).
+
 ### Fix: the specialist must perform the service (decided 22.10.2026)
 
 **Problem.** The public slots endpoint and appointment creation (guest
@@ -7287,3 +7368,6 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   `formatPrice` must write currency the same way. Today the assistant
   writes the code after the amount ("109 UAH"; see "Tone and manner").
   Recorded 27.10.2026.
+- Stages 18-21: a starter FAQ template (health, payment, cancellation,
+  preparation) that a new salon owner edits. Recorded 27.10.2026 (see
+  "Sub-step 10e details").
