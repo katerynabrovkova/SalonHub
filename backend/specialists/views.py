@@ -14,6 +14,7 @@ from rest_framework.permissions import SAFE_METHODS, AllowAny, BasePermission
 from rest_framework.request import Request
 from rest_framework.serializers import BaseSerializer
 
+from accounts.authentication import OPTIONAL_COOKIE_AUTHENTICATION_CLASSES
 from core.permissions import IsSalonStaff
 from core.tenancy import get_current_salon_id
 from specialists.models import Specialist
@@ -58,6 +59,10 @@ class _SpecialistViewMixin:
     """
 
     request: Request  # set by DRF's APIView.dispatch
+    # Same as catalog's _CatalogViewMixin: an invalid access cookie is treated
+    # as anonymous instead of a 401 (docs/DECISIONS.md § "Fix: public views
+    # ignore an invalid access cookie (decided 29.10.2026)").
+    authentication_classes = OPTIONAL_COOKIE_AUTHENTICATION_CLASSES
 
     def get_permissions(self) -> list[BasePermission]:
         if self.request.method in SAFE_METHODS:

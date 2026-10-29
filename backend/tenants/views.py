@@ -7,12 +7,13 @@ from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 
+from accounts.views import PublicEndpointMixin
 from core.tenancy import get_current_salon_id
 from tenants.models import Salon
 from tenants.serializers import SalonInfoSerializer
 
 
-class SalonInfoDetailView(generics.RetrieveAPIView):
+class SalonInfoDetailView(PublicEndpointMixin, generics.RetrieveAPIView):
     """
     Public read of the current request's own salon (`GET
     /api/v1/salons/<slug>/`), same read-access posture as catalog's public

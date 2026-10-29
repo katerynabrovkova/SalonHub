@@ -13,6 +13,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.views import PublicEndpointMixin
 from booking.models import Appointment, AppointmentStatus
 from core.tenancy import tenant_context
 from notifications.models import NotificationTrigger
@@ -61,7 +62,7 @@ def _warn_if_impossible_transition(
     )
 
 
-class PaymentWebhookView(APIView):
+class PaymentWebhookView(PublicEndpointMixin, APIView):
     """
     POST /api/v1/webhooks/payments/ — a top-level route outside
     /api/v1/salons/<slug>/: the provider has no notion of a salon slug.

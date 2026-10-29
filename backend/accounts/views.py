@@ -108,14 +108,21 @@ class PublicEndpointMixin:
     """
     Opts a public (AllowAny) view out of authentication entirely.
 
-    The ``access_token`` cookie is a session cookie (no ``max_age``), so it
-    outlives the 15-minute token inside it and a browser keeps sending a stale
-    one. DRF runs authentication before permissions, so with the project-default
-    classes a stale or garbage cookie raises ``InvalidToken`` (401
-    ``token_not_valid``) before ``AllowAny`` is ever consulted. A public
+    The ``access_token`` cookie carries ``max-age`` equal to the token's
+    lifetime (``accounts/cookies.py``), but a browser can still send one that
+    no longer validates: garbage, just expired, ended by a ``session_version``
+    bump, an inactive or deleted account, or another salon's account. DRF runs
+    authentication before permissions, so with the project-default classes
+    such a cookie raises (401) before ``AllowAny`` is ever consulted. A public
     endpoint has no use for the caller's identity, so it must not authenticate
     at all. List this mixin BEFORE ``APIView`` in the bases, or the default
     ``authentication_classes`` silently wins.
+
+    A view that serves guests but also reads the account (catalog and
+    specialist reads, review create) uses
+    ``accounts.authentication.OPTIONAL_COOKIE_AUTHENTICATION_CLASSES``
+    instead (docs/DECISIONS.md § "Fix: public views ignore an invalid access
+    cookie (decided 29.10.2026)").
     """
 
     authentication_classes = ()

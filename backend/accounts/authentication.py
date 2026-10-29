@@ -110,3 +110,35 @@ class AccountJWTCookieAuthentication(AccountJWTAuthentication):
         enforce_csrf_on_unsafe(request)
 
         return user, validated_token
+
+
+class OptionalAccountJWTCookieAuthentication(AccountJWTCookieAuthentication):
+    """
+    For views that serve both guests and accounts (docs/DECISIONS.md § "Fix:
+    public views ignore an invalid access cookie (decided 29.10.2026)"): an
+    invalid access cookie (garbage, expired, ``session_version`` mismatch,
+    missing or inactive account, another salon's account) makes the request
+    anonymous instead of a 401. With an invalid cookie the server cannot tell
+    staff from a guest, and anonymous only lowers rights; staff writes are
+    still denied by ``IsSalonStaff``.
+
+    Only the cookie's validation and the account lookup are caught (both
+    raise ``AuthenticationFailed``; ``InvalidToken`` is a subclass). A valid
+    cookie behaves exactly as in the parent, so the CSRF ``PermissionDenied``
+    on unsafe methods still raises. Never a project default: protected
+    endpoints keep answering 401 to an invalid cookie.
+    """
+
+    def authenticate(self, request: Request) -> tuple[Account, Token] | None:  # type: ignore[override]
+        try:
+            return super().authenticate(request)
+        except AuthenticationFailed:
+            return None
+
+
+# The project default order (config/settings/base.py), with the cookie class
+# relaxed and the header class still strict.
+OPTIONAL_COOKIE_AUTHENTICATION_CLASSES = (
+    OptionalAccountJWTCookieAuthentication,
+    AccountJWTAuthentication,
+)

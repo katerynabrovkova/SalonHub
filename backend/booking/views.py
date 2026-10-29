@@ -36,6 +36,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from accounts.views import PublicEndpointMixin
 from booking.models import Appointment, AppointmentSource, CancelledBy
 from booking.serializers import (
     AccountBookingRequestSerializer,
@@ -118,7 +119,9 @@ class _GuestTokenAppointmentMixin:
         return appointment
 
 
-class GuestAppointmentDetailView(_GuestTokenAppointmentMixin, generics.RetrieveAPIView):
+class GuestAppointmentDetailView(
+    PublicEndpointMixin, _GuestTokenAppointmentMixin, generics.RetrieveAPIView
+):
     permission_classes = [HasValidGuestToken]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "guest_token"
@@ -126,7 +129,9 @@ class GuestAppointmentDetailView(_GuestTokenAppointmentMixin, generics.RetrieveA
     serializer_class = AppointmentGuestSerializer
 
 
-class GuestAppointmentCancelView(_GuestTokenAppointmentMixin, generics.GenericAPIView):
+class GuestAppointmentCancelView(
+    PublicEndpointMixin, _GuestTokenAppointmentMixin, generics.GenericAPIView
+):
     """
     provider_class is a class attribute, not a module-level instance, so a
     test can substitute a fake/failing provider via
@@ -170,7 +175,9 @@ class GuestAppointmentCancelView(_GuestTokenAppointmentMixin, generics.GenericAP
         return Response(self.get_serializer(appointment).data)
 
 
-class GuestAppointmentPayView(_GuestTokenAppointmentMixin, generics.GenericAPIView):
+class GuestAppointmentPayView(
+    PublicEndpointMixin, _GuestTokenAppointmentMixin, generics.GenericAPIView
+):
     """
     Guest pay endpoint (docs/DECISIONS.md § Stage 8.D decisions). Thin HTTP
     layer over payments.services.initiate_payment — no try/except: the
@@ -368,7 +375,7 @@ class AccountAppointmentPayView(generics.GenericAPIView):
         return _initiate_payment_response(self, self._resolve_owned_appointment())
 
 
-class GuestBookingCreateView(APIView):
+class GuestBookingCreateView(PublicEndpointMixin, APIView):
     """
     Guest booking creation (docs/DECISIONS.md § Stage 7.D decisions). Public
     write (AllowAny), set explicitly — DEFAULT_PERMISSION_CLASSES is

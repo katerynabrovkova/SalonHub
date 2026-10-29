@@ -14,6 +14,7 @@ from rest_framework.permissions import SAFE_METHODS, AllowAny, BasePermission
 from rest_framework.request import Request
 from rest_framework.serializers import BaseSerializer
 
+from accounts.authentication import OPTIONAL_COOKIE_AUTHENTICATION_CLASSES
 from catalog.models import Service, ServiceCategory
 from catalog.serializers import (
     ServiceCategoryReadSerializer,
@@ -42,6 +43,11 @@ class _CatalogViewMixin:
     """
 
     request: Request  # set by DRF's APIView.dispatch
+    # Public reads and staff writes share these views, so an invalid access
+    # cookie is treated as anonymous instead of a 401 (docs/DECISIONS.md §
+    # "Fix: public views ignore an invalid access cookie (decided
+    # 29.10.2026)").
+    authentication_classes = OPTIONAL_COOKIE_AUTHENTICATION_CLASSES
 
     def get_permissions(self) -> list[BasePermission]:
         if self.request.method in SAFE_METHODS:

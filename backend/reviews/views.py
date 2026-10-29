@@ -29,6 +29,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.authentication import OPTIONAL_COOKIE_AUTHENTICATION_CLASSES
+from accounts.views import PublicEndpointMixin
 from booking.models import Appointment
 from reviews.models import Review
 from reviews.permissions import CanSubmitAppointmentReview
@@ -41,6 +43,11 @@ from specialists.models import Specialist
 
 
 class ReviewCreateView(generics.CreateAPIView):
+    # A guest (X-Guest-Token) or an account may review, so an invalid access
+    # cookie is treated as anonymous instead of a 401 (docs/DECISIONS.md §
+    # "Fix: public views ignore an invalid access cookie (decided
+    # 29.10.2026)").
+    authentication_classes = OPTIONAL_COOKIE_AUTHENTICATION_CLASSES
     permission_classes = [CanSubmitAppointmentReview]
     serializer_class = ReviewCreateSerializer
 
@@ -78,7 +85,7 @@ class ReviewCreateView(generics.CreateAPIView):
         return appointment
 
 
-class ReviewListView(APIView):
+class ReviewListView(PublicEndpointMixin, APIView):
     """
     GET /api/v1/salons/<slug>/reviews/ — public, unpaginated, grouped by
     specialist (docs/DECISIONS.md § Stage 11 Part 2). Returns a bare list of

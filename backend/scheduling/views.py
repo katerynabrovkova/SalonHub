@@ -25,6 +25,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.views import PublicEndpointMixin
 from core.exceptions import SpecialistDoesNotOfferServiceError
 from core.tenancy import get_current_salon_id
 from scheduling.serializers import (
@@ -40,7 +41,7 @@ from specialists.services import specialist_offers_service
 from tenants.models import Salon
 
 
-class AvailabilityView(APIView):
+class AvailabilityView(PublicEndpointMixin, APIView):
     permission_classes = [AllowAny]
 
     def get(self, request: Request, *args: object, **kwargs: object) -> Response:
@@ -104,7 +105,7 @@ class AvailabilityView(APIView):
         return Response({"available_times": available_times})
 
 
-class SpecialistsAtTimeView(APIView):
+class SpecialistsAtTimeView(PublicEndpointMixin, APIView):
     """
     The second availability endpoint (§ Stage 6.K decisions): given a
     service and a single chosen moment, who is free then. AllowAny for the
