@@ -4,7 +4,6 @@
       "Read(./.env)",
       "Read(**/.env)",
       "Edit(**/.env)",
-      "Write(**/.env)",
       "Edit(./.claude/settings.json)",
       "Bash(cat *.env)",
       "Bash(cat *.env *)",
