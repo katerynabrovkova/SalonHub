@@ -112,7 +112,8 @@ on booking step 3 (see its known-issue entry).
 - Recorded 19.10.2026, for the stage that wires a real payment provider:
   in production, refuse to start with `MockPaymentProvider`. Its webhook
   accepts any signature, so anyone could confirm a booking without paying.
-  Add a startup check.
+  Add a startup check. Target decided 29.10.2026: see the Stage 17
+  triage list.
 - Recorded 20.10.2026: where to send the client after logout (login page,
   salon home or `/services`) is decided in the design pass, together with
   the salon home page. Today: both "Вийти" buttons (the avatar menu,
@@ -5440,6 +5441,7 @@ cards".
 - Also unknown: what WayForPay does with a 0.00 amount. That can happen
   today when a small price rounds the deposit to 0, since
   `initiate_payment` sends whatever `compute_deposit_amount` returns.
+- Target decided 29.10.2026: see the Stage 17 triage list.
 
 ### Persisted refund decision (`Payment.refund_due`)
 
@@ -7416,7 +7418,8 @@ cookie. Controls:
 - `SpecialistsAtTimeQuerySerializer` (`scheduling/serializers.py` ~93)
   still binds `Service.objects.all()`. Low risk: it only returns linked
   specialists, and booking step 4 already 404s for an inactive service.
-  Make it active-only in a separate small fix. Found 22.10.2026.
+  Make it active-only in a separate small fix. Found 22.10.2026. Target
+  decided 29.10.2026: see the Stage 17 triage list.
 - Public views without `PublicEndpointMixin` (found 23.10.2026; recon
   25.10.2026):
   - Confirmed: 16 guest-reachable endpoints answer 401 `token_not_valid`
@@ -7485,71 +7488,113 @@ cookie. Controls:
 comes first, then the items found in the last manual check, then the
 items already assigned to Stage 17 elsewhere in this section.
 
+- **Stage 17 scope (decided 29.10.2026):** the widget is built functional
+  with neutral styling. Its visual design belongs to the frontend design
+  pass of Stages 18-21 (see the clarification of 20.09.2026 under "Agreed
+  stage order").
 - **Backlog triage at the start of Stage 17 planning:** assign a target
   stage, or mark "deliberately not scheduled", for every untargeted item
-  listed in the Stage 16 closure report (27.10.2026). The list, grouped
-  as reported:
-  - Stage 16 "Open items":
-    - the privacy policy page: "before the assistant is enabled for real
-      customers", a condition, not a stage;
-    - `SpecialistsAtTimeQuerySerializer` active-only: "a separate small
-      fix";
-    - public views without `PublicEndpointMixin`: "after Stage 16 and
-      before Stage 22", a window, not a stage. Decided 29.10.2026 as a
-      separate step before Stage 17: see "Fix: public views ignore an
-      invalid access cookie (decided 29.10.2026)".
-  - Stage 16 "Deferred" (in "Product decisions"):
-    - human handoff and a knowledge base that learns from staff answers;
-    - the Anthropic fallback model ("after the OpenAI provider works");
-    - `Specialist.languages`;
-    - ASGI (a trigger, "when the concurrency cap is actually being hit",
-      but no stage).
-  - Known issues:
-    - pre-existing `ruff` findings ("whenever convenient"); possibly
-      already covered by the 20.10.2026 cleanup, not checked;
-    - `OutstandingToken.user` holds the wrong row;
-    - password-reset request is not timing-identical (accepted by Katya,
-      "not scheduled for a fix");
-    - `Salon.deposit_percentage` is unbounded ("fix later", together
-      with the 0% deposit flow);
-    - `initiate_payment` writes the Payment outside its lock
-      ("investigate later");
-    - the `flag_stuck_refunds` race test uses a savepoint;
-    - `WayForPayProvider` cleanup ("before WayForPay is wired", an event,
-      not a stage).
-  - Deferred list under "Agreed stage order":
-    - refuse to start with `MockPaymentProvider` in production ("the
-      stage that wires a real payment provider", no stage number);
-    - guest `Customer.email` case normalization;
-    - a `salon_id` guard on the registration verification token
-      ("later");
-    - `no_show` cards have no badge and no money line ("decide later");
-    - redirecting an authenticated user away from `/login` (option E;
-      implied by the design pass, not stated).
-  - Other sections:
+  listed in the Stage 16 closure report (27.10.2026). **Targets decided
+  29.10.2026**, grouped by target. The source section of each item is in
+  brackets.
+  - Closed:
+    - public views without `PublicEndpointMixin` [Stage 16 "Open
+      items"]: implemented 29.10.2026, see "Fix: public views ignore an
+      invalid access cookie (decided 29.10.2026)";
+    - pre-existing `ruff` findings [Known issues]: checked clean
+      29.10.2026 (`ruff check .` and `ruff format --check .` both pass);
+    - emailed links in the path-based frontend shape [Other sections]:
+      already migrated; `accounts/tasks.py` and
+      `notifications/services.py` build links with
+      `build_salon_frontend_url`. The outdated docstring left at
+      `accounts/tokens.py:13` moves to the Stage 17 opening sub-step.
+  - Stage 17, opening backend sub-step (before the widget):
+    - `SpecialistsAtTimeQuerySerializer` active-only [Stage 16 "Open
+      items"];
+    - the `compute_candidate_start_times` salon guard ["Open questions"
+      with no stage];
+    - the outdated path-shape docstring at `accounts/tokens.py:13` (from
+      the closed emailed-links item).
+  - Stage 18:
+    - salon profile API ["Open questions" whose stage has passed]. May
+      partly move to Stage 17 if the widget shows the salon name; decided
+      in Stage 17 block A;
+    - redirecting an authenticated user away from `/login` (option E)
+      [Deferred list], as part of the design pass whose scope is set when
+      Stage 18 starts.
+  - Stage 19:
+    - whether a salon admin may book or pay as a customer [Other
+      sections]: decide before admin appointment creation exists;
+    - `no_show` cards have no badge and no money line [Deferred list]:
+      decide in the stage that lets staff set `no_show`;
+    - local-time presentation across a DST transition ["Open questions"
+      with no stage]: the admin calendar is the first view that renders
+      that night.
+  - Stage 20:
+    - specialist experience as a structured field ["Open questions"
+      whose stage has passed].
+  - With the stage that first lets a salon edit its own settings, at the
+    latest Stage 22 (no numbered stage for salon settings yet):
+    - `Salon.deposit_percentage` bounds 0-100 [Known issues]: a
+      `CheckConstraint`, a `Meta` change that needs its own approval
+      before it is written. The 0% deposit flow decision is split off to
+      the payment gate below;
+    - `Salon.timezone` write-time validation ["Open questions" with no
+      stage].
+  - Stage 21:
+    - guest `Customer.email` case normalization [Deferred list]: a data
+      migration that checks for case collisions first; any constraint
+      change needs approval first;
     - verification and password-reset emails bypass the Notification
-      journal ("unscheduled work, not covered by any currently-numbered
-      stage");
-    - emailed links still use the path-based frontend shape and must move
-      to the subdomain shape ("tracked open follow-up");
-    - whether a salon admin may book or pay as a customer ("still open");
-    - refresh-token rotation is not atomic (the Web Locks API is "a
-      possible later fix"), and `auth/refresh` has no throttle.
-  - "Open questions" whose target stage has passed:
-    - tenant resolution by custom domain ("before the public frontend
-      stage");
-    - specialist experience as a structured field ("~Stage 13");
-    - salon profile API ("Stage 12/13");
-    - "Resume payment" ("Stage 14+").
-  - "Open questions" with no stage:
-    - business model: one-off site sale vs. recurring subscription;
-    - `Salon.timezone` write-time validation;
-    - the `compute_candidate_start_times` salon guard;
-    - local-time presentation across a DST transition ("the local-time
-      formatting substage", not a numbered stage);
-    - the max-advance boundary at a DST transition at local midnight;
-    - per-specialist service duration vs. the "any" union rule
-      (conditional: "if overrides are ever added").
+      journal [Other sections]: the admin notifications screen needs a
+      complete journal.
+  - Gate "before a real payment provider is enabled", whichever stage
+    that happens in; Stage 22 by default:
+    - `initiate_payment` writes the Payment outside its lock [Known
+      issues];
+    - `WayForPayProvider` cleanup [Known issues];
+    - refuse to start with `MockPaymentProvider` in production [Deferred
+      list];
+    - the `flag_stuck_refunds` race test uses a savepoint [Known issues];
+    - "Resume payment" ["Open questions" whose stage has passed]; check
+      first how much the Stage 15 "Оплатити" endpoint already covers;
+    - the 0% deposit flow decision, including what WayForPay does with a
+      0.00 amount [Known issues, split from the `deposit_percentage`
+      bounds].
+  - Stage 22:
+    - `auth/refresh` has no throttle [Other sections]: with the
+      `NUM_PROXIES` / IP-throttle work already assigned to Stage 22;
+    - a `salon_id` guard on the registration verification token
+      [Deferred list];
+    - the privacy policy page [Stage 16 "Open items"]. The condition
+      stays: the assistant is not enabled for real customers without it.
+  - Deliberately not scheduled:
+    - human handoff and a knowledge base that learns from staff answers
+      [Stage 16 "Deferred"]: needs the deferred second notification
+      channel (Stage 10) and a privacy decision;
+    - the Anthropic fallback model [Stage 16 "Deferred"]: no need shown
+      yet; it would need its own review of Ukrainian answers;
+    - `Specialist.languages` [Stage 16 "Deferred"]: the bio is enough;
+      revisit in Stage 20 if a salon asks;
+    - ASGI [Stage 16 "Deferred"]: stays trigger-based ("when the
+      concurrency cap is actually being hit"); Stage 22 logs
+      `assistant_busy` so the trigger can be seen;
+    - `OutstandingToken.user` holds the wrong row [Known issues]: no
+      security effect; matters only if "log out everywhere" is built;
+    - password-reset request is not timing-identical [Known issues]:
+      accepted by Katya;
+    - refresh-token rotation is not atomic [Other sections]: accepted;
+      worst case one re-login across tabs;
+    - tenant resolution by custom domain ["Open questions" whose stage
+      has passed]: depends on the business model; subdomains work;
+    - business model: one-off site sale vs. recurring subscription
+      ["Open questions" with no stage]: a product decision; no stage
+      covers onboarding or billing;
+    - the max-advance boundary at a DST transition at local midnight
+      ["Open questions" with no stage]: only zones such as
+      `America/Santiago`, one hour on one day a year;
+    - per-specialist service duration vs. the "any" union rule ["Open
+      questions" with no stage]: conditional on overrides, none planned.
 
 Found in the last manual check of Stage 16:
 
