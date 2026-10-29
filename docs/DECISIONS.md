@@ -7514,11 +7514,13 @@ items already assigned to Stage 17 elsewhere in this section.
     - the `compute_candidate_start_times` salon guard ["Open questions"
       with no stage];
     - the outdated path-shape docstring at `accounts/tokens.py:13` (from
-      the closed emailed-links item).
+      the closed emailed-links item);
+    - the salon name in `GET /api/v1/salons/<slug>/`, for the widget
+      header (see "Stage 17 block A: where the widget lives").
   - Stage 18:
-    - salon profile API ["Open questions" whose stage has passed]. May
-      partly move to Stage 17 if the widget shows the salon name; decided
-      in Stage 17 block A;
+    - salon profile API ["Open questions" whose stage has passed]. The
+      salon name alone moves to the Stage 17 opening sub-step (see "Stage
+      17 block A: where the widget lives"); the rest stays in Stage 18;
     - redirecting an authenticated user away from `/login` (option E)
       [Deferred list], as part of the design pass whose scope is set when
       Stage 18 starts.
@@ -7654,3 +7656,30 @@ the widget can deliver:
 - A real browser check that `X-Assistant-Session` is allowed and exposed
   by CORS; mocked tests cannot catch it ("Implementation notes",
   "Sub-step 7 details").
+
+### Stage 17 block A: where the widget lives (decided 29.10.2026)
+
+- **Pages with the widget:** home, services, the specialists list and
+  specialist detail, reviews, and `/booking` (all steps).
+- **Pages without it:** `/booking/pay`, login, register, forgot and reset
+  password, verify email, the client cabinet (`/client/**`), admin pages.
+- **Mounting.** The widget is mounted in the root layout and shown by an
+  allowlist of paths, so a new page has no widget until it is added (safe
+  default). On a page outside the list the widget hides but keeps the
+  conversation. Moving between listed pages keeps the conversation and
+  its cards in memory. Whether cards survive a full reload is decided in
+  block B.
+- **Phone.** Collapsed: a narrow stripe on the right edge, slightly below
+  the middle (about 26 px visible, tap area at least 44 px); a dot shows a
+  live conversation. Opened: the chat is full screen.
+- **Desktop.** Collapsed the same way as on the phone. Opened: a small
+  window in the bottom-right corner (about 360 x 500 px), expandable into
+  a side panel (about 440 px) that shifts the page instead of covering it.
+- **Header:** "Асистент <salon name>". The salon name is added to
+  `GET /api/v1/salons/<slug>/` in the Stage 17 opening backend sub-step;
+  the rest of the salon profile API stays in Stage 18 (see the Stage 17
+  triage list).
+- **Mockups:** design canvas, row "Stage 17: віджет асистента". They show
+  the target look. The code is built with neutral styling, and the visual
+  design is finished in the design pass (see "Stage 17 scope" in the
+  Stage 16 closure).
