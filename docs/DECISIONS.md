@@ -5995,11 +5995,9 @@ Agreed after the first planning commit. Mockups: Design canvas boards
 **Analytics (counters only, no conversation text)**
 
 - **Collected from Stage 16:** conversations started, proposals per
-  service, bookings created from an assistant proposal. The proposal's
-  booking link carries a source marker (e.g. `via=assistant`) and the
-  appointment stores it in a new `source` field; the backend accepts it
-  as optional, the frontend passes it in Stage 17. Owner dashboard UI
-  belongs to Stages 18-21.
+  service, bookings after a conversation with the assistant
+  (`Appointment.source`; how the frontend sets it: "Stage 17 block C").
+  Owner dashboard UI belongs to Stages 18-21.
   - **Refined 26.10.2026,** see "Sub-step 9 details": counters are stored
     in Postgres as daily aggregates per salon.
 - **Unanswered questions are not collected now** (they are conversation
@@ -6593,7 +6591,8 @@ the cap.
   never affect money (price, deposit, refunds), discounts or access.
 - **Admin:** `AppointmentAdmin` shows `source` in `list_display` and
   `list_filter`.
-- **Bookings from the assistant have no separate counter:** they are
+- **Bookings after a conversation with the assistant have no separate
+  counter:** they are
   counted from appointments with `source="assistant"`. The booking path
   writes no counters. Which statuses count is decided with the owner
   dashboard (Stages 18-21).
@@ -7457,12 +7456,7 @@ cookie. Controls:
   from other provider errors (today both are `assistant_provider_error`;
   the guide gives only the message "identifier blocked", no code). Added
   26.10.2026 (see "Sub-step 10 details").
-- Stage 17: `via=assistant` must be passed along on every internal
-  `/booking` link (step 3 week navigation, step 3 → 4, the step 3 retry
-  link, the step 4 slot-taken redirect) and sent as `source` by both
-  booking forms. Open: whether `via` survives if the customer goes back
-  and changes the specialist. Recorded 26.10.2026 (sub-step 9 is backend
-  only).
+- Stage 17: both booking forms send `source`; see "Stage 17 block C".
 - Design pass (Stages 18-21): the assistant and the frontend's
   `formatPrice` must write currency the same way. Today the assistant
   writes the code after the amount ("109 UAH"; see "Tone and manner").
@@ -7626,9 +7620,7 @@ Already assigned to Stage 17:
 
 - **Proposal card** rendering, with the button shapes by slot count
   ("Product decisions", refined in "Sub-step 6 details").
-- **`via=assistant`** passed along on every internal `/booking` link and
-  sent as `source` by both booking forms; open whether `via` survives a
-  change of specialist ("Open items"; "Sub-step 9 details").
+- **Booking `source`** sent by both booking forms; see "Stage 17 block C".
 - **Blocked `safety_identifier`:** a clear message instead of an endless
   "Try again"; needs the backend to tell a blocked identifier apart from
   other provider errors ("Open items"; "Sub-step 10 details").
@@ -7716,3 +7708,24 @@ the widget can deliver:
   "Згорнути"), matching their `aria-label`.
 - **Mockups:** design canvas, row "Stage 17: віджет асистента", boards
   starting with "B:".
+
+### Stage 17 block C: card handoff and booking source (decided 29.10.2026)
+
+- **Definition.** `Appointment.source = assistant` means "booked after a
+  conversation with the assistant in the same browser tab", not "booked
+  through a card link". It counts bookings at another time, for another
+  service, or found by the customer on their own after the conversation.
+  Analytics label it "bookings after a conversation with the assistant",
+  not bookings the assistant brought.
+- **Mechanism.** At submit time, both the guest and the account booking
+  forms send `source=assistant` when the tab holds a stored assistant
+  session id (stored only after a `done` event, block B); otherwise
+  `direct`. No `via` parameter is passed through booking links.
+- **Window: the current tab only** (`sessionStorage`). A booking after the
+  tab was closed, or from another device, counts as `direct`. Deliberately
+  a lower bound.
+- **Isolation.** `sessionStorage` is per origin and each salon has its own
+  subdomain, so a conversation in one salon cannot mark a booking in
+  another.
+- **Card content and button targets** stay as decided in Stage 16; chat
+  behaviour after a card click is in block B.
