@@ -7322,6 +7322,70 @@ list cards are plain blocks. Found during the Stage 16 manual check.
 **Open item.** No navigation leads to `/specialists` or `/services` at
 all. Site navigation belongs to the design pass (Stages 18-21).
 
+### Fix: public views ignore an invalid access cookie (decided 29.10.2026)
+
+Decided 29.10.2026 after the recon of the same day. Replaces the open
+item "Public views without `PublicEndpointMixin`" below.
+
+**Scope.** Done now, as a separate step before Stage 17, not inside it.
+
+**Problem.** DRF authenticates before it checks permissions. A garbage or
+expired access cookie, or one that fails the account checks, makes
+`AccountJWTCookieAuthentication` raise, so 16 guest-reachable views
+answer 401 before `AllowAny` is consulted. No live impact today: the
+server components fetch without cookies, and the browser's guest calls
+go cross-origin without credentials.
+
+**Pure-public views get `PublicEndpointMixin`** (9 views; none of them
+reads the account): salon detail, availability,
+availability/specialists, reviews list, guest booking POST, guest
+appointment detail, cancel and pay, payment webhook.
+
+**Mixed views get a new cookie authentication class** (7 views:
+categories list and detail, services list and detail, specialists list
+and detail, review create). It is used only on these views.
+
+- An invalid access cookie (garbage, expired, `session_version`
+  mismatch, missing or inactive account, another salon's account) is
+  treated as anonymous instead of raising.
+- A valid cookie behaves exactly as today, including the CSRF check on
+  unsafe methods.
+- The header authentication class stays strict.
+- The project-wide default stays strict, so protected endpoints such as
+  `/auth/me/` keep answering 401.
+- **Why:** with an invalid cookie the server cannot tell staff from a
+  guest. Treating it as anonymous only lowers rights, never raises them;
+  staff writes are still denied by `IsSalonStaff`.
+
+**Findings recorded with this fix:**
+
+- A valid cookie on guest booking POST would get 403: the cookie class
+  enforces CSRF on unsafe methods, and the frontend sends no
+  `X-CSRFToken` there. The mixin fixes this too.
+- On a shared production API host, a cookie from salon A would get 401
+  on salon B's public endpoints (the account lookup is tenant-scoped).
+  The hosting layout is decided in Stage 22.
+- The `PublicEndpointMixin` docstring (`accounts/views.py`) says the
+  access cookie is a session cookie with no `max_age`. That is outdated:
+  the access cookie has had `max-age` since 640ec22. Corrected in the
+  code step.
+
+**To verify in RED:** what review create returns for an anonymous
+request without a guest token (401 or 404), and what that means for
+session renewal in `apiRequest`. Record the answer here; no behaviour
+change unless decided.
+
+**Tests.** Extend `tests/test_public_endpoints_ignore_invalid_cookie.py`
+to all 16 views, each with a garbage, an expired and an other-salon
+cookie. Controls:
+
+- `/auth/me/` still answers 401 with a garbage cookie;
+- staff with a valid cookie still see `include_inactive` results;
+- a staff write with an invalid cookie is still denied;
+- an account with a valid cookie can still create a review;
+- guest booking POST with a valid account cookie and no `X-CSRFToken`
+  succeeds (no 403).
+
 ### Open items (not decisions)
 
 - Stage 22 requirements: the production server must support streaming
@@ -7360,6 +7424,9 @@ all. Site navigation belongs to the design pass (Stages 18-21).
   - Schedule: a separate fix after Stage 16 and before Stage 22. Extend
     `tests/test_public_endpoints_ignore_invalid_cookie.py` to every view
     in the list.
+  - Decided 29.10.2026, after a second recon the same day: see "Fix:
+    public views ignore an invalid access cookie (decided 29.10.2026)"
+    above.
 - `X-Forwarded-For` can be spoofed while `NUM_PROXIES` is unset. This
   defeats every IP-keyed throttle (login, register, password reset, guest
   token, and the assistant's salon + IP limit) whenever a client reaches
@@ -7414,7 +7481,9 @@ items already assigned to Stage 17 elsewhere in this section.
     - `SpecialistsAtTimeQuerySerializer` active-only: "a separate small
       fix";
     - public views without `PublicEndpointMixin`: "after Stage 16 and
-      before Stage 22", a window, not a stage.
+      before Stage 22", a window, not a stage. Decided 29.10.2026 as a
+      separate step before Stage 17: see "Fix: public views ignore an
+      invalid access cookie (decided 29.10.2026)".
   - Stage 16 "Deferred" (in "Product decisions"):
     - human handoff and a knowledge base that learns from staff answers;
     - the Anthropic fallback model ("after the OpenAI provider works");
