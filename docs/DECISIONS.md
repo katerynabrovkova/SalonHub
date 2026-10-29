@@ -7408,7 +7408,10 @@ cookie. Controls:
   snapshots could hold conversation text.
 - A privacy policy page must exist before the assistant is enabled for
   real customers. It must also mention the `safety_identifier` sent to
-  OpenAI (see "Sub-step 10 details"; added 26.10.2026).
+  OpenAI (see "Sub-step 10 details"; added 26.10.2026). The widget link
+  must open the privacy page (see "Stage 17 block D"; added 29.10.2026).
+  The page must say that OpenAI processes voice input (see "Stage 17
+  block D").
 - Check whether the public slots endpoint and appointment creation verify
   that the specialist performs the service (the availability engine does
   not). Found 21.10.2026. Checked 22.10.2026: they do not; the fix is
@@ -7449,13 +7452,7 @@ cookie. Controls:
   the backend directly. Must be settled in Stage 22 with the proxy layout.
   Found 26.10.2026. The assistant's `safety_identifier` (sub-step 10) is
   derived from the same IP and is affected too (added 26.10.2026).
-- Stage 17: a customer whose `safety_identifier` OpenAI has blocked gets
-  `assistant_provider_error` on every message, and the widget's "Try
-  again" can never succeed. Show a clear message instead of an endless
-  "Try again". This needs the backend to tell a blocked identifier apart
-  from other provider errors (today both are `assistant_provider_error`;
-  the guide gives only the message "identifier blocked", no code). Added
-  26.10.2026 (see "Sub-step 10 details").
+- Stage 17: blocked `safety_identifier`; see "Stage 17 block D".
 - Stage 17: both booking forms send `source`; see "Stage 17 block C".
 - Design pass (Stages 18-21): the assistant and the frontend's
   `formatPrice` must write currency the same way. Today the assistant
@@ -7608,24 +7605,15 @@ Found in the last manual check of Stage 16:
   the wording rule in "Sub-step 10e details").
 - **More FAQ items for BellaBeauty:** health, preparation, payment and
   other topics. Salon content written by Katya, not code.
-- **Show that the assistant is working** before the first word arrives
-  (for example "Перевіряю вільний час…"). A normal turn takes about 3-9
-  seconds, mostly tool calls. Open: whether a generic indicator in the
-  widget is enough, or the backend should send a status event during
-  tool calls. Today the client events are only `text`, `proposal`,
-  `error` and `done`, and the customer never sees tool calls ("Sub-step
-  3 details").
+- **Show that the assistant is working:** see "Stage 17 block D".
 
 Already assigned to Stage 17:
 
 - **Proposal card** rendering, with the button shapes by slot count
   ("Product decisions", refined in "Sub-step 6 details").
 - **Booking `source`** sent by both booking forms; see "Stage 17 block C".
-- **Blocked `safety_identifier`:** a clear message instead of an endless
-  "Try again"; needs the backend to tell a blocked identifier apart from
-  other provider errors ("Open items"; "Sub-step 10 details").
-- **Voice input** in the widget; browser-side versus server-side
-  recognition to be researched ("Product decisions", Deferred).
+- **Blocked `safety_identifier`:** see "Stage 17 block D".
+- **Voice input:** see "Stage 17 block D".
 - **AI processing notice** in the widget ("Safety and privacy").
 - **Widget texts** for `assistant_daily_limit` and `assistant_busy`, with
   a "go to booking" button where relevant ("Limits"); for a throttled
@@ -7729,3 +7717,44 @@ the widget can deliver:
   another.
 - **Card content and button targets** stay as decided in Stage 16; chat
   behaviour after a card click is in block B.
+
+### Stage 17 block D: widget extras (decided 29.10.2026)
+
+- **Working indicator.** The backend sends a new NDJSON event
+  `{"type":"status","step":"<step>"}` when the assistant calls a tool. It
+  carries only the step key, never tool arguments or model output. The
+  widget maps steps to fixed texts:
+  - list services: "Дивлюся послуги…";
+  - `check_availability`: "Перевіряю вільний час…";
+  - specialist info: "Дивлюся інформацію про майстрів…";
+  - FAQ: "Шукаю відповідь…";
+  - salon info: "Уточнюю деталі салону…";
+  - `propose_booking`: "Готую пропозицію…".
+
+  Before the first status the widget shows pulsing dots; the status
+  disappears when the first text arrives. No expandable details. This
+  resolves the Stage 16 open item "generic indicator or backend status
+  event" ("Show that the assistant is working" in the Stage 16 closure).
+- **Voice input:** transcription through our backend (OpenAI), built as
+  the last sub-step of Stage 17. A recon before it settles the model,
+  maximum length and size, limits per session, IP and salon, and cost.
+  Audio is never stored: it is sent for transcription and discarded; only
+  text comes back. Same assistant-enabled check and per-customer
+  `safety_identifier` as the chat. The privacy policy must mention that
+  OpenAI processes voice.
+- **AI notice:** one line above the input, always visible: "Відповідає
+  ШІ, він може помилятися." with a link "Як ми обробляємо дані" to the
+  privacy policy route. The header shows only "Асистент <salon name>", no
+  AI subtitle. Until the privacy page exists the link returns 404; "the
+  widget link opens the privacy page" is part of the privacy-policy gate
+  ("Open items").
+- **Blocked `safety_identifier`.** The backend detects this provider
+  error and sends its own error code; how OpenAI signals it is checked in
+  recon, not guessed. The widget shows "На жаль, зараз я не можу
+  відповісти. Записатися можна через форму на сайті." with a link to the
+  services page, and no retry button. Nothing in the text blames the
+  customer, because one IP can be shared by many people.
+- **Starter questions:** tapping one sends it at once; the chips
+  disappear after the first message.
+- **Mockups:** design canvas, row "Stage 17: віджет асистента", boards
+  starting with "D:".
