@@ -7386,6 +7386,20 @@ cookie. Controls:
 - guest booking POST with a valid account cookie and no `X-CSRFToken`
   succeeds (no 403).
 
+**Implemented 29.10.2026.**
+
+- New `OptionalAccountJWTCookieAuthentication` and
+  `OPTIONAL_COOKIE_AUTHENTICATION_CLASSES` (`accounts/authentication.py`)
+  on the 7 mixed views; `PublicEndpointMixin` on the 9 pure-public views.
+  Project defaults unchanged.
+- "To verify in RED": an anonymous review create without a guest token
+  returns 401 `not_authenticated`, so `apiRequest` treats it as a session
+  to renew. No change needed.
+- The `/auth/me/` control also asserts `token_not_valid`, so the strict
+  project default is guarded directly: the lenient class as the default
+  is killed by 2 tests.
+- Suite: 1503 passed.
+
 ### Open items (not decisions)
 
 - Stage 22 requirements: the production server must support streaming
