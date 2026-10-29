@@ -7758,3 +7758,33 @@ the widget can deliver:
   disappear after the first message.
 - **Mockups:** design canvas, row "Stage 17: віджет асистента", boards
   starting with "D:".
+
+### Stage 17 sub-step order (decided 29.10.2026)
+
+Each sub-step is its own recon, RED, GREEN and commit cycle.
+
+- **17.1 Backend opening fixes:** `SpecialistsAtTimeQuerySerializer`
+  active-only; the `compute_candidate_start_times` salon guard; the
+  `accounts/tokens.py` docstring; the salon name in
+  `GET /api/v1/salons/<slug>/`.
+- **17.2 Backend for the widget:** status events in the stream; proposal
+  cards stored in the session and returned by history; a distinct error
+  code for a blocked `safety_identifier` (recon first).
+- **17.3 Widget shell:** salon data fetched server-side; the widget in the
+  root layout with the page allowlist; stripe, small window, side panel,
+  minimise; not rendered when `assistant_enabled` is `false`. No
+  conversation yet.
+- **17.4 Conversation:** sending, streamed reply, session id stored after
+  `done`, history after reload, expired-conversation notice, input
+  disabled while streaming; a real browser check that
+  `X-Assistant-Session` is allowed and exposed by CORS.
+- **17.5 Statuses and errors:** status texts, busy, limits, cut-off reply,
+  blocked customer, "Спробувати ще раз".
+- **17.6 Card and booking:** the card in the chat, handoff to the booking
+  form, phone auto-minimise, `source=assistant` in both booking forms.
+- **17.7 Interface details:** AI notice, starter questions, desktop button
+  tooltips.
+- **17.8 Assistant polish:** manual check through the real widget; tone
+  and every "Carried to Stage 17" item.
+- **17.9 Voice input:** recon, backend endpoint, widget button.
+- **17.10 Stage 17 closure.**
