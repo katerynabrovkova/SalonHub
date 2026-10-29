@@ -7683,3 +7683,36 @@ the widget can deliver:
   the target look. The code is built with neutral styling, and the visual
   design is finished in the design pass (see "Stage 17 scope" in the
   Stage 16 closure).
+
+### Stage 17 block B: conversation mechanics (decided 29.10.2026)
+
+- **No close button** in the widget header. The conversation still ends
+  when the tab closes or 30 minutes after the last message, as decided in
+  Stage 16; there is still no "start over".
+- **Proposal cards survive a full reload.** They are stored in the
+  session together with the assistant message and returned by the
+  history endpoint. Isolation is unchanged. Stale slots are acceptable:
+  booking re-checks the slot, and the existing "slot taken" flow handles
+  it. A backend change in Stage 17.
+- **After a click on a card time or "Інший день або час":** on a phone the
+  chat minimises so the booking form is visible; on desktop it stays as it
+  was.
+- **`assistant_busy` (503) and throttled (429):** the agreed text and a
+  "Спробувати ще раз" button; no automatic retry. The widget does not
+  need `Retry-After`, so `CORS_EXPOSE_HEADERS` stays unchanged. A busy
+  refusal does not use up the daily limit (Stage 16, 8b).
+- **Expired conversation.** If the widget has a stored session id but
+  history comes back empty, it shows "Попередня розмова завершилась"
+  above the greeting and drops the stored id. No stored id means a plain
+  greeting.
+- **The session id is stored only after a successful turn** (a `done`
+  event), because the backend returns an id even when the first message
+  fails and nothing is stored.
+- **Header buttons.** On a phone, only "minimise" (back to the edge
+  stripe). On desktop, "resize" toggles between the small corner window
+  and the side panel, and "minimise" collapses to the edge stripe as on a
+  phone. The conversation is kept in every case. Desktop header buttons
+  show a hover tooltip with their action ("Розгорнути", "Зменшити",
+  "Згорнути"), matching their `aria-label`.
+- **Mockups:** design canvas, row "Stage 17: віджет асистента", boards
+  starting with "B:".
