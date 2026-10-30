@@ -5,14 +5,17 @@ Stage 16 sub-step 6c — the conversation orchestrator (docs/DECISIONS.md §
 `run_turn` handles one customer message: it sends the stored history, the
 new message, the system instructions and the tool specs to the provider,
 runs the model/tool loop (at most 10 provider calls), and yields client
-events: {"type": "text", "text"}, {"type": "proposal", "card"},
-{"type": "error", "code"} and {"type": "done"}. It needs a bound tenant
-context; the endpoint's generator binds it (sub-step 7).
+events: {"type": "text", "text"}, {"type": "status", "step"},
+{"type": "proposal", "card"}, {"type": "error", "code"} and
+{"type": "done"}. It needs a bound tenant context; the endpoint's generator
+binds it (sub-step 7).
 
-Text deltas are forwarded as they arrive. The proposal, if any, is sent
-after all text, right before `done`. The customer message and the full
-reply text are stored only on success. One log line per message carries the
-salon id, summed token counts, latency and outcome, never any text.
+Text deltas are forwarded as they arrive. A status is sent right before each
+known tool runs, with the tool's name as its step (Stage 17.2a). The
+proposal, if any, is sent after all text, right before `done`. The customer
+message and the full reply text are stored only on success. One log line per
+message carries the salon id, summed token counts, latency and outcome,
+never any text.
 
 Daily counters (sub-step 9): a conversation is counted on the first
 successfully stored turn of a session, and a proposal for every emitted
@@ -93,6 +96,10 @@ def _matches_schema(spec: ToolSpec, arguments: dict[str, Any]) -> bool:
     return set(arguments) <= set(properties) and all(key in arguments for key in required)
 
 
+def _is_known_tool(name: str) -> bool:
+    return name in tools.TOOLS or name == PROPOSE_BOOKING_SPEC.name
+
+
 def _history_messages(session_id: str) -> list[ChatMessage]:
     return [
         ChatMessage(role=cast(Literal["user", "assistant"], item["role"]), content=item["content"])
@@ -121,8 +128,7 @@ def _log_tool_call(salon: Salon, call: ToolCall, result: dict[str, Any]) -> None
     argument values or the session id. A name that is not a known tool came
     from the model and is logged as "unknown".
     """
-    known = call.name in tools.TOOLS or call.name == PROPOSE_BOOKING_SPEC.name
-    name = call.name if known else "unknown"
+    name = call.name if _is_known_tool(call.name) else "unknown"
     outcome = result.get("error", "ok")
     counts = ""
     if outcome == "ok" and name == "check_availability":
@@ -245,6 +251,8 @@ def run_turn(
                 )
             )
             for call in tool_calls:
+                if _is_known_tool(call.name):
+                    yield {"type": "status", "step": call.name}
                 if call.name == PROPOSE_BOOKING_SPEC.name:
                     if not _matches_schema(PROPOSE_BOOKING_SPEC, call.arguments):
                         result = INVALID_TOOL_CALL

@@ -317,12 +317,41 @@ def test_tool_mid_stream_sees_only_the_bound_salons_data(
     response = _post(enabled_salon.slug, {"message": "What do you offer?"})
     events = _events(response)
 
-    assert events == [{"type": "text", "text": "We do manicures."}, {"type": "done"}]
+    assert events == [
+        {"type": "status", "step": "list_services"},
+        {"type": "text", "text": "We do manicures."},
+        {"type": "done"},
+    ]
     second_call = provider.calls[1]["messages"]
     assert isinstance(second_call, tuple)
     [tool_message] = [m for m in second_call if m.role == "tool"]
     assert "Own manicure" in tool_message.content
     assert "Foreign manicure" not in tool_message.content
+
+
+# --- Stage 17.2a: status events --------------------------------------------
+
+
+def test_status_event_through_the_endpoint_has_only_type_and_step(monkeypatch, enabled_salon):
+    _use_provider(
+        monkeypatch,
+        [
+            [
+                ToolCall(
+                    id="call-1", name="get_specialist_info", arguments={"specialist_id": 987654}
+                ),
+                _finish(),
+            ],
+            [TextDelta(text="Done."), _finish()],
+        ],
+    )
+
+    response = _post(enabled_salon.slug, {"message": "Who works here?"})
+    events = _events(response)
+
+    assert [event for event in events if event["type"] == "status"] == [
+        {"type": "status", "step": "get_specialist_info"}
+    ]
 
 
 # --- 9-10. errors mid-stream ----------------------------------------------

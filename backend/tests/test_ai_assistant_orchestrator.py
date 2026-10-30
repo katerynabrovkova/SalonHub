@@ -130,6 +130,10 @@ def _tool_results(provider: MockAssistantProvider, call_index: int) -> list[Any]
     return [json.loads(message.content) for message in _tool_messages(provider, call_index)]
 
 
+def _status(step: str) -> dict[str, str]:
+    return {"type": "status", "step": step}
+
+
 def test_plain_text_reply_streams_text_then_done_and_stores_the_turn(tbilisi_salon):
     events, _provider = _run(
         tbilisi_salon,
@@ -179,7 +183,11 @@ def test_tool_round_sees_only_the_bound_salons_data(tbilisi_salon, other_salon, 
     assert tool_message.tool_call_id == "call-1"
     assert "Own manicure" in tool_message.content
     assert "Foreign manicure" not in tool_message.content
-    assert events == [{"type": "text", "text": "We do manicures."}, {"type": "done"}]
+    assert events == [
+        _status("list_services"),
+        {"type": "text", "text": "We do manicures."},
+        {"type": "done"},
+    ]
 
 
 def test_check_availability_gets_the_turns_now_and_lang(
@@ -280,8 +288,8 @@ def test_propose_booking_sends_one_proposal_after_all_text_right_before_done(
         ],
     )
 
-    assert [event["type"] for event in events] == ["text", "text", "proposal", "done"]
-    card = events[2]["card"]
+    assert [event["type"] for event in events] == ["text", "status", "text", "proposal", "done"]
+    card = events[3]["card"]
     assert card["service"]["id"] == service.id
     assert card["specialist"]["id"] == specialist.id
     assert card["slots"] == [SLOT_0900]
@@ -693,7 +701,7 @@ def test_deadline_counts_across_all_provider_calls_of_one_message(tbilisi_salon,
     events = _run_provider(tbilisi_salon, provider)
 
     assert len(provider.calls) == 2
-    assert events == [{"type": "text", "text": "Checking. "}, PROVIDER_ERROR]
+    assert events == [{"type": "text", "text": "Checking. "}, _status("get_faq"), PROVIDER_ERROR]
     assert _history(tbilisi_salon) == []
 
 
@@ -734,7 +742,11 @@ def test_exactly_80_seconds_is_still_in_time(tbilisi_salon, clock):
 
     events = _run_provider(tbilisi_salon, provider, user_text="Parking?")
 
-    assert events == [{"type": "text", "text": "Just in time."}, {"type": "done"}]
+    assert events == [
+        _status("get_faq"),
+        {"type": "text", "text": "Just in time."},
+        {"type": "done"},
+    ]
     assert _history(tbilisi_salon) == [
         {"role": "user", "content": "Parking?"},
         {"role": "assistant", "content": "Just in time."},
@@ -753,7 +765,11 @@ def test_exactly_80_seconds_before_the_next_call_still_starts_it(tbilisi_salon, 
     events = _run_provider(tbilisi_salon, provider)
 
     assert len(provider.calls) == 2
-    assert events == [{"type": "text", "text": "Just in time."}, {"type": "done"}]
+    assert events == [
+        _status("get_faq"),
+        {"type": "text", "text": "Just in time."},
+        {"type": "done"},
+    ]
 
 
 def test_deadline_passed_after_a_calls_last_event_starts_no_further_call(tbilisi_salon, clock):
@@ -767,7 +783,7 @@ def test_deadline_passed_after_a_calls_last_event_starts_no_further_call(tbilisi
 
     events = _run_provider(tbilisi_salon, provider)
 
-    assert events == [PROVIDER_ERROR]
+    assert events == [_status("get_faq"), PROVIDER_ERROR]
     assert len(provider.calls) == 1
     assert _history(tbilisi_salon) == []
 
@@ -803,6 +819,117 @@ def test_deadline_drops_a_pending_proposal_and_counts_nothing(
 
     events = _run_provider(tbilisi_salon, provider)
 
-    assert events == [PROVIDER_ERROR]
+    assert events == [_status("propose_booking"), PROVIDER_ERROR]
     assert recorded == []
     assert _history(tbilisi_salon) == []
+
+
+# --- Stage 17.2a: status events --------------------------------------------
+
+
+def _tool_arguments(name: str, service, specialist) -> dict[str, Any]:
+    if name == "check_availability":
+        return {
+            "service_id": service.id,
+            "specialist_id": specialist.id,
+            "date_from": "2026-08-17",
+            "date_to": "2026-08-17",
+        }
+    if name == "propose_booking":
+        return {"service_id": service.id, "specialist_id": specialist.id}
+    return {}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "list_services",
+        "check_availability",
+        "get_specialist_info",
+        "get_faq",
+        "get_salon_info",
+        "propose_booking",
+    ],
+)
+def test_each_tool_emits_its_step_key(tbilisi_salon, service, specialist, name):
+    arguments = _tool_arguments(name, service, specialist)
+
+    events, _provider = _run(
+        tbilisi_salon,
+        [
+            [ToolCall(id="call-1", name=name, arguments=arguments), _finish()],
+            [TextDelta(text="Done."), _finish()],
+        ],
+    )
+
+    assert [event for event in events if event["type"] == "status"] == [_status(name)]
+
+
+def test_status_arrives_before_its_tool_runs(monkeypatch, tbilisi_salon):
+    runs: list[dict[str, Any]] = []
+    runs_at_status: list[int] = []
+    spec, real_get_faq = tools_module.TOOLS["get_faq"]
+
+    def _spy(**kwargs: Any) -> dict[str, Any]:
+        runs.append(kwargs)
+        return real_get_faq(**kwargs)
+
+    monkeypatch.setitem(tools_module.TOOLS, "get_faq", (spec, _spy))
+    provider = MockAssistantProvider(
+        [[_faq_call("call-1"), _finish()], [TextDelta(text="Done."), _finish()]]
+    )
+
+    with tenant_context(tbilisi_salon.id):
+        for event in run_turn(
+            session_id=SESSION_ID,
+            user_text="Hello",
+            lang="en",
+            now=NOW,
+            provider=provider,
+            safety_identifier=SAFETY_IDENTIFIER,
+        ):
+            if event["type"] == "status":
+                runs_at_status.append(len(runs))
+
+    assert runs_at_status == [0]
+    assert len(runs) == 1
+
+
+def test_two_tools_in_one_call_give_two_statuses_in_order(tbilisi_salon):
+    events, _provider = _run(
+        tbilisi_salon,
+        [
+            [
+                _faq_call("call-1"),
+                ToolCall(id="call-2", name="get_salon_info", arguments={}),
+                _finish(),
+            ],
+            [TextDelta(text="Done."), _finish()],
+        ],
+    )
+
+    assert [event for event in events if event["type"] == "status"] == [
+        _status("get_faq"),
+        _status("get_salon_info"),
+    ]
+
+
+def test_turn_limit_round_emits_no_status(tbilisi_salon):
+    """The 10th call's tools never run, so nine statuses for ten calls."""
+    events, _provider = _run(tbilisi_salon, _faq_rounds(10))
+
+    assert [event for event in events if event["type"] == "status"] == [_status("get_faq")] * 9
+    assert events[-1] == {"type": "error", "code": "assistant_turn_limit"}
+
+
+def test_unknown_tool_name_emits_no_status(tbilisi_salon):
+    events, _provider = _run(
+        tbilisi_salon,
+        [
+            [ToolCall(id="call-1", name="book_now", arguments={}), _finish()],
+            [TextDelta(text="Sorry."), _finish()],
+        ],
+    )
+
+    assert [event for event in events if event["type"] == "status"] == []
+    assert "book_now" not in json.dumps(events)

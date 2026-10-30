@@ -8,7 +8,7 @@ instructions, the conversation so far and the tool specs to the model and
 yields provider events (TextDelta, ToolCall, Finish) as they arrive. It
 never executes tools, knows nothing about salons or tenant context, and
 never logs request or response content. These events are internal to the
-orchestrator; the widget only ever sees the client events (text,
+orchestrator; the widget only ever sees the client events (text, status,
 proposal, error, done). Vendor formats are translated inside adapters
 only.
 """

@@ -509,7 +509,7 @@ def test_counter_failure_is_logged_without_text_and_does_not_break_the_stream(
     with caplog.at_level(logging.DEBUG):
         events = _run(tbilisi_salon, [[_propose("call-1", arguments), _finish()], _reply("Here.")])
 
-    assert [event["type"] for event in events] == ["text", "proposal", "done"]
+    assert [event["type"] for event in events] == ["status", "text", "proposal", "done"]
     with tenant_context(tbilisi_salon.id):
         assert load_history(SESSION_ID) == [
             {"role": "user", "content": USER_TEXT},
