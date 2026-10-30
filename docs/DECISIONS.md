@@ -7777,6 +7777,15 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     is acceptable; it is never reachable from customer input because every
     caller takes the salon from the bound tenant.
   - No extra queries: a plain column comparison.
+  - Conflict with Stage 7.C:
+    `test_create_appointment_cross_tenant_salon_mismatch_raises_integrity_error`
+    passed a mismatched salon on purpose and expected the composite tenant
+    FK to reject it. With the guard, `ValueError` fires first. That test now
+    expects `ValueError` and keeps its "0 rows created" check.
+  - The composite FK stays as the last line of defence and keeps its own
+    test: a test that bypasses the service layer and saves a cross-tenant
+    `Appointment` directly must still get `IntegrityError`. Reuse an
+    existing test if one does this; otherwise add one in 17.1.
 - **17.2 Backend for the widget:** status events in the stream; proposal
   cards stored in the session and returned by history; a distinct error
   code for a blocked `safety_identifier` (recon first).
