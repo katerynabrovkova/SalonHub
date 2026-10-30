@@ -172,14 +172,10 @@ on them.
   validator). `scheduling._step_windows` guards `<= 0` at read time
   precisely because the write side doesn't. Real fix: close it at the
   source. Needed by Stage 19/20.
-- **Salon profile API.** No endpoint currently exposes `Salon.name` /
-  `Salon.about` / other salon-identity fields over HTTP (the `tenants/` app
-  has no `serializers.py`, `views.py`, or `urls.py` — see Stage 11.5 closure
-  recon, 2026-09-10). Stage 11.5 made these fields translatable at the data
-  layer only; no stage in the roadmap explicitly commits to building a read
-  endpoint for them. Must be resolved when Stage 12/13 scope is written: does
-  the frontend catalog/landing page need to render salon name/about, and if
-  so, in which stage does the endpoint get built.
+- **Salon profile API.** `Salon.name` is exposed since Stage 17.1 by
+  `GET /api/v1/salons/<slug>/`, resolved per `?lang=`. The rest of the salon
+  profile API (`Salon.about` and other salon-identity fields) stays in
+  Stage 18.
 - **Blocker provenance through the availability engine.**
   `compute_open_windows` flattens every blocking source (`TimeOff`,
   `Appointment`, future closures) into indistinguishable `Window`s before
@@ -7777,15 +7773,24 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     is acceptable; it is never reachable from customer input because every
     caller takes the salon from the bound tenant.
   - No extra queries: a plain column comparison.
+  - 17.1b (decided 30.10.2026): `compute_multi_specialist_availability`
+    also checks the service's salon up front with the same helper, so the
+    "any specialist" path (availability, `is_start_offered` with
+    `specialist=None`, `create_appointment_for_any_specialist`) raises
+    `ValueError` on a foreign service instead of returning no slots.
+  - The per-specialist check in the "any" loops survives mutation by
+    design: specialists come through `SpecialistService`, whose composite
+    FKs tie specialist and service to one salon. It is kept as a defence
+    against a future bug in `_fetch_qualifying_specialists`.
   - Conflict with Stage 7.C:
-    `test_create_appointment_cross_tenant_salon_mismatch_raises_integrity_error`
-    passed a mismatched salon on purpose and expected the composite tenant
-    FK to reject it. With the guard, `ValueError` fires first. That test now
-    expects `ValueError` and keeps its "0 rows created" check.
+    `test_create_appointment_cross_tenant_salon_mismatch_raises_value_error`
+    passes a mismatched salon on purpose. It used to expect the composite
+    tenant FK to reject it; with the guard, `ValueError` fires first. It
+    now expects `ValueError` and keeps its "0 rows created" check.
   - The composite FK stays as the last line of defence and keeps its own
-    test: a test that bypasses the service layer and saves a cross-tenant
-    `Appointment` directly must still get `IntegrityError`. Reuse an
-    existing test if one does this; otherwise add one in 17.1.
+    test: `test_cross_tenant_appointment_saved_directly_is_rejected_by_the_composite_fk`
+    bypasses the service layer, saves a cross-tenant `Appointment` directly
+    and must still get `IntegrityError`.
 - **17.2 Backend for the widget:** status events in the stream; proposal
   cards stored in the session and returned by history; a distinct error
   code for a blocked `safety_identifier` (recon first).
