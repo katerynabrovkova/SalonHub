@@ -530,8 +530,10 @@ the tools it asks for run against tenant-scoped data under the bound tenant cont
 (§ 5), and their results go back to the model until it answers in text. The loop is
 capped by a number of model calls and an overall deadline (values in
 `docs/DECISIONS.md` § Stage 16). Text is streamed to the client as typed events as it
-arrives; tool calls and their results are never shown to the customer and never
-stored in the session. The proposal tool is intercepted by the orchestrator: it
+arrives. The customer sees only the name of a known tool, in a status event right
+before it runs; tool arguments, tool results and provider events are never shown to
+the customer, and tool calls and their results are never stored in the session. The
+proposal tool is intercepted by the orchestrator: it
 validates the ids and slots and computes the card data, with money from the same
 functions as booking, and books nothing. Usage limits are checked before a reply
 starts streaming: per session, per salon and client IP, a daily quota per salon, and

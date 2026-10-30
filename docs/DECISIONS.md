@@ -5831,8 +5831,8 @@ and that the closure was open until it was closed on 27.10.2026.
 
 ### Request flow
 
-- **Streamed responses with typed events:** `text`, `proposal`, `error`,
-  `done`. The proposal is sent after the text, once validated.
+- **Streamed responses with typed events:** `text`, `status`, `proposal`,
+  `error`, `done`. The proposal is sent after the text, once validated.
 - **Synchronous Django view returning a streamed response.** The
   generator binds `tenant_context(salon_id)` itself: the middleware's
   context has ended by the time the body is iterated. It converts any
@@ -6154,9 +6154,10 @@ are reachable only in local dev.
 - **Two event layers.** Provider events are internal, from the provider
   to the orchestrator: `TextDelta(text)`, `ToolCall(id, name, arguments)`,
   `Finish(input_tokens, output_tokens)`. Client events go from the
-  orchestrator/view to the widget: `text`, `proposal`, `error`, `done`,
-  as decided in "Request flow". The customer never sees provider events
-  or tool calls.
+  orchestrator/view to the widget: `text`, `status`, `proposal`, `error`,
+  `done`, as decided in "Request flow". The customer sees only the name of
+  a known tool, in a `status` event right before it runs; never tool
+  arguments, tool results or provider events.
 - **New app `ai_assistant`.** `AppConfig` like the other apps, added to
   `INSTALLED_APPS` after `reviews`. No `models.py` and no migrations,
   consistent with "owns no persistent models" (sub-step 2 details;
@@ -7718,8 +7719,8 @@ the widget can deliver:
 
 - **Working indicator.** The backend sends a new NDJSON event
   `{"type":"status","step":"<step>"}` when the assistant calls a tool. It
-  carries only the step key, never tool arguments or model output. The
-  widget maps steps to fixed texts:
+  carries only the step key, which is the tool name (see 17.2a), never
+  tool arguments or model output. The widget maps steps to fixed texts:
   - list services: "Дивлюся послуги…";
   - `check_availability`: "Перевіряю вільний час…";
   - specialist info: "Дивлюся інформацію про майстрів…";
@@ -7813,6 +7814,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       output.
     - A status may arrive after text has started; the widget shows it
       under the text until the next text arrives (widget rule for 17.5).
+    - Implemented 30.10.2026. Suite: 1526 passed. Mutations M1 (status
+      when the `ToolCall` arrives), M2 (no known-tool check) and M4 (status
+      after the tool runs) are each caught by one dedicated test.
   - **17.2b Cards in history.**
     - The assistant message stores its proposal card:
       `{"role","content","card"}`. The `card` key is present only when a
