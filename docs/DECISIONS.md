@@ -41,6 +41,8 @@ current stage. `Stage N` references elsewhere point at this list.
 15. Frontend customer account + guest token management ✓ (20.10.2026)
 16. AI assistant backend ✓ (27.10.2026)
 17. AI assistant frontend widget
+    Before Stage 18: plan the roadmap gap (see "Open item: roadmap gap");
+    the design pass does not start until that plan is recorded.
 18. Admin shell + dashboard + appointments list
 19. Admin calendar + appointment create/edit
 20. Admin services, specialists, working hours, days off
@@ -142,8 +144,7 @@ on booking step 3 (see its known-issue entry).
 Not yet decided — recorded so they surface before the stages that depend
 on them.
 
-- **Business model: one-off site sale vs. recurring SaaS subscription.**
-  Affects salon onboarding / plans / billing stages.
+- **Business model:** see "Open item: roadmap gap".
 - **Tenant resolution: path prefix only, or also custom domain per
   salon.** Path-prefix only today (Stage 3 middleware). Domain-based
   would be additive to the middleware, not a rewrite. Decide before the
@@ -7579,10 +7580,10 @@ items already assigned to Stage 17 elsewhere in this section.
     - refresh-token rotation is not atomic [Other sections]: accepted;
       worst case one re-login across tabs;
     - tenant resolution by custom domain ["Open questions" whose stage
-      has passed]: depends on the business model; subdomains work;
-    - business model: one-off site sale vs. recurring subscription
-      ["Open questions" with no stage]: a product decision; no stage
-      covers onboarding or billing;
+      has passed]: depends on the business model (see "Open item:
+      roadmap gap"); subdomains work;
+    - business model: see the open item "Roadmap gap" after "Stage 17
+      sub-step order";
     - the max-advance boundary at a DST transition at local midnight
       ["Open questions" with no stage]: only zones such as
       `America/Santiago`, one hour on one day a year;
@@ -7788,3 +7789,16 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   and every "Carried to Stage 17" item.
 - **17.9 Voice input:** recon, backend endpoint, widget button.
 - **17.10 Stage 17 closure.**
+
+### Open item: roadmap gap
+
+Roadmap gap (found 30.10.2026): the roadmap has no stages for per-salon
+themes and appearance settings, the platform's own marketing site with
+pricing, salon onboarding, or salon subscriptions and billing. Plan these
+after Stage 17 and before the design pass (Stages 18-21), because themes
+change how the design pass must be built.
+
+Business model: still open. Current leaning (Katya, 30.10.2026): a
+recurring subscription per salon (monthly or yearly), with the platform
+hosting and maintaining each salon's site, rather than a one-off site
+sale. Not decided; settle it when the gap is planned.
