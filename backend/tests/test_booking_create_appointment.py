@@ -80,7 +80,7 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 
 import booking.services as booking_services
 from booking.constants import SLOT_HOLD_DURATION
@@ -574,21 +574,22 @@ def test_create_appointment_transaction_not_poisoned_after_db_layer_conflict(
 # --- 12. Cross-tenant composite-FK guard ------------------------------------
 
 
-def test_create_appointment_cross_tenant_salon_mismatch_raises_integrity_error(
+def test_create_appointment_cross_tenant_salon_mismatch_raises_value_error(
     salon, other_salon, specialist, service, customer
 ):
     """
     specialist/service/customer all belong to `salon`; `salon=other_salon`
-    is passed to create_appointment by (simulated) caller bug. Per §
-    Stage 7.C decisions this is deliberately unhandled: the composite tenant
-    FK (core/db.py's composite_tenant_fk) is the only thing that rejects it,
-    surfacing as a raw IntegrityError, not a DomainError. tenant_context is
-    bound to `salon.id` — the tenant that actually owns these rows, exactly
-    as a real per-request context would be — so only the `salon` argument
-    itself is wrong, pinning this as a caller bug, not a tenant-context bug.
+    is passed to create_appointment by (simulated) caller bug. The engine's
+    salon guard rejects it with a ValueError, not a DomainError, before any
+    row is written (docs/DECISIONS.md § "Stage 17 sub-step order", 17.1). The
+    composite tenant FK used to be what rejected this; it stays as the last
+    line of defence, see the test below. tenant_context is bound to
+    `salon.id` — the tenant that actually owns these rows, exactly as a real
+    per-request context would be — so only the `salon` argument itself is
+    wrong, pinning this as a caller bug, not a tenant-context bug.
     """
     _working_hours(salon, specialist)
-    with tenant_context(salon.id), pytest.raises(IntegrityError):
+    with tenant_context(salon.id), pytest.raises(ValueError, match="salon"):
         create_appointment(
             salon=other_salon,
             specialist=specialist,
@@ -596,6 +597,31 @@ def test_create_appointment_cross_tenant_salon_mismatch_raises_integrity_error(
             customer=customer,
             start_datetime=FIRST_CANDIDATE,
             now=SAFE_NOW,
+        )
+    assert (
+        Appointment.unscoped_objects.filter(
+            specialist=specialist, start_datetime=FIRST_CANDIDATE
+        ).count()
+        == 0
+    )
+
+
+def test_cross_tenant_appointment_saved_directly_is_rejected_by_the_composite_fk(
+    salon, other_salon, specialist, service, customer
+):
+    """
+    Bypasses the service layer, so the salon guard never runs: the composite
+    tenant FK (core/db.py's composite_tenant_fk) is the last line of defence
+    (docs/DECISIONS.md § "Stage 17 sub-step order", 17.1). Matching the
+    constraint name proves it is that FK and not some other IntegrityError.
+    """
+    with pytest.raises(IntegrityError, match="composite_fk"), transaction.atomic():
+        make_appointment(
+            salon=other_salon,
+            customer=customer,
+            specialist=specialist,
+            service=service,
+            start=FIRST_CANDIDATE,
         )
     assert (
         Appointment.unscoped_objects.filter(

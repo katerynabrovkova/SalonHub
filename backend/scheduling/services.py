@@ -54,6 +54,10 @@ are split into _open_windows (with an include_appointments switch) and
 _bookable_starts, behaviour unchanged, so the reason reuses the engine.
 Sub-step 10e adds day_schedule (a day's working ranges and last possible
 start) and splits the "not working" reason into DAY_OFF and OUTSIDE_HOURS.
+
+Stage 17.1 (docs/DECISIONS.md § "Stage 17 sub-step order") adds _check_salon,
+the salon guard shared by compute_candidate_start_times, day_schedule and
+no_free_start_reason.
 """
 
 import datetime as dt
@@ -331,6 +335,20 @@ def _max_advance_boundary(now: dt.datetime, max_advance_days: int, tz: ZoneInfo)
     return dt.datetime.combine(boundary_date, dt.time(0, 0), tzinfo=tz).astimezone(dt.UTC)
 
 
+def _check_salon(salon: Salon, *, service: Service, specialist: Specialist | None) -> None:
+    """
+    Raises ValueError when `service` or `specialist` belongs to another salon
+    (docs/DECISIONS.md § "Stage 17 sub-step order", 17.1). A mismatch is a
+    programming error, never customer input: every caller takes the salon
+    from the bound tenant. Compares plain columns, so it issues no queries.
+    Pass specialist=None to check only the service.
+    """
+    if service.salon_id != salon.id:
+        raise ValueError(f"Service {service.id} does not belong to salon {salon.id}.")
+    if specialist is not None and specialist.salon_id != salon.id:
+        raise ValueError(f"Specialist {specialist.id} does not belong to salon {salon.id}.")
+
+
 def compute_candidate_start_times(
     specialist: Specialist,
     service: Service,
@@ -354,9 +372,10 @@ def compute_candidate_start_times(
     decisions' django_assert_num_queries(3); a lazy specialist.salon access
     would have added a fourth — salon.min_lead_time_hours,
     salon.max_advance_days, and salon.timezone are all plain columns on the
-    already-loaded row, so booking-window filtering adds none either). Not
-    checked against specialist.salon — see docs/DECISIONS.md § Open
-    questions.
+    already-loaded row, so booking-window filtering adds none either).
+    _check_salon compares it with specialist.salon_id and service.salon_id,
+    plain columns, so that adds no query either (docs/DECISIONS.md § "Stage
+    17 sub-step order", 17.1).
 
     `now` has no default and is validated first: a naive value raises
     ValueError immediately, before compute_open_windows or anything else
@@ -369,6 +388,7 @@ def compute_candidate_start_times(
     """
     if timezone.is_naive(now):
         raise ValueError("now must be a timezone-aware datetime.")
+    _check_salon(salon, service=service, specialist=specialist)
 
     windows = compute_open_windows(
         specialist=specialist,
@@ -543,10 +563,12 @@ def day_schedule(
     schedule, not its availability. Read-only; requires tenant context to
     already be bound.
     """
+    _check_salon(salon, service=service, specialist=specialist)
     tz = ZoneInfo(salon.timezone)
     windows: list[Window] = []
     starts: list[dt.datetime] = []
     for each in _specialists_for(service, specialist):
+        _check_salon(salon, service=service, specialist=each)
         own = _open_windows(each, date, date, salon.timezone, include_appointments=False)
         windows += own
         starts += _step_windows(
@@ -623,6 +645,7 @@ def no_free_start_reason(
     """
     if timezone.is_naive(now):
         raise ValueError("now must be a timezone-aware datetime.")
+    _check_salon(salon, service=service, specialist=specialist)
 
     tz = ZoneInfo(salon.timezone)
 
@@ -641,6 +664,7 @@ def no_free_start_reason(
 
     def any_start(*, include_appointments: bool) -> bool:
         for each in specialists:
+            _check_salon(salon, service=service, specialist=each)
             windows = _open_windows(
                 each, date_from, date_to, salon.timezone, include_appointments=include_appointments
             )

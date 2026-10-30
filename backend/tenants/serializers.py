@@ -15,26 +15,34 @@ class SalonInfoSerializer(serializers.ModelSerializer):
     Public per-salon info read, used by SalonInfoDetailView (tenants/views.py).
     Read-only: the endpoint is GET-only (a RetrieveAPIView with no write
     method), so every field is read-only — there is no write path to guard.
-    Deliberately narrow: `currency` plus the assistant widget fields
-    (`assistant_enabled`, `assistant_starters`). Every other Salon field
-    stays backend-internal, including the customer-facing contacts
+    Deliberately narrow: `name` and `currency` plus the assistant widget
+    fields (`assistant_enabled`, `assistant_starters`). Every other Salon
+    field stays backend-internal, including the customer-facing contacts
     (`phone`, `address`, `instagram_url`), which the assistant reads through
     its own tool until a frontend consumer exists.
 
-    `assistant_starters` resolves each `{lang_code: string}` item to a plain
-    string for the request's ``?lang=`` (docs/DECISIONS.md § Stage 11.5 "API
-    language contract"); an item that resolves to "" is omitted.
+    `name` and each `{lang_code: string}` item of `assistant_starters`
+    resolve to a plain string for the request's ``?lang=``
+    (docs/DECISIONS.md § Stage 11.5 "API language contract"); `name` can
+    resolve to "", a starter that resolves to "" is omitted.
     """
 
+    name = serializers.SerializerMethodField()
     assistant_starters = serializers.SerializerMethodField()
 
     class Meta:
         model = Salon
-        fields = ["currency", "assistant_enabled", "assistant_starters"]
+        fields = ["name", "currency", "assistant_enabled", "assistant_starters"]
         read_only_fields = fields
 
-    def get_assistant_starters(self, obj: Salon) -> list[str]:
+    def _resolved(self, value: dict[str, str]) -> str:
         request = self.context.get("request")
         requested_lang = request.query_params.get("lang") if request is not None else None
-        resolved = (resolve_translation(item, requested_lang) for item in obj.assistant_starters)
+        return resolve_translation(value, requested_lang)
+
+    def get_name(self, obj: Salon) -> str:
+        return self._resolved(obj.name)
+
+    def get_assistant_starters(self, obj: Salon) -> list[str]:
+        resolved = (self._resolved(item) for item in obj.assistant_starters)
         return [text for text in resolved if text != ""]

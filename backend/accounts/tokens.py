@@ -10,8 +10,9 @@ tokens need a stored single-use record (``booking/guest_tokens``) and this
 one does not.
 
 Salon is deliberately NOT in the payload: the emailed link already carries
-the slug (``{FRONTEND_URL}/salons/<slug>/verify-email#token=...``), so the
-verify endpoint (D.4) runs under the salon prefix with tenant context
+the slug as its subdomain (``core.urls.build_salon_frontend_url``, e.g.
+``http://<slug>.localhost:3000/verify-email#token=...``), so the frontend
+calls the verify endpoint (D.4) under the salon prefix, with tenant context
 bound. ``read_account_verification_token`` resolves the account through the
 tenant-scoped ``Account.objects`` on top of that, so a token minted in one
 salon cannot be redeemed under another even if replayed against the wrong

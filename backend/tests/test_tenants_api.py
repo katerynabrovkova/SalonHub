@@ -28,6 +28,7 @@ def test_get_salon_info_returns_currency(client, salon):
 
     assert response.status_code == 200
     assert response.json() == {
+        "name": "Bella Demo Salon",
         "currency": "UAH",
         "assistant_enabled": False,
         "assistant_starters": [],
@@ -76,7 +77,12 @@ def test_get_salon_info_only_exposes_allowlisted_fields(client, salon):
     response = client.get(_salon_detail_url(salon))
 
     assert response.status_code == 200
-    assert set(response.json().keys()) == {"currency", "assistant_enabled", "assistant_starters"}
+    assert set(response.json().keys()) == {
+        "name",
+        "currency",
+        "assistant_enabled",
+        "assistant_starters",
+    }
 
 
 def test_get_salon_info_does_not_expose_contacts(client, salon):
@@ -142,13 +148,48 @@ def test_get_salon_info_returns_each_salons_own_assistant_settings(client, salon
 
     assert salon_response.status_code == 200
     assert salon_response.json() == {
+        "name": "Bella Demo Salon",
         "currency": "UAH",
         "assistant_enabled": True,
         "assistant_starters": ["Book a manicure"],
     }
     assert other_response.status_code == 200
     assert other_response.json() == {
+        "name": "Other Salon",
         "currency": "UAH",
         "assistant_enabled": False,
         "assistant_starters": ["Book a pedicure"],
     }
+
+
+# --- salon name: resolved to a plain string per ?lang= ---------------------
+
+
+def test_get_salon_info_resolves_name_for_requested_lang(client, salon):
+    salon.name = {"en": "Bella", "uk": "Белла"}
+    salon.save(update_fields=["name"])
+
+    response = client.get(_salon_detail_url(salon), {"lang": "uk"})
+
+    assert response.status_code == 200
+    assert response.json().get("name") == "Белла"
+
+
+def test_get_salon_info_name_falls_back_to_english(client, salon):
+    salon.name = {"en": "Bella"}
+    salon.save(update_fields=["name"])
+
+    response = client.get(_salon_detail_url(salon), {"lang": "uk"})
+
+    assert response.status_code == 200
+    assert response.json().get("name") == "Bella"
+
+
+def test_get_salon_info_uk_only_name_is_returned_without_lang(client, salon):
+    salon.name = {"uk": "Белла"}
+    salon.save(update_fields=["name"])
+
+    response = client.get(_salon_detail_url(salon))
+
+    assert response.status_code == 200
+    assert response.json().get("name") == "Белла"

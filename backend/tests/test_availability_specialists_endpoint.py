@@ -325,6 +325,33 @@ def test_cross_tenant_service_id_returns_400_not_404(client, salon, other_salon)
     assert "service" in response.data["error"]["details"]
 
 
+def test_inactive_service_returns_400_on_the_service_field(
+    client, monkeypatch, salon, specialist, service
+):
+    """`specialist` is linked to `service` and has WorkingHours, so a 200
+    here would carry a real specialist (docs/DECISIONS.md § "Fix: the
+    specialist must perform the service")."""
+    _freeze_now(monkeypatch)
+    make_working_hours(
+        salon=salon,
+        specialist=specialist,
+        day_of_week=MONDAY.weekday(),
+        start_time=dt.time(9, 0),
+        end_time=dt.time(10, 15),
+    )
+    with tenant_context(salon.id):
+        service.is_active = False
+        service.save(update_fields=["is_active"])
+
+    response = client.get(
+        _availability_specialists_url(salon),
+        {"service": service.id, "datetime": "2026-08-17T09:00:00+03:00"},
+    )
+
+    assert response.status_code == 400
+    assert "service" in response.data["error"]["details"]
+
+
 # --- (e) response shape --------------------------------------------------------
 
 
