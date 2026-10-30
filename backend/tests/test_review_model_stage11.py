@@ -94,7 +94,7 @@ def test_review_specialist_from_a_different_salon_raises_integrity_error(
     """
     Cross-tenant composite-FK guard, mirroring
     test_booking_create_appointment.py's
-    test_create_appointment_cross_tenant_salon_mismatch_raises_integrity_error:
+    test_cross_tenant_appointment_saved_directly_is_rejected_by_the_composite_fk:
     the specialist belongs to `other_salon`, the Review to `salon`. Only
     core/db.py's composite_tenant_fk (specialist_id, salon_id) rejects this,
     surfacing as a raw IntegrityError. tenant_context is bound to `salon.id`,

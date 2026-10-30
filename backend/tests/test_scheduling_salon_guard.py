@@ -1,9 +1,10 @@
 """
 Stage 17.1 — the engine's salon guard (docs/DECISIONS.md § "Stage 17 sub-step
-order", 17.1): `compute_candidate_start_times`, `day_schedule` and
-`no_free_start_reason` raise ValueError when the specialist or the service
-does not belong to the `salon` argument. With "any" (specialist=None) the
-service is checked up front.
+order", 17.1 and 17.1b): `compute_candidate_start_times`, `day_schedule`,
+`no_free_start_reason` and `compute_multi_specialist_availability` raise
+ValueError when the specialist or the service does not belong to the `salon`
+argument. With "any" (specialist=None, and always in
+`compute_multi_specialist_availability`) the service is checked up front.
 
 Each test has real WorkingHours, so a missing guard shows up as a returned
 result, not as an accidental exception. `match="salon"` keeps an unrelated
@@ -20,6 +21,7 @@ from catalog.models import Service, ServiceCategory
 from core.tenancy import tenant_context
 from scheduling.services import (
     compute_candidate_start_times,
+    compute_multi_specialist_availability,
     day_schedule,
     no_free_start_reason,
 )
@@ -106,6 +108,27 @@ def test_compute_candidate_start_times_service_from_another_salon_raises(
     with tenant_context(salon.id), pytest.raises(ValueError, match="salon"):
         compute_candidate_start_times(
             specialist=specialist,
+            service=other_service,
+            salon=salon,
+            date_from=MONDAY,
+            date_to=MONDAY,
+            now=NOW,
+        )
+
+
+# --- compute_multi_specialist_availability ---------------------------------
+
+
+def test_compute_multi_specialist_availability_service_from_another_salon_raises(
+    salon, specialist, other_service
+):
+    """17.1b: with no qualifying specialist the per-specialist check never
+    runs, so without an up-front check this returns {}, which looks like "no
+    free time"."""
+    _hours(salon, specialist)
+
+    with tenant_context(salon.id), pytest.raises(ValueError, match="salon"):
+        compute_multi_specialist_availability(
             service=other_service,
             salon=salon,
             date_from=MONDAY,

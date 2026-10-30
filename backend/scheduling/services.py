@@ -56,8 +56,8 @@ Sub-step 10e adds day_schedule (a day's working ranges and last possible
 start) and splits the "not working" reason into DAY_OFF and OUTSIDE_HOURS.
 
 Stage 17.1 (docs/DECISIONS.md § "Stage 17 sub-step order") adds _check_salon,
-the salon guard shared by compute_candidate_start_times, day_schedule and
-no_free_start_reason.
+the salon guard shared by compute_candidate_start_times, day_schedule,
+no_free_start_reason and compute_multi_specialist_availability.
 """
 
 import datetime as dt
@@ -464,7 +464,10 @@ def compute_multi_specialist_availability(
     inner compute_candidate_start_times guard: with zero qualifying
     specialists the inner function is never called at all, so a naive `now`
     would otherwise silently produce {} instead of raising
-    (docs/DECISIONS.md § Stage 6.H decisions).
+    (docs/DECISIONS.md § Stage 6.H decisions). The service's salon is checked
+    up front for the same reason: a foreign service has no qualifying
+    specialists, so without this it would look like "no free time"
+    (docs/DECISIONS.md § "Stage 17 sub-step order", 17.1b).
 
     Requires tenant context to already be bound (core.tenancy.tenant_context),
     same as compute_open_windows and compute_candidate_start_times — this
@@ -472,6 +475,7 @@ def compute_multi_specialist_availability(
     """
     if timezone.is_naive(now):
         raise ValueError("now must be a timezone-aware datetime.")
+    _check_salon(salon, service=service, specialist=None)
 
     qualifying_specialists = list(_fetch_qualifying_specialists(service))
     per_specialist = [
