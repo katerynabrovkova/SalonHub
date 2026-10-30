@@ -180,13 +180,6 @@ on them.
   endpoint for them. Must be resolved when Stage 12/13 scope is written: does
   the frontend catalog/landing page need to render salon name/about, and if
   so, in which stage does the endpoint get built.
-- **`compute_candidate_start_times`'s `salon` arg is not checked against
-  `specialist.salon`.** A mismatched `salon` silently resolves granularity
-  / lead time / max-advance / timezone from the wrong tenant — wrong
-  output, not a crash, and current tests wouldn't catch it. No guard yet
-  (deliberate, per 6.E). A guard (`assert specialist.salon_id == salon.id`)
-  costs nothing — `salon_id` is a plain column, not a lazy FK. Open
-  question is likelihood, not cost.
 - **Blocker provenance through the availability engine.**
   `compute_open_windows` flattens every blocking source (`TimeOff`,
   `Appointment`, future closures) into indistinguishable `Window`s before
@@ -7765,16 +7758,34 @@ the widget can deliver:
 Each sub-step is its own recon, RED, GREEN and commit cycle.
 
 - **17.1 Backend opening fixes:** `SpecialistsAtTimeQuerySerializer`
-  active-only; the `compute_candidate_start_times` salon guard; the
-  `accounts/tokens.py` docstring; the salon name in
-  `GET /api/v1/salons/<slug>/`.
+  active-only; the engine salon guard (below); the `accounts/tokens.py`
+  docstring; the salon name in `GET /api/v1/salons/<slug>/`.
+
+  **Decided 30.10.2026: the engine's `salon` argument is checked.** Today
+  a mismatched `salon` silently resolves granularity / lead time /
+  max-advance / timezone from the wrong tenant — wrong output, not a
+  crash, and current tests wouldn't catch it.
+  - One shared check, used by `compute_candidate_start_times`,
+    `day_schedule` and `no_free_start_reason`:
+    `specialist.salon_id == salon.id` and `service.salon_id == salon.id`.
+  - The check is a small helper, not inside `_open_windows`, which lacks
+    `salon` and `service`. When `specialist` is `None` ("any"), the service
+    is checked up front and each specialist in the loop is checked as it
+    is used.
+  - On mismatch raise `ValueError`, not `assert` (`python -O` removes
+    asserts). A mismatch is a programming error, so a 500 with a log entry
+    is acceptable; it is never reachable from customer input because every
+    caller takes the salon from the bound tenant.
+  - No extra queries: a plain column comparison.
 - **17.2 Backend for the widget:** status events in the stream; proposal
   cards stored in the session and returned by history; a distinct error
   code for a blocked `safety_identifier` (recon first).
 - **17.3 Widget shell:** salon data fetched server-side; the widget in the
   root layout with the page allowlist; stripe, small window, side panel,
   minimise; not rendered when `assistant_enabled` is `false`. No
-  conversation yet.
+  conversation yet. The salon-info fetch sends `?lang=` so the header name
+  matches the interface language; an empty salon name falls back to plain
+  "Асистент".
 - **17.4 Conversation:** sending, streamed reply, session id stored after
   `done`, history after reload, expired-conversation notice, input
   disabled while streaming; a real browser check that
