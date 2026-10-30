@@ -6336,6 +6336,8 @@ Additions for 4c (22.10.2026):
   and assistant messages, trims to the last 20 and sets the 30-minute
   expiry in one `MULTI`/`EXEC` transaction. `load_history` does not
   extend the expiry; only a new turn does.
+  - **Added 30.10.2026:** an assistant item also carries `card` when its
+    turn produced a proposal card; see 17.2b in "Stage 17 sub-step order".
 - **Session id:** `secrets.token_urlsafe(32)`. Only its hash is in the
   key, like guest tokens, so a Redis snapshot or key listing does not
   reveal usable ids.
@@ -6493,6 +6495,8 @@ Instruction rules added 23.10.2026 (in `ai_assistant/instructions.py`):
 - **GET history:** `{"messages": [{role, content}]}`. No header, or an
   unknown, expired or other-salon id → `{"messages": []}` (200, not
   404).
+  - **Added 30.10.2026:** an assistant message with a stored proposal card
+    also has `card`; see 17.2b in "Stage 17 sub-step order".
 - **The view's generator binds `tenant_context(salon_id)` itself** and
   converts any unexpected exception into
   `{"type": "error", "code": "internal_error"}`. Details go only to the
@@ -6848,6 +6852,8 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   the same applies to `gpt-6-luna` is not stated. For now it maps to
   `assistant_provider_error` like any other vendor error (see "Open items"
   for Stage 17).
+  - **Added 30.10.2026:** a distinct error code is decided in 17.2c in
+    "Stage 17 sub-step order". Until 17.2c lands, the mapping above stands.
 - **The privacy policy must mention it** (see "Open items").
 - **It inherits the `X-Forwarded-For` issue** recorded in "Open items":
   while `NUM_PROXIES` is unset, a client that reaches the backend directly
@@ -7791,9 +7797,45 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     test: `test_cross_tenant_appointment_saved_directly_is_rejected_by_the_composite_fk`
     bypasses the service layer, saves a cross-tenant `Appointment` directly
     and must still get `IntegrityError`.
-- **17.2 Backend for the widget:** status events in the stream; proposal
-  cards stored in the session and returned by history; a distinct error
-  code for a blocked `safety_identifier` (recon first).
+- **17.2 Backend for the widget** (decided 30.10.2026, after the 17.2
+  recon). Three sub-steps, each its own recon-free RED, GREEN and commit
+  cycle.
+  - **17.2a Status events.**
+    - The event is `{"type":"status","step":"<tool name>"}`. The step keys
+      are the six tool names (`list_services`, `check_availability`,
+      `get_specialist_info`, `get_faq`, `get_salon_info`,
+      `propose_booking`), pinned by a test.
+    - It is emitted at the top of the tool loop, right before each tool
+      runs, one per tool in order. None is sent for tools that do not run
+      (the turn-limit round) or for an unknown tool name (reuse the
+      known-tool check).
+    - The event carries only `type` and `step`, never arguments or model
+      output.
+    - A status may arrive after text has started; the widget shows it
+      under the text until the next text arrives (widget rule for 17.5).
+  - **17.2b Cards in history.**
+    - The assistant message stores its proposal card:
+      `{"role","content","card"}`. The `card` key is present only when a
+      card exists. History returns it unchanged.
+    - Replay to the provider stays role and content only, so the model
+      never sees stored cards.
+    - Failed turns store no card. A stored card keeps the price and
+      language of its turn; the booking form shows the real price.
+  - **17.2c Blocked `safety_identifier`.**
+    - New `AssistantIdentifierBlockedError` (subclass of
+      `AssistantProviderError`), stream error code
+      `assistant_identifier_blocked`.
+    - Detection: the phrase documented in OpenAI's safety-checks guide
+      ("identifier blocked", case-insensitive) in the error message, or
+      the undocumented code `identifier_blocked` in the error code field.
+      It is checked at `create()`, on a mid-stream `APIError`, on `error`
+      events and on `response.failed`. OpenAI documents no status or code,
+      so detection is best effort: a false positive shows the neutral
+      message instead of retry, which is the safer side.
+    - The orchestrator logs the provider error's HTTP status and error
+      code (never the message) for every provider error, so the real shape
+      of a block can be learned. The adapter still logs nothing.
+    - Rotating the HMAC secret must never be used to get around a block.
 - **17.3 Widget shell:** salon data fetched server-side; the widget in the
   root layout with the page allowlist; stripe, small window, side panel,
   minimise; not rendered when `assistant_enabled` is `false`. No
