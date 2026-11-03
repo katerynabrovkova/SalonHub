@@ -364,3 +364,93 @@ describe("AssistantChat input", () => {
     expect(signal.aborted).toBe(true);
   });
 });
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.5a, and § "Stage 17
+// block D" (working indicator).
+describe("AssistantChat statuses", () => {
+  const DOTS = "assistant-typing-dots";
+  const CHECKING = "Перевіряю вільний час…";
+  const PROPOSING = "Готую пропозицію…";
+
+  function isBefore(first: Element, second: Element): boolean {
+    return Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+
+  it("test_pulsing_dots_show_while_streaming_before_any_text_or_status", async () => {
+    replyWith();
+    const { user } = renderChat();
+    expect(screen.queryByTestId(DOTS)).not.toBeInTheDocument();
+
+    await send(user, "Привіт");
+
+    expect(await screen.findByTestId(DOTS)).toBeInTheDocument();
+  });
+
+  it("test_status_replaces_the_dots_and_the_first_text_clears_it", async () => {
+    const channel = replyWith();
+    const { user } = renderChat();
+    await send(user, "Чи є час у суботу?");
+
+    channel.push({ type: "status", step: "check_availability" });
+
+    expect(await screen.findByText(CHECKING)).toBeInTheDocument();
+    expect(screen.queryByTestId(DOTS)).not.toBeInTheDocument();
+
+    channel.push({ type: "text", text: "Так, є" });
+
+    await screen.findByText("Так, є");
+    expect(screen.queryByText(CHECKING)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(DOTS)).not.toBeInTheDocument();
+  });
+
+  it("test_status_after_text_shows_under_the_text_until_the_next_text", async () => {
+    const channel = replyWith();
+    const { user } = renderChat();
+    await send(user, "Запишіть мене");
+
+    channel.push({ type: "text", text: "Зараз підберу" });
+    const reply = await screen.findByText("Зараз підберу");
+    channel.push({ type: "status", step: "propose_booking" });
+
+    const status = await screen.findByText(PROPOSING);
+    expect(isBefore(reply, status)).toBe(true);
+
+    channel.push({ type: "text", text: " час." });
+
+    await screen.findByText("Зараз підберу час.");
+    expect(screen.queryByText(PROPOSING)).not.toBeInTheDocument();
+  });
+
+  it("test_unknown_step_keeps_the_dots", async () => {
+    const channel = replyWith();
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await screen.findByTestId(DOTS);
+
+    channel.push({ type: "status", step: "mystery_tool" });
+    // Let the event be read before checking that nothing changed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getByTestId(DOTS)).toBeInTheDocument();
+    expect(screen.queryByText("mystery_tool")).not.toBeInTheDocument();
+  });
+
+  it("test_nothing_is_shown_after_done", async () => {
+    const channel = replyWith();
+    const { user } = renderChat();
+    await send(user, "Привіт");
+
+    channel.push(
+      { type: "status", step: "list_services" },
+      { type: "text", text: "Вітаю!" },
+      { type: "status", step: "check_availability" },
+      { type: "done" },
+    );
+    channel.end();
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: INPUT })).toBeEnabled());
+    expect(screen.queryByTestId(DOTS)).not.toBeInTheDocument();
+    expect(screen.queryByText(CHECKING)).not.toBeInTheDocument();
+    expect(screen.queryByText("Дивлюся послуги…")).not.toBeInTheDocument();
+  });
+});

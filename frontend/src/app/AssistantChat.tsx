@@ -13,9 +13,11 @@
  *   request keeps the id and shows the plain greeting.
  * - The session id is stored only after `done`; the backend returns an id
  *   even for a first message that fails and stores nothing (block B).
- * - 17.4 shows text only: status, proposal and unknown events are ignored
- *   (17.5 / 17.6), history cards show their text only and empty messages
- *   are skipped until 17.6.
+ * - Statuses (17.5a): the last status event's step is kept until the next
+ *   text or the end of the turn; the view shows its text, or pulsing dots
+ *   before any text or known status.
+ * - Proposal and unknown events are ignored, history cards show their text
+ *   only and empty messages are skipped until 17.6.
  * - Any failure (an `error` event, a refusal before the stream, a stream
  *   ending without `done`) shows one neutral line until 17.5.
  * - The request is aborted on unmount.
@@ -33,6 +35,7 @@ import {
 
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
 import { clearSessionId, readSessionId, storeSessionId } from "@/lib/assistant/sessionId";
+import { statusText } from "@/lib/assistant/statusText";
 
 const GREETING =
   "Вітаю! Я допоможу дізнатися ціни, обрати послугу і знайти вільний час у нашому салоні. Що Вас цікавить?";
@@ -57,6 +60,13 @@ export interface AssistantConversation {
   expired: boolean;
   /** At least one stored turn: the stripe's live dot (block A). */
   hasConversation: boolean;
+  /**
+   * The step key of the last status event (17.5a), cleared by every text
+   * event and when the turn ends.
+   */
+  status: string | null;
+  /** The streaming reply has its first text. */
+  replyStarted: boolean;
   send: (text: string) => void;
 }
 
@@ -66,6 +76,8 @@ export function useAssistantConversation(slug: string): AssistantConversation {
   const [failed, setFailed] = useState(false);
   const [expired, setExpired] = useState(false);
   const [hasConversation, setHasConversation] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [replyStarted, setReplyStarted] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -124,6 +136,8 @@ export function useAssistantConversation(slug: string): AssistantConversation {
       streamingRef.current = true;
       setStreaming(true);
       setFailed(false);
+      setStatus(null);
+      setReplyStarted(false);
       setMessages((current) => [...current, { id: userId, role: "user", content: text }]);
 
       function showReply(content: string) {
@@ -148,6 +162,10 @@ export function useAssistantConversation(slug: string): AssistantConversation {
             if (event.type === "text") {
               replyText += event.text;
               showReply(replyText);
+              setReplyStarted(true);
+              setStatus(null);
+            } else if (event.type === "status") {
+              setStatus(event.step);
             } else if (event.type === "done") {
               done = true;
               if (reply.sessionId !== null) {
@@ -159,7 +177,7 @@ export function useAssistantConversation(slug: string): AssistantConversation {
             } else if (event.type === "error") {
               break;
             }
-            // status, proposal and unknown events: ignored in 17.4.
+            // proposal and unknown events: ignored until 17.6.
           }
         } catch {
           // A refusal, a network failure or a broken stream: handled below.
@@ -169,6 +187,7 @@ export function useAssistantConversation(slug: string): AssistantConversation {
         }
         streamingRef.current = false;
         setStreaming(false);
+        setStatus(null);
         if (!done) {
           setFailed(true);
         }
@@ -177,7 +196,7 @@ export function useAssistantConversation(slug: string): AssistantConversation {
     [slug],
   );
 
-  return { messages, streaming, failed, expired, hasConversation, send };
+  return { messages, streaming, failed, expired, hasConversation, status, replyStarted, send };
 }
 
 interface AssistantChatProps {
@@ -186,14 +205,19 @@ interface AssistantChatProps {
 }
 
 export default function AssistantChat({ conversation, inputRef }: AssistantChatProps) {
-  const { messages, streaming, failed, expired, send } = conversation;
+  const { messages, streaming, failed, expired, status, replyStarted, send } = conversation;
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+
+  // 17.5a: a known status shows its text under the last bubble; before any
+  // text or known status the dots pulse. An unknown step keeps the dots.
+  const statusLine = status === null ? null : statusText(status);
+  const showDots = streaming && !replyStarted && statusLine === null;
 
   useEffect(() => {
     // jsdom has no scrollIntoView, hence the optional call.
     endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages, failed]);
+  }, [messages, failed, statusLine, showDots]);
 
   function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -235,6 +259,24 @@ export default function AssistantChat({ conversation, inputRef }: AssistantChatP
             ))}
           </ul>
         ) : null}
+        <div role="status" className="self-start text-zinc-500 dark:text-zinc-400">
+          {showDots ? (
+            <span
+              data-testid="assistant-typing-dots"
+              aria-hidden="true"
+              className="flex gap-1 rounded-lg bg-zinc-100 px-3 py-3 dark:bg-zinc-800"
+            >
+              {[0, 150, 300].map((delay) => (
+                <span
+                  key={delay}
+                  className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-400"
+                  style={{ animationDelay: `${delay}ms` }}
+                />
+              ))}
+            </span>
+          ) : null}
+          {statusLine !== null ? <span className="text-xs">{statusLine}</span> : null}
+        </div>
         {failed ? (
           <p role="alert" className="text-zinc-600 dark:text-zinc-400">
             {NEUTRAL_ERROR}
