@@ -18,8 +18,11 @@
  *   before any text or known status.
  * - Proposal and unknown events are ignored, history cards show their text
  *   only and empty messages are skipped until 17.6.
- * - Any failure (an `error` event, a refusal before the stream, a stream
- *   ending without `done`) shows one neutral line until 17.5.
+ * - Any other ending (an `error` event, a refusal before the stream, a lost
+ *   connection, a stream ending without `done`) shows its 17.5b table row:
+ *   text, "Спробувати ще раз" where offered, and the "book it yourself"
+ *   link where offered (lib/assistant/failure.ts). Retry resends the last
+ *   customer text without a second bubble and replaces the partial reply.
  * - The request is aborted on unmount.
  */
 
@@ -33,14 +36,17 @@ import {
   type Ref,
 } from "react";
 
+import Link from "next/link";
+
+import { ApiError } from "@/lib/api/errors";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
+import { failureFor, type Failure, type FailureCause } from "@/lib/assistant/failure";
 import { clearSessionId, readSessionId, storeSessionId } from "@/lib/assistant/sessionId";
 import { statusText } from "@/lib/assistant/statusText";
 
 const GREETING =
   "Вітаю! Я допоможу дізнатися ціни, обрати послугу і знайти вільний час у нашому салоні. Що Вас цікавить?";
 const EXPIRED_NOTICE = "Попередня розмова завершилась";
-const NEUTRAL_ERROR = "Не вдалося отримати відповідь. Спробуйте ще раз.";
 
 // Same limit as the backend serializer (ai_assistant/serializers.py).
 const MAX_MESSAGE_LENGTH = 2000;
@@ -54,8 +60,8 @@ export interface ChatMessage {
 export interface AssistantConversation {
   messages: ChatMessage[];
   streaming: boolean;
-  /** The last reply failed; shows the neutral line. */
-  failed: boolean;
+  /** How the last reply failed (17.5b table row), or null. */
+  failure: Failure | null;
   /** A stored conversation had expired; shows the notice. */
   expired: boolean;
   /** At least one stored turn: the stripe's live dot (block A). */
@@ -68,12 +74,14 @@ export interface AssistantConversation {
   /** The streaming reply has its first text. */
   replyStarted: boolean;
   send: (text: string) => void;
+  /** Resends the last customer text after a failure that offers retry. */
+  retry: () => void;
 }
 
 export function useAssistantConversation(slug: string): AssistantConversation {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [expired, setExpired] = useState(false);
   const [hasConversation, setHasConversation] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -82,6 +90,9 @@ export function useAssistantConversation(slug: string): AssistantConversation {
   const streamingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const nextIdRef = useRef(0);
+  // The last customer text and the reply bubble of the last turn, for retry.
+  const lastTextRef = useRef<string | null>(null);
+  const replyIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     const stored = readSessionId();
@@ -123,22 +134,22 @@ export function useAssistantConversation(slug: string): AssistantConversation {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const send = useCallback(
-    (raw: string) => {
-      const text = raw.trim();
-      if (text === "" || streamingRef.current) {
-        return;
-      }
-      const userId = nextIdRef.current++;
+  /**
+   * Runs one turn for `text`, whose customer bubble is already shown. The
+   * reply streams into a new bubble; a failure is described by its cause
+   * and turned into the 17.5b table row by failureFor.
+   */
+  const runTurn = useCallback(
+    (text: string) => {
       const replyId = nextIdRef.current++;
+      replyIdRef.current = replyId;
       const controller = new AbortController();
       abortRef.current = controller;
       streamingRef.current = true;
       setStreaming(true);
-      setFailed(false);
+      setFailure(null);
       setStatus(null);
       setReplyStarted(false);
-      setMessages((current) => [...current, { id: userId, role: "user", content: text }]);
 
       function showReply(content: string) {
         setMessages((current) =>
@@ -150,6 +161,8 @@ export function useAssistantConversation(slug: string): AssistantConversation {
 
       void (async () => {
         let done = false;
+        let replyText = "";
+        let cause: FailureCause | null = null;
         try {
           const reply = await sendAssistantMessage(
             slug,
@@ -157,7 +170,6 @@ export function useAssistantConversation(slug: string): AssistantConversation {
             sessionIdRef.current,
             controller.signal,
           );
-          let replyText = "";
           for await (const event of reply.events) {
             if (event.type === "text") {
               replyText += event.text;
@@ -175,12 +187,25 @@ export function useAssistantConversation(slug: string): AssistantConversation {
               setHasConversation(true);
               break;
             } else if (event.type === "error") {
+              cause = { kind: "event", code: event.code, textReceived: replyText !== "" };
               break;
             }
             // proposal and unknown events: ignored until 17.6.
           }
-        } catch {
-          // A refusal, a network failure or a broken stream: handled below.
+          if (!done && cause === null) {
+            cause = { kind: "no_done", textReceived: replyText !== "" };
+          }
+        } catch (error) {
+          if (error instanceof ApiError) {
+            cause = { kind: "api", status: error.status, code: error.code };
+          } else if (error instanceof TypeError) {
+            // fetch or the stream read failed: the connection was lost,
+            // whether or not text had begun.
+            cause = { kind: "network" };
+          } else {
+            // A malformed stream line: the reply broke off.
+            cause = { kind: "no_done", textReceived: replyText !== "" };
+          }
         }
         if (controller.signal.aborted) {
           return;
@@ -188,15 +213,51 @@ export function useAssistantConversation(slug: string): AssistantConversation {
         streamingRef.current = false;
         setStreaming(false);
         setStatus(null);
-        if (!done) {
-          setFailed(true);
+        if (!done && cause !== null) {
+          setFailure(failureFor(cause));
         }
       })();
     },
     [slug],
   );
 
-  return { messages, streaming, failed, expired, hasConversation, status, replyStarted, send };
+  const send = useCallback(
+    (raw: string) => {
+      const text = raw.trim();
+      if (text === "" || streamingRef.current) {
+        return;
+      }
+      lastTextRef.current = text;
+      const userId = nextIdRef.current++;
+      setMessages((current) => [...current, { id: userId, role: "user", content: text }]);
+      runTurn(text);
+    },
+    [runTurn],
+  );
+
+  // 17.5b: resend the last customer text, without a second customer bubble;
+  // the partial reply of the failed turn (never stored) is replaced.
+  const retry = useCallback(() => {
+    const text = lastTextRef.current;
+    if (text === null || streamingRef.current) {
+      return;
+    }
+    const partialId = replyIdRef.current;
+    setMessages((current) => current.filter((message) => message.id !== partialId));
+    runTurn(text);
+  }, [runTurn]);
+
+  return {
+    messages,
+    streaming,
+    failure,
+    expired,
+    hasConversation,
+    status,
+    replyStarted,
+    send,
+    retry,
+  };
 }
 
 interface AssistantChatProps {
@@ -205,7 +266,8 @@ interface AssistantChatProps {
 }
 
 export default function AssistantChat({ conversation, inputRef }: AssistantChatProps) {
-  const { messages, streaming, failed, expired, status, replyStarted, send } = conversation;
+  const { messages, streaming, failure, expired, status, replyStarted, send, retry } =
+    conversation;
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -217,7 +279,7 @@ export default function AssistantChat({ conversation, inputRef }: AssistantChatP
   useEffect(() => {
     // jsdom has no scrollIntoView, hence the optional call.
     endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages, failed, statusLine, showDots]);
+  }, [messages, failure, statusLine, showDots]);
 
   function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -277,10 +339,27 @@ export default function AssistantChat({ conversation, inputRef }: AssistantChatP
           ) : null}
           {statusLine !== null ? <span className="text-xs">{statusLine}</span> : null}
         </div>
-        {failed ? (
-          <p role="alert" className="text-zinc-600 dark:text-zinc-400">
-            {NEUTRAL_ERROR}
-          </p>
+        {failure !== null ? (
+          <div
+            role="status"
+            className="flex flex-col items-start gap-2 text-zinc-600 dark:text-zinc-400"
+          >
+            <p>{failure.text}</p>
+            {failure.retry ? (
+              <button
+                type="button"
+                onClick={retry}
+                className="min-h-11 rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
+              >
+                Спробувати ще раз
+              </button>
+            ) : null}
+            {failure.link !== null ? (
+              <Link href={failure.link.href} className="underline">
+                {failure.link.label}
+              </Link>
+            ) : null}
+          </div>
         ) : null}
         <div ref={endRef} />
       </div>

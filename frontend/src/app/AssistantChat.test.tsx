@@ -198,6 +198,8 @@ describe("AssistantChat sending", () => {
   it.each([
     {
       name: "error_event",
+      // 17.5b table: text had begun, so the reply was cut off.
+      text: "Відповідь обірвалась. Спробуйте ще раз.",
       arrange: () => {
         const channel = replyWith();
         return () => {
@@ -211,6 +213,7 @@ describe("AssistantChat sending", () => {
     },
     {
       name: "api_error_before_stream",
+      text: "Зараз у мене багато співрозмовниць. Спробуйте, будь ласка, за хвилинку 🤗",
       arrange: () => {
         mockedSend.mockRejectedValueOnce(
           new ApiError(503, "assistant_busy", "The assistant is busy."),
@@ -220,6 +223,7 @@ describe("AssistantChat sending", () => {
     },
     {
       name: "stream_ends_without_done",
+      text: "Відповідь обірвалась. Спробуйте ще раз.",
       arrange: () => {
         const channel = replyWith();
         return () => {
@@ -229,15 +233,15 @@ describe("AssistantChat sending", () => {
       },
     },
   ])(
-    "test_failed_reply_stores_no_id_shows_the_neutral_line_and_enables_input_($name)",
-    async ({ arrange }) => {
+    "test_failed_reply_stores_no_id_shows_its_table_text_and_enables_input_($name)",
+    async ({ arrange, text }) => {
       const finish = arrange();
       const { user } = renderChat();
       await send(user, "Привіт");
 
       finish();
 
-      expect(await screen.findByText(NEUTRAL_ERROR)).toBeInTheDocument();
+      expect(await screen.findByText(text)).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: INPUT })).toBeEnabled();
       expect(mockedStore).not.toHaveBeenCalled();
     },
@@ -452,5 +456,284 @@ describe("AssistantChat statuses", () => {
     expect(screen.queryByTestId(DOTS)).not.toBeInTheDocument();
     expect(screen.queryByText(CHECKING)).not.toBeInTheDocument();
     expect(screen.queryByText("Дивлюся послуги…")).not.toBeInTheDocument();
+  });
+});
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.5b and its table.
+describe("AssistantChat errors and retry", () => {
+  const RETRY = "Спробувати ще раз";
+  const BOOK_YOURSELF = "Записатись самостійно";
+  const BUSY = "Зараз у мене багато співрозмовниць. Спробуйте, будь ласка, за хвилинку 🤗";
+  const NETWORK = "Схоже, зник зв'язок. Перевірте інтернет і спробуйте ще раз.";
+  const CUT_OFF = "Відповідь обірвалась. Спробуйте ще раз.";
+  const NOTHING_ARRIVED =
+    "Ой, щось пішло не так, і я не встиг відповісти. Спробуйте, будь ласка, ще раз.";
+
+  /** Like eventChannel, plus fail(): the stream read rejects mid-stream. */
+  function failingChannel() {
+    const buffer: AssistantEvent[] = [];
+    let ended = false;
+    let failure: unknown = null;
+    let wake: (() => void) | null = null;
+    function notify() {
+      wake?.();
+      wake = null;
+    }
+    async function* events(): AsyncGenerator<AssistantEvent> {
+      while (true) {
+        if (buffer.length > 0) {
+          yield buffer.shift() as AssistantEvent;
+          continue;
+        }
+        if (failure !== null) {
+          throw failure;
+        }
+        if (ended) {
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+    }
+    return {
+      events: events(),
+      push(...items: AssistantEvent[]) {
+        buffer.push(...items);
+        notify();
+      },
+      end() {
+        ended = true;
+        notify();
+      },
+      fail(error: unknown) {
+        failure = error;
+        notify();
+      },
+    };
+  }
+
+  function failWithEvents(...items: AssistantEvent[]) {
+    const channel = failingChannel();
+    mockedSend.mockResolvedValueOnce({ sessionId: "server-id", events: channel.events });
+    channel.push(...items);
+    channel.end();
+  }
+
+  it.each([
+    {
+      name: "busy",
+      arrange: () =>
+        mockedSend.mockRejectedValueOnce(new ApiError(503, "assistant_busy", "Busy")),
+      text: BUSY,
+      retry: true,
+      link: false,
+    },
+    {
+      name: "throttled",
+      arrange: () => mockedSend.mockRejectedValueOnce(new ApiError(429, "throttled", "Slow")),
+      text: "Ви пишете швидше, ніж я встигаю думати 😅 Зачекайте, будь ласка, хвилинку.",
+      retry: true,
+      link: false,
+    },
+    {
+      name: "daily_limit",
+      arrange: () =>
+        mockedSend.mockRejectedValueOnce(new ApiError(429, "assistant_daily_limit", "Limit")),
+      text: "Я сьогодні наговорився досхочу і пішов на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:",
+      retry: false,
+      link: true,
+    },
+    {
+      name: "identifier_blocked",
+      arrange: () => failWithEvents({ type: "error", code: "assistant_identifier_blocked" }),
+      text: "На жаль, зараз я не можу відповісти. Записатися можна через форму на сайті.",
+      retry: false,
+      link: true,
+    },
+    {
+      name: "network",
+      arrange: () => mockedSend.mockRejectedValueOnce(new TypeError("Failed to fetch")),
+      text: NETWORK,
+      retry: true,
+      link: false,
+    },
+    {
+      name: "cut_off_after_text",
+      arrange: () =>
+        failWithEvents(
+          { type: "text", text: "Ось що я знайш" },
+          { type: "error", code: "assistant_provider_error" },
+        ),
+      text: CUT_OFF,
+      retry: true,
+      link: false,
+    },
+    {
+      name: "nothing_arrived",
+      arrange: () => failWithEvents({ type: "error", code: "assistant_turn_limit" }),
+      text: NOTHING_ARRIVED,
+      retry: true,
+      link: false,
+    },
+    {
+      name: "not_found",
+      arrange: () => mockedSend.mockRejectedValueOnce(new ApiError(404, "not_found", "Gone")),
+      text: "Асистент зараз недоступний. Записатися можна через форму на сайті.",
+      retry: false,
+      link: true,
+    },
+    {
+      name: "invalid",
+      arrange: () => mockedSend.mockRejectedValueOnce(new ApiError(400, "invalid", "Bad")),
+      text: NOTHING_ARRIVED,
+      retry: false,
+      link: false,
+    },
+  ])(
+    "test_table_row_shows_its_text_retry_and_link_($name)",
+    async ({ arrange, text, retry, link }) => {
+      arrange();
+      const { user } = renderChat();
+
+      await send(user, "Привіт");
+
+      expect(await screen.findByText(text)).toBeInTheDocument();
+      if (retry) {
+        expect(screen.getByRole("button", { name: RETRY })).toBeInTheDocument();
+      } else {
+        expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
+      }
+      if (link) {
+        expect(screen.getByRole("link", { name: BOOK_YOURSELF })).toHaveAttribute(
+          "href",
+          "/services",
+        );
+      } else {
+        expect(screen.queryByRole("link", { name: BOOK_YOURSELF })).not.toBeInTheDocument();
+      }
+      expect(screen.queryByText(NEUTRAL_ERROR)).not.toBeInTheDocument();
+    },
+  );
+
+  it("test_network_failure_after_text_shows_the_network_text", async () => {
+    const channel = failingChannel();
+    mockedSend.mockResolvedValueOnce({ sessionId: "server-id", events: channel.events });
+    const { user } = renderChat();
+    await send(user, "Привіт");
+
+    channel.push({ type: "text", text: "Ось що я знайш" });
+    await screen.findByText("Ось що я знайш");
+    channel.fail(new TypeError("network error"));
+
+    expect(await screen.findByText(NETWORK)).toBeInTheDocument();
+    expect(screen.queryByText(CUT_OFF)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: RETRY })).toBeInTheDocument();
+  });
+
+  it("test_retry_resends_the_same_text_without_a_second_customer_bubble", async () => {
+    mockedSend.mockRejectedValueOnce(new ApiError(503, "assistant_busy", "Busy"));
+    const retried = replyWith("server-id");
+    const { user } = renderChat();
+    await send(user, "Скільки коштує манікюр?");
+    await screen.findByText(BUSY);
+
+    await user.click(screen.getByRole("button", { name: RETRY }));
+    retried.push({ type: "text", text: "Від 500 грн." }, { type: "done" });
+    retried.end();
+
+    expect(await screen.findByText("Від 500 грн.")).toBeInTheDocument();
+    expect(mockedSend).toHaveBeenCalledTimes(2);
+    expect(mockedSend).toHaveBeenLastCalledWith(
+      "bella-demo",
+      "Скільки коштує манікюр?",
+      null,
+      expect.any(AbortSignal),
+    );
+    expect(screen.getAllByText("Скільки коштує манікюр?")).toHaveLength(1);
+    expect(screen.queryByText(BUSY)).not.toBeInTheDocument();
+  });
+
+  it("test_retry_uses_the_stored_id_and_replaces_the_partial_reply", async () => {
+    mockedRead.mockReturnValue("stored-id");
+    mockedHistory.mockResolvedValueOnce([
+      { role: "user", content: "Привіт" },
+      { role: "assistant", content: "Вітаю!" },
+    ]);
+    const { user } = renderChat();
+    await screen.findByText("Вітаю!");
+    failWithEvents(
+      { type: "text", text: "Ось що я знайш" },
+      { type: "error", code: "assistant_provider_error" },
+    );
+    await send(user, "Що є на суботу?");
+    await screen.findByText(CUT_OFF);
+    expect(screen.getByText("Ось що я знайш")).toBeInTheDocument();
+
+    const retried = replyWith("stored-id");
+    await user.click(screen.getByRole("button", { name: RETRY }));
+    retried.push({ type: "text", text: "У суботу є 10:00 і 12:30." }, { type: "done" });
+    retried.end();
+
+    expect(await screen.findByText("У суботу є 10:00 і 12:30.")).toBeInTheDocument();
+    expect(mockedSend).toHaveBeenLastCalledWith(
+      "bella-demo",
+      "Що є на суботу?",
+      "stored-id",
+      expect.any(AbortSignal),
+    );
+    expect(screen.queryByText("Ось що я знайш")).not.toBeInTheDocument();
+    // History (2) + the customer message + the new reply.
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+  });
+
+  it("test_second_failure_and_second_retry_resend_the_same_text_once", async () => {
+    mockedSend.mockRejectedValueOnce(new ApiError(503, "assistant_busy", "Busy"));
+    const { user } = renderChat();
+    await send(user, "Скільки коштує манікюр?");
+    await screen.findByText(BUSY);
+
+    failWithEvents(
+      { type: "text", text: "Ось що я знайш" },
+      { type: "error", code: "assistant_provider_error" },
+    );
+    await user.click(screen.getByRole("button", { name: RETRY }));
+    await screen.findByText(CUT_OFF);
+
+    const retried = replyWith("server-id");
+    await user.click(screen.getByRole("button", { name: RETRY }));
+    retried.push({ type: "text", text: "Від 500 грн." }, { type: "done" });
+    retried.end();
+
+    expect(await screen.findByText("Від 500 грн.")).toBeInTheDocument();
+    expect(mockedSend).toHaveBeenCalledTimes(3);
+    expect(mockedSend).toHaveBeenLastCalledWith(
+      "bella-demo",
+      "Скільки коштує манікюр?",
+      null,
+      expect.any(AbortSignal),
+    );
+    expect(screen.getAllByText("Скільки коштує манікюр?")).toHaveLength(1);
+    expect(screen.queryByText("Ось що я знайш")).not.toBeInTheDocument();
+    expect(screen.queryByText(CUT_OFF)).not.toBeInTheDocument();
+  });
+
+  it("test_input_stays_enabled_and_a_new_message_hides_the_retry_button", async () => {
+    mockedSend.mockRejectedValueOnce(new ApiError(503, "assistant_busy", "Busy"));
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await screen.findByText(BUSY);
+
+    expect(screen.getByRole("textbox", { name: INPUT })).toBeEnabled();
+    expect(screen.getByRole("button", { name: RETRY })).toBeInTheDocument();
+
+    const next = replyWith("server-id");
+    await send(user, "Інше питання");
+
+    expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
+    next.push({ type: "text", text: "Слухаю" }, { type: "done" });
+    next.end();
+    await screen.findByText("Слухаю");
+    expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
   });
 });
