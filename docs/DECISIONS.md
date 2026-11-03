@@ -7933,7 +7933,47 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
 - **17.4 Conversation:** sending, streamed reply, session id stored after
   `done`, history after reload, expired-conversation notice, input
   disabled while streaming; a real browser check that
-  `X-Assistant-Session` is allowed and exposed by CORS.
+  `X-Assistant-Session` is allowed and exposed by CORS. Details decided
+  03.11.2026, after the 17.4 recon, in two sub-steps:
+  - **17.4a Conversation engine (no UI).**
+    - `lib/assistant/sessionId.ts`: `sessionStorage` key
+      `"salonhub:assistant-session"`; read, store and clear, each wrapped
+      in try/catch. Shared with the 17.6 booking forms.
+    - `lib/assistant/readNdjson.ts`: an async generator over the response
+      body. Handles partial lines across chunks, multi-byte characters
+      split across chunks and a final line without a newline; blank lines
+      are skipped; malformed JSON raises. Tested in the node environment.
+    - `lib/assistant/assistantApi.ts`: sending a message uses `?lang=uk`,
+      a JSON body, `X-Assistant-Session` only when an id exists,
+      `credentials: "omit"` and the base `NEXT_PUBLIC_API_URL`. It returns
+      the response's session id and the event stream; a non-OK response
+      becomes `ApiError`. The history GET sends the header, and makes no
+      request when there is no id.
+  - **17.4b Chat in the widget.**
+    - The loader passes the salon slug to the widget as a prop.
+    - **Greeting** shown by the widget before the first message: "Вітаю!
+      Я допоможу дізнатися ціни, обрати послугу і знайти вільний час у
+      нашому салоні. Що Вас цікавить?" Because the widget greets, the
+      model must stop greeting in its first reply: the instructions
+      change in 17.8.
+    - **History** loads once per page load when a session id is stored
+      (not on first open), so the stripe dot is accurate. The dot means
+      the conversation has at least one stored turn. A stored id plus
+      empty history shows "Попередня розмова завершилась" above the
+      greeting and drops the id.
+    - **Text only in 17.4:** status, proposal and unknown events are
+      ignored; history messages with a card show their text only, and
+      messages with empty content are skipped until 17.6.
+    - **Input** is disabled while streaming; the client limit is 2000
+      characters; blank text is not sent.
+    - **Errors** (an `error` event, a refusal before the stream, a stream
+      ending without `done`) end streaming and show one neutral line,
+      "Не вдалося отримати відповідь. Спробуйте ще раз.", until 17.5 adds
+      the real texts. The id is stored only after `done`.
+    - The stream keeps reading while minimised or on an excluded page; it
+      is aborted on unmount. Focus on open goes to the input.
+    - The real-browser CORS check (plan from the 17.4 recon) is recorded
+      in this entry when done.
 - **17.5 Statuses and errors:** status texts, busy, limits, cut-off reply,
   blocked customer, "Спробувати ще раз".
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
@@ -7942,6 +7982,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   tooltips.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
+  - Remove the model's greeting from the instructions (the widget greets,
+    see 17.4b) and rewrite the Stage 16 rule "Greet only in the first
+    reply" (~6890) in place.
 - **17.9 Voice input:** recon, backend endpoint, widget button.
 - **17.10 Stage 17 closure.**
 
