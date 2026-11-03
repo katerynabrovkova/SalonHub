@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +21,8 @@ vi.mock("@/lib/assistant/sessionId", () => ({
 import { ApiError } from "@/lib/api/errors";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
 import { clearSessionId, readSessionId, storeSessionId } from "@/lib/assistant/sessionId";
+
+import { formatPrice } from "@/lib/pricing/formatPrice";
 
 import AssistantChat, { useAssistantConversation } from "./AssistantChat";
 
@@ -247,7 +249,8 @@ describe("AssistantChat sending", () => {
     },
   );
 
-  it("test_status_proposal_and_unknown_events_are_ignored", async () => {
+  // Valid proposals are covered by "AssistantChat proposal card" (17.6a).
+  it("test_status_and_unknown_events_do_not_change_the_reply_text", async () => {
     const channel = replyWith("server-id");
     const { user } = renderChat();
     await send(user, "Привіт");
@@ -255,7 +258,6 @@ describe("AssistantChat sending", () => {
     channel.push(
       { type: "text", text: "Ось " },
       { type: "status", step: "check_availability" },
-      { type: "proposal", card: { service: { id: 1, name: "Манікюр" }, slots: [] } },
       { type: "mystery" },
       { type: "text", text: "варіанти" },
       { type: "done" },
@@ -287,23 +289,25 @@ describe("AssistantChat history", () => {
     expect(mockedHistory).toHaveBeenCalledWith("bella-demo", "stored-id");
   });
 
-  it("test_history_card_shows_text_only_and_empty_messages_are_skipped", async () => {
+  // 17.4b (empty messages skipped) and 17.6a (a malformed stored card is
+  // dropped; its message's text still shows). Valid cards: see "AssistantChat
+  // proposal card".
+  it("test_history_skips_empty_messages_and_drops_a_malformed_card_keeping_its_text", async () => {
+    const malformedCard = { service: { id: 7 }, slots: "soon" };
     mockedRead.mockReturnValue("stored-id");
     mockedHistory.mockResolvedValueOnce([
       { role: "user", content: "Манікюр на суботу?" },
-      {
-        role: "assistant",
-        content: "Є вільний час.",
-        card: { service: { id: 1, name: "Манікюр" }, slots: ["2026-11-07T10:00:00+02:00"] },
-      },
-      { role: "assistant", content: "", card: { service: { id: 1, name: "Манікюр" }, slots: [] } },
+      { role: "assistant", content: "Ось варіант", card: malformedCard },
+      { role: "assistant", content: "" },
+      { role: "assistant", content: "", card: malformedCard },
     ]);
     renderChat();
 
-    expect(await screen.findByText("Є вільний час.")).toBeInTheDocument();
-    const items = screen.getAllByRole("listitem");
-    expect(items).toHaveLength(2);
-    expect(within(items[1]).queryByText(/Манікюр/)).not.toBeInTheDocument();
+    expect(await screen.findByText("Ось варіант")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.queryByRole("link", { name: "Обрати час" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Інший день або час" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Записатися на/ })).not.toBeInTheDocument();
   });
 
   it("test_stored_id_with_empty_history_shows_the_expired_notice_and_clears_the_id", async () => {
@@ -735,5 +739,202 @@ describe("AssistantChat errors and retry", () => {
     next.end();
     await screen.findByText("Слухаю");
     expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
+  });
+});
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.6a; card shape from
+// backend/ai_assistant/proposals.py. 2026-11-07 is a Saturday.
+describe("AssistantChat proposal card", () => {
+  const SERVICE_NAME = "Манікюр з покриттям";
+  const OTHER_TIME = "Інший день або час";
+  const CHOOSE_TIME = "Обрати час";
+  const SAT_10 = "2026-11-07T10:00:00+02:00";
+  const SAT_1230 = "2026-11-07T12:30:00+02:00";
+  const SUN_11 = "2026-11-08T11:00:00+02:00";
+  const BASE = "/booking?entry=service&service=7&specialist=3";
+
+  function proposalCard(overrides: Record<string, unknown> = {}) {
+    return {
+      service: { id: 7, name: SERVICE_NAME, duration_minutes: 60 },
+      specialist: { id: 3, name: "Олена", average_rating: 4.8, review_count: 21 },
+      price: "500.00",
+      deposit: "100.00",
+      due_at_visit: "400.00",
+      currency: "UAH",
+      slots: [SAT_10, SAT_1230],
+      ...overrides,
+    };
+  }
+
+  /** formatPrice output uses U+00A0; match any whitespace run instead. */
+  function textPattern(text: string): RegExp {
+    const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^${escaped.replace(/\s+/g, "\\s+")}$`);
+  }
+
+  function slotHref(slot: string, specialist = "3"): string {
+    return `/booking?entry=service&service=7&specialist=${specialist}&step=4&slot=${encodeURIComponent(slot)}`;
+  }
+
+  /** Renders a restored conversation whose assistant message has the card. */
+  async function renderCard(card: unknown, content = "") {
+    mockedRead.mockReturnValue("stored-id");
+    mockedHistory.mockResolvedValueOnce([
+      { role: "user", content: "Запишіть мене на манікюр" },
+      { role: "assistant", content, card },
+    ]);
+    const result = renderChat();
+    await screen.findByText("Запишіть мене на манікюр");
+    return result;
+  }
+
+  it("test_specialist_line_shows_rating_and_review_count_plural", async () => {
+    await renderCard(proposalCard());
+
+    expect(await screen.findByText(SERVICE_NAME)).toBeInTheDocument();
+    expect(screen.getByText("Олена · ★ 4.8 (21 відгук) · 60 хв")).toBeInTheDocument();
+  });
+
+  it("test_specialist_line_without_reviews", async () => {
+    await renderCard(
+      proposalCard({
+        specialist: { id: 3, name: "Олена", average_rating: null, review_count: 0 },
+      }),
+    );
+
+    expect(await screen.findByText("Олена · Немає відгуків · 60 хв")).toBeInTheDocument();
+  });
+
+  it("test_specialist_line_for_any_specialist", async () => {
+    await renderCard(proposalCard({ specialist: "any" }));
+
+    expect(await screen.findByText("Будь-який майстер · 60 хв")).toBeInTheDocument();
+  });
+
+  it("test_money_lines_with_the_deposit_bold", async () => {
+    await renderCard(proposalCard());
+
+    const price = await screen.findByText(textPattern(`Вартість ${formatPrice("500.00", "UAH")}`));
+    const deposit = screen.getByText(
+      textPattern(`Передоплата онлайн ${formatPrice("100.00", "UAH")}`),
+    );
+    const due = screen.getByText(textPattern(`На місці ${formatPrice("400.00", "UAH")}`));
+    expect(deposit.closest("strong, b")).not.toBeNull();
+    expect(price.closest("strong, b")).toBeNull();
+    expect(due.closest("strong, b")).toBeNull();
+  });
+
+  it("test_slots_on_one_day_show_a_date_line_and_time_chips", async () => {
+    await renderCard(proposalCard({ slots: [SAT_10, SAT_1230] }));
+
+    expect(await screen.findByText("Сб, 7 листопада")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "10:00" })).toHaveAttribute("href", slotHref(SAT_10));
+    expect(screen.getByRole("link", { name: "12:30" })).toHaveAttribute(
+      "href",
+      slotHref(SAT_1230),
+    );
+    expect(screen.getByRole("link", { name: OTHER_TIME })).toHaveAttribute(
+      "href",
+      `${BASE}&step=3&date_from=2026-11-07`,
+    );
+    expect(screen.queryByRole("link", { name: CHOOSE_TIME })).not.toBeInTheDocument();
+  });
+
+  it("test_slots_on_different_days_show_the_day_on_each_chip", async () => {
+    await renderCard(proposalCard({ slots: [SAT_10, SUN_11] }));
+
+    expect(await screen.findByRole("link", { name: "Сб 10:00" })).toHaveAttribute(
+      "href",
+      slotHref(SAT_10),
+    );
+    expect(screen.getByRole("link", { name: "Нд 11:00" })).toHaveAttribute(
+      "href",
+      slotHref(SUN_11),
+    );
+    expect(screen.queryByText("Сб, 7 листопада")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: OTHER_TIME })).toHaveAttribute(
+      "href",
+      `${BASE}&step=3&date_from=2026-11-07`,
+    );
+  });
+
+  it("test_one_slot_shows_one_booking_button", async () => {
+    await renderCard(proposalCard({ slots: [SAT_10] }));
+
+    expect(
+      await screen.findByRole("link", { name: "Записатися на 7 листопада, 10:00" }),
+    ).toHaveAttribute("href", slotHref(SAT_10));
+    expect(screen.queryByRole("link", { name: "10:00" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: OTHER_TIME })).toHaveAttribute(
+      "href",
+      `${BASE}&step=3&date_from=2026-11-07`,
+    );
+  });
+
+  it("test_no_slots_show_only_choose_time", async () => {
+    await renderCard(proposalCard({ specialist: "any", slots: [] }));
+
+    expect(await screen.findByRole("link", { name: CHOOSE_TIME })).toHaveAttribute(
+      "href",
+      "/booking?entry=service&service=7&specialist=any&step=3",
+    );
+    expect(screen.queryByRole("link", { name: OTHER_TIME })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Записатися на/ })).not.toBeInTheDocument();
+  });
+
+  it("test_live_proposal_without_text_shows_the_card", async () => {
+    const channel = replyWith("server-id");
+    const { user } = renderChat();
+    await send(user, "Запишіть мене");
+
+    channel.push(
+      { type: "proposal", card: proposalCard({ slots: [SAT_10] }) },
+      { type: "done" },
+    );
+    channel.end();
+
+    expect(await screen.findByText(SERVICE_NAME)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Записатися на 7 листопада, 10:00" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("test_history_message_with_empty_content_and_a_card_shows_the_card", async () => {
+    await renderCard(proposalCard(), "");
+
+    expect(await screen.findByText(SERVICE_NAME)).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("test_history_message_with_text_and_a_card_shows_both", async () => {
+    await renderCard(proposalCard(), "Ось вільний час:");
+
+    expect(await screen.findByText(SERVICE_NAME)).toBeInTheDocument();
+    expect(screen.getByText("Ось вільний час:")).toBeInTheDocument();
+  });
+
+  // A malformed history card: merged into the "AssistantChat history" test
+  // test_history_skips_empty_messages_and_drops_a_malformed_card_keeping_its_text.
+
+  it("test_retry_removes_the_failed_turn_card", async () => {
+    const failed = replyWith("server-id");
+    const { user } = renderChat();
+    await send(user, "Запишіть мене");
+    failed.push(
+      { type: "text", text: "Ось варіант" },
+      { type: "proposal", card: proposalCard({ slots: [SAT_10] }) },
+      { type: "error", code: "assistant_provider_error" },
+    );
+    failed.end();
+    await screen.findByText(SERVICE_NAME);
+
+    const retried = replyWith("server-id");
+    await user.click(screen.getByRole("button", { name: "Спробувати ще раз" }));
+    retried.push({ type: "text", text: "Спробуйте інший день" }, { type: "done" });
+    retried.end();
+
+    expect(await screen.findByText("Спробуйте інший день")).toBeInTheDocument();
+    expect(screen.queryByText(SERVICE_NAME)).not.toBeInTheDocument();
   });
 });

@@ -190,6 +190,15 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
     setMode("collapsed");
   }
 
+  // 17.6a / block B: after a card link click the phone chat minimises so
+  // the booking form is visible. Focus is left alone (not moved to the
+  // stripe): the page is changing under it. Desktop stays as it was.
+  function handleCardNavigate() {
+    if (!isDesktop) {
+      setMode("collapsed");
+    }
+  }
+
   function trapTab(event: KeyboardEvent<HTMLDivElement>) {
     const focusable = Array.from(
       event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE),
@@ -296,7 +305,11 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
           </button>
         </div>
       </header>
-      <AssistantChat conversation={conversation} inputRef={inputRef} />
+      <AssistantChat
+        conversation={conversation}
+        inputRef={inputRef}
+        onCardNavigate={handleCardNavigate}
+      />
     </div>
   );
 }

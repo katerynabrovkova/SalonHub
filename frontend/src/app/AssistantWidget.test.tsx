@@ -463,6 +463,59 @@ describe("AssistantWidget conversation", () => {
     expect(document.activeElement).not.toBe(input);
   });
 
+  // docs/DECISIONS.md § "Stage 17 sub-step order", 17.6a, and block B:
+  // after a card click the phone chat minimises so the booking form shows,
+  // without moving focus to the stripe; desktop stays as it was.
+  async function openCardReply(user: ReturnType<typeof userEvent.setup>) {
+    const channel = eventChannel();
+    vi.mocked(sendAssistantMessage).mockResolvedValueOnce({
+      sessionId: "server-id",
+      events: channel.events,
+    });
+    await openChat(user);
+    await user.type(screen.getByRole("textbox", { name: INPUT }), "Запишіть мене");
+    await user.click(screen.getByRole("button", { name: "Надіслати" }));
+    channel.push(
+      {
+        type: "proposal",
+        card: {
+          service: { id: 7, name: "Манікюр з покриттям", duration_minutes: 60 },
+          specialist: "any",
+          price: "500.00",
+          deposit: "100.00",
+          due_at_visit: "400.00",
+          currency: "UAH",
+          slots: [],
+        },
+      },
+      { type: "done" },
+    );
+    channel.end();
+    return screen.findByRole("link", { name: "Обрати час" });
+  }
+
+  it("test_phone_card_click_minimises_without_focusing_the_stripe", async () => {
+    viewportWidth = PHONE_WIDTH;
+    const { user } = renderChatWidget();
+    const link = await openCardReply(user);
+
+    await user.click(link);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const stripe = screen.getByRole("button", { name: STRIPE });
+    expect(document.activeElement).not.toBe(stripe);
+  });
+
+  it("test_desktop_card_click_keeps_the_chat_open", async () => {
+    viewportWidth = DESKTOP_WIDTH;
+    const { user } = renderChatWidget();
+    const link = await openCardReply(user);
+
+    await user.click(link);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   it("test_messages_survive_minimise_and_reopen", async () => {
     const { user } = renderChatWidget();
     await openChat(user);

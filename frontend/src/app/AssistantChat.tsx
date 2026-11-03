@@ -16,8 +16,10 @@
  * - Statuses (17.5a): the last status event's step is kept until the next
  *   text or the end of the turn; the view shows its text, or pulsing dots
  *   before any text or known status.
- * - Proposal and unknown events are ignored, history cards show their text
- *   only and empty messages are skipped until 17.6.
+ * - Proposal cards (17.6a) come from the live `proposal` event and from
+ *   history; a message is kept when it has text or a well-formed card, and
+ *   a malformed card is dropped. Retry removes the failed turn's bubble,
+ *   card included. Unknown events are ignored.
  * - Any other ending (an `error` event, a refusal before the stream, a lost
  *   connection, a stream ending without `done`) shows its 17.5b table row:
  *   text, "Спробувати ще раз" where offered, and the "book it yourself"
@@ -41,8 +43,11 @@ import Link from "next/link";
 import { ApiError } from "@/lib/api/errors";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
 import { failureFor, type Failure, type FailureCause } from "@/lib/assistant/failure";
+import { parseProposalCard, type ProposalCard } from "@/lib/assistant/proposalCard";
 import { clearSessionId, readSessionId, storeSessionId } from "@/lib/assistant/sessionId";
 import { statusText } from "@/lib/assistant/statusText";
+
+import AssistantProposalCard from "./AssistantProposalCard";
 
 const GREETING =
   "Вітаю! Я допоможу дізнатися ціни, обрати послугу і знайти вільний час у нашому салоні. Що Вас цікавить?";
@@ -55,6 +60,8 @@ export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
+  /** The assistant message's proposal card (17.6a), if any. */
+  card?: ProposalCard;
 }
 
 export interface AssistantConversation {
@@ -112,13 +119,21 @@ export function useAssistantConversation(slug: string): AssistantConversation {
           setExpired(true);
           return;
         }
-        const restored = history
-          .filter((message) => message.content !== "")
-          .map((message) => ({
+        // A message is kept when it has text or a well-formed card; a
+        // malformed stored card is dropped, its text still shows (17.6a).
+        const restored: ChatMessage[] = [];
+        for (const message of history) {
+          const card = parseProposalCard(message.card);
+          if (message.content === "" && card === null) {
+            continue;
+          }
+          restored.push({
             id: nextIdRef.current++,
             role: message.role,
             content: message.content,
-          }));
+            ...(card === null ? {} : { card }),
+          });
+        }
         // Prepended: a message sent before history arrived stays last.
         setMessages((current) => [...restored, ...current]);
         setHasConversation(true);
@@ -151,12 +166,17 @@ export function useAssistantConversation(slug: string): AssistantConversation {
       setStatus(null);
       setReplyStarted(false);
 
-      function showReply(content: string) {
+      // The reply bubble is created by its first text or its card.
+      function updateReply(patch: Partial<ChatMessage>) {
         setMessages((current) =>
           current.some((message) => message.id === replyId)
-            ? current.map((message) => (message.id === replyId ? { ...message, content } : message))
-            : [...current, { id: replyId, role: "assistant", content }],
+            ? current.map((message) => (message.id === replyId ? { ...message, ...patch } : message))
+            : [...current, { id: replyId, role: "assistant", content: "", ...patch }],
         );
+      }
+
+      function showReply(content: string) {
+        updateReply({ content });
       }
 
       void (async () => {
@@ -190,7 +210,13 @@ export function useAssistantConversation(slug: string): AssistantConversation {
               cause = { kind: "event", code: event.code, textReceived: replyText !== "" };
               break;
             }
-            // proposal and unknown events: ignored until 17.6.
+            if (event.type === "proposal") {
+              const card = parseProposalCard(event.card);
+              if (card !== null) {
+                updateReply({ card });
+              }
+            }
+            // Unknown events are ignored.
           }
           if (!done && cause === null) {
             cause = { kind: "no_done", textReceived: replyText !== "" };
@@ -263,9 +289,15 @@ export function useAssistantConversation(slug: string): AssistantConversation {
 interface AssistantChatProps {
   conversation: AssistantConversation;
   inputRef?: Ref<HTMLTextAreaElement>;
+  /** Runs on every card link click (the widget minimises on a phone). */
+  onCardNavigate?: () => void;
 }
 
-export default function AssistantChat({ conversation, inputRef }: AssistantChatProps) {
+export default function AssistantChat({
+  conversation,
+  inputRef,
+  onCardNavigate,
+}: AssistantChatProps) {
   const { messages, streaming, failure, expired, status, replyStarted, send, retry } =
     conversation;
   const [draft, setDraft] = useState("");
@@ -316,7 +348,14 @@ export default function AssistantChat({ conversation, inputRef }: AssistantChatP
                     : "max-w-[85%] self-start whitespace-pre-wrap rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800"
                 }
               >
-                {message.content}
+                {message.card === undefined ? (
+                  message.content
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {message.content !== "" ? <p>{message.content}</p> : null}
+                    <AssistantProposalCard card={message.card} onNavigate={onCardNavigate} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
