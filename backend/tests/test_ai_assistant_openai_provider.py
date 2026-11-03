@@ -49,6 +49,7 @@ from openai.types.responses import (
     Response,
     ResponseCompletedEvent,
     ResponseCreatedEvent,
+    ResponseError,
     ResponseErrorEvent,
     ResponseFailedEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
@@ -628,3 +629,91 @@ def test_stream_makes_no_network_call(monkeypatch):
     client = _FakeClient([_text("Hi"), _item_done(call), _completed(output=[call])])
     events = list(_stream(_provider(client)))
     assert isinstance(events[-1], Finish)
+
+
+# --- Stage 17.2c: blocked safety_identifier ---------------------------------
+
+# The phrase OpenAI's safety-checks guide documents, in mixed case: the
+# check is case-insensitive.
+BLOCKED_MESSAGE = "Identifier Blocked: this safety identifier has no model access."
+
+
+def _blocked_error_class() -> type[AssistantProviderError]:
+    """Looked up per test, so a missing class fails each test on its own."""
+    return importlib.import_module("core.exceptions").AssistantIdentifierBlockedError
+
+
+def _status_error(status: int, *, message: str, code: str | None) -> openai.APIStatusError:
+    response = httpx2.Response(status, request=_REQUEST)
+    body = {"message": message, "type": "invalid_request_error", "param": None, "code": code}
+    if status == 403:
+        return openai.PermissionDeniedError(message, response=response, body=body)
+    return openai.BadRequestError(message, response=response, body=body)
+
+
+@pytest.mark.parametrize("status", [400, 403])
+def test_blocked_phrase_at_create_raises_identifier_blocked_error(status):
+    client = _FakeClient(raise_on_create=_status_error(status, message=BLOCKED_MESSAGE, code=None))
+    _events, exc = _collect(_stream(_provider(client)))
+    assert isinstance(exc, _blocked_error_class())
+
+
+def test_identifier_blocked_code_at_create_raises_identifier_blocked_error():
+    error = _status_error(400, message="Request rejected.", code="identifier_blocked")
+    client = _FakeClient(raise_on_create=error)
+    _events, exc = _collect(_stream(_provider(client)))
+    assert isinstance(exc, _blocked_error_class())
+
+
+def test_blocked_phrase_mid_stream_raises_identifier_blocked_error():
+    error = openai.APIError(BLOCKED_MESSAGE, _REQUEST, body=None)
+    client = _FakeClient([_text("Part"), error])
+    events, exc = _collect(_stream(_provider(client)))
+    assert events == [TextDelta(text="Part")]
+    assert isinstance(exc, _blocked_error_class())
+
+
+def test_blocked_phrase_in_error_event_raises_identifier_blocked_error():
+    event = ResponseErrorEvent(
+        type="error", message=BLOCKED_MESSAGE, code=None, param=None, sequence_number=3
+    )
+    client = _FakeClient([event])
+    _events, exc = _collect(_stream(_provider(client)))
+    assert isinstance(exc, _blocked_error_class())
+
+
+def test_blocked_phrase_in_response_failed_raises_identifier_blocked_error():
+    failed = _response(status="failed").model_copy(
+        update={"error": ResponseError(code="invalid_prompt", message=BLOCKED_MESSAGE)}
+    )
+    client = _FakeClient(
+        [ResponseFailedEvent(type="response.failed", response=failed, sequence_number=3)]
+    )
+    _events, exc = _collect(_stream(_provider(client)))
+    assert isinstance(exc, _blocked_error_class())
+
+
+def test_provider_error_at_create_does_not_chain_the_sdk_exception():
+    error = _status_error(400, message="provider-secret-message", code="invalid_value")
+    client = _FakeClient(raise_on_create=error)
+    _events, exc = _collect(_stream(_provider(client)))
+    assert isinstance(exc, AssistantProviderError)
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+
+
+def test_provider_error_mid_stream_does_not_chain_the_sdk_exception():
+    error = openai.APIError("provider-secret-message", _REQUEST, body=None)
+    client = _FakeClient([_text("Part"), error])
+    events, exc = _collect(_stream(_provider(client)))
+    assert events == [TextDelta(text="Part")]
+    assert isinstance(exc, AssistantProviderError)
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+
+
+def test_other_400_stays_a_plain_provider_error():
+    error = _status_error(400, message="Invalid value for 'input'.", code="invalid_value")
+    client = _FakeClient(raise_on_create=error)
+    _events, exc = _collect(_stream(_provider(client)))
+    assert type(exc) is AssistantProviderError

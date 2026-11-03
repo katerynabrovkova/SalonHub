@@ -13,6 +13,7 @@ autouse `_assistant_redis` fixture.
 """
 
 import datetime as dt
+import importlib
 import json
 import logging
 from typing import Any
@@ -569,3 +570,17 @@ def test_history_with_another_salons_id_is_empty_even_with_a_card(enabled_salon,
     assert response.status_code == 200
     assert response.json() == {"messages": []}
     assert _history(other_salon, session_id)[-1]["card"] == CARD
+
+
+# --- Stage 17.2c: blocked safety_identifier ---------------------------------
+
+
+def test_blocked_identifier_error_event_carries_its_own_code(monkeypatch, enabled_salon):
+    blocked = importlib.import_module("core.exceptions").AssistantIdentifierBlockedError()
+    _use_provider(monkeypatch, [[TextDelta(text="Let me "), blocked]])
+
+    response = _post(enabled_salon.slug, {"message": "Hello"})
+    events = _events(response)
+
+    assert events[-1] == {"type": "error", "code": "assistant_identifier_blocked"}
+    assert _history(enabled_salon, response[SESSION_HEADER]) == []

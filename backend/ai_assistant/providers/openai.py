@@ -21,6 +21,12 @@ stream that ends without `response.completed`. Nothing else is wrapped.
 The SDK stream is always closed, including when the caller closes this
 generator (deadline or customer gone). Nothing is logged.
 
+Stage 17.2c: an SDK error, an `error` event or `response.failed` whose
+message contains "identifier blocked" (any case) or whose code is
+`identifier_blocked` becomes AssistantIdentifierBlockedError instead. The
+error carries the HTTP status and error code when the provider sent them,
+never the message text.
+
 Imported only by get_assistant_provider() when ASSISTANT_PROVIDER is
 "openai", so the SDK is never loaded with the mock.
 """
@@ -57,7 +63,7 @@ from ai_assistant.providers.base import (
     ToolCall,
     ToolSpec,
 )
-from core.exceptions import AssistantProviderError
+from core.exceptions import AssistantIdentifierBlockedError, AssistantProviderError
 
 # Constants, not settings: deadline (80 s) + TIMEOUT_SECONDS must stay under
 # the stream cap's 120-second stale cutoff (docs/DECISIONS.md § "Sub-step
@@ -65,6 +71,29 @@ from core.exceptions import AssistantProviderError
 TIMEOUT_SECONDS = 30
 MAX_RETRIES = 0
 MAX_OUTPUT_TOKENS = 2048
+
+# A blocked safety_identifier (docs/DECISIONS.md § "Stage 17 sub-step
+# order", 17.2c): the phrase from OpenAI's safety-checks guide, and an
+# undocumented code. Best effort: OpenAI documents no status or code.
+BLOCKED_PHRASE = "identifier blocked"
+BLOCKED_CODE = "identifier_blocked"
+
+
+def _provider_error(
+    *, message: str | None, code: str | None, http_status: int | None = None
+) -> AssistantProviderError:
+    """The error for a provider failure; the message is only inspected,
+    never kept."""
+    blocked = code == BLOCKED_CODE or (message is not None and BLOCKED_PHRASE in message.lower())
+    error_class = AssistantIdentifierBlockedError if blocked else AssistantProviderError
+    return error_class(http_status=http_status, error_code=code)
+
+
+def _from_sdk_error(exc: openai.OpenAIError) -> AssistantProviderError:
+    if not isinstance(exc, openai.APIError):
+        return AssistantProviderError()
+    http_status = exc.status_code if isinstance(exc, openai.APIStatusError) else None
+    return _provider_error(message=exc.message, code=exc.code, http_status=http_status)
 
 
 def _input_items(messages: Sequence[ChatMessage]) -> list[dict[str, Any]]:
@@ -147,7 +176,14 @@ def _translate(sdk_events: Iterable[ResponseStreamEvent]) -> Iterator[ProviderEv
         elif isinstance(event, ResponseCompletedEvent):
             yield _finish(event)
             return
-        elif isinstance(event, ResponseErrorEvent | ResponseFailedEvent | ResponseIncompleteEvent):
+        elif isinstance(event, ResponseErrorEvent):
+            raise _provider_error(message=event.message, code=event.code)
+        elif isinstance(event, ResponseFailedEvent):
+            error = event.response.error
+            raise _provider_error(
+                message=error.message if error else None, code=error.code if error else None
+            )
+        elif isinstance(event, ResponseIncompleteEvent):
             raise AssistantProviderError()
     # The turn must end with Finish.
     raise AssistantProviderError()
@@ -171,6 +207,7 @@ class OpenAIAssistantProvider(AssistantProvider):
     ) -> Iterator[ProviderEvent]:
         # Our items and tools are plain dicts in the documented shapes; the
         # casts only meet the SDK's TypedDict parameter types.
+        error: AssistantProviderError | None = None
         try:
             sdk_stream = self._client.responses.create(
                 model=settings.ASSISTANT_OPENAI_MODEL,
@@ -186,12 +223,18 @@ class OpenAIAssistantProvider(AssistantProvider):
                 max_output_tokens=MAX_OUTPUT_TOKENS,
                 safety_identifier=safety_identifier,
             )
+        # Raised after the except block, so neither __cause__ nor __context__
+        # holds the SDK exception and its provider message text (Stage 17.2c).
         except openai.OpenAIError as exc:
-            raise AssistantProviderError() from exc
+            error = _from_sdk_error(exc)
+        if error is not None:
+            raise error
         try:
             yield from _translate(sdk_stream)
         except openai.OpenAIError as exc:
-            raise AssistantProviderError() from exc
+            error = _from_sdk_error(exc)
         finally:
             # Also runs on GeneratorExit, so the vendor stops generating.
             sdk_stream.close()
+        if error is not None:
+            raise error

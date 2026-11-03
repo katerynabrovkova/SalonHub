@@ -39,6 +39,12 @@ Sub-step 10d (docs/DECISIONS.md § "Sub-step 10d details"): every tool call
 also gets one INFO line on the `ai_assistant.orchestrator.tools` logger
 with the salon id, tool name, outcome and counts, never text or argument
 values.
+
+Stage 17.2c (docs/DECISIONS.md § "Stage 17 sub-step order", 17.2c): a
+blocked `safety_identifier` (AssistantIdentifierBlockedError) ends the turn
+with `assistant_identifier_blocked` and the log outcome
+`identifier_blocked`. For every provider error the log line also carries
+`http_status=<n|none> error_code=<code|none>`, never the provider's message.
 """
 
 import datetime as dt
@@ -63,7 +69,7 @@ from ai_assistant.providers.base import (
     ToolSpec,
 )
 from ai_assistant.session_store import append_turn, load_history
-from core.exceptions import AssistantProviderError
+from core.exceptions import AssistantIdentifierBlockedError, AssistantProviderError
 from tenants.models import Salon
 
 logger = logging.getLogger(__name__)
@@ -149,6 +155,14 @@ def _log_tool_call(salon: Salon, call: ToolCall, result: dict[str, Any]) -> None
     )
 
 
+def _provider_error_fields(exc: AssistantProviderError) -> str:
+    """The provider's HTTP status and error code for the turn log line;
+    "none" when the provider sent none. Never the message text."""
+    http_status = "none" if exc.http_status is None else exc.http_status
+    error_code = "none" if exc.error_code is None else exc.error_code
+    return f" http_status={http_status} error_code={error_code}"
+
+
 class _DeadlineExceeded(Exception):
     """The customer message ran past DEADLINE_SECONDS."""
 
@@ -185,6 +199,7 @@ def run_turn(
     output_tokens = 0
     provider_calls = 0
     outcome = "error"
+    error_fields = ""
     reply_parts: list[str] = []
     card: dict[str, Any] | None = None
     try:
@@ -276,8 +291,13 @@ def run_turn(
                         tool_call_id=call.id,
                     )
                 )
-    except AssistantProviderError:
+    except AssistantIdentifierBlockedError as exc:
+        outcome = "identifier_blocked"
+        error_fields = _provider_error_fields(exc)
+        yield {"type": "error", "code": "assistant_identifier_blocked"}
+    except AssistantProviderError as exc:
         outcome = "provider_error"
+        error_fields = _provider_error_fields(exc)
         yield {"type": "error", "code": "assistant_provider_error"}
     except _DeadlineExceeded:
         # Its own log outcome; the client sees an ordinary provider error.
@@ -290,11 +310,12 @@ def run_turn(
     finally:
         logger.info(
             "assistant turn: salon_id=%s outcome=%s provider_calls=%d "
-            "input_tokens=%d output_tokens=%d latency_ms=%d",
+            "input_tokens=%d output_tokens=%d latency_ms=%d%s",
             salon.id,
             outcome,
             provider_calls,
             input_tokens,
             output_tokens,
             (monotonic() - started) * 1000,
+            error_fields,
         )

@@ -19,13 +19,17 @@ seconds; exactly 80 is still in time.
 """
 
 import datetime as dt
+import importlib
 import json
 import logging
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import httpx2
+import openai
 import pytest
+from openai.types.responses import ResponseErrorEvent
 
 from ai_assistant import orchestrator as orchestrator_module
 from ai_assistant import tools as tools_module
@@ -42,6 +46,7 @@ from ai_assistant.providers.base import (
     ToolSpec,
 )
 from ai_assistant.providers.mock import MockAssistantProvider, ScriptTurn
+from ai_assistant.providers.openai import OpenAIAssistantProvider
 from ai_assistant.session_store import append_turn, load_history
 from catalog.models import Service, ServiceCategory
 from core.exceptions import AssistantProviderError
@@ -1066,3 +1071,118 @@ def test_failed_turn_stores_no_card(tbilisi_salon, service, specialist, _assista
         item for key in _assistant_redis.keys("*") for item in _assistant_redis.lrange(key, 0, -1)
     )
     assert b'"card"' not in stored
+
+
+# --- Stage 17.2c: blocked safety_identifier ---------------------------------
+
+PROVIDER_MESSAGE = "provider-secret-message-4b1e"
+_OPENAI_REQUEST = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+
+
+def _blocked_error() -> AssistantProviderError:
+    """Looked up per test, so a missing class fails each test on its own."""
+    return importlib.import_module("core.exceptions").AssistantIdentifierBlockedError()
+
+
+def _orchestrator_records(caplog) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == "ai_assistant.orchestrator"]
+
+
+def test_blocked_identifier_ends_with_its_own_code_logs_its_outcome_and_stores_nothing(
+    caplog, tbilisi_salon, _assistant_redis
+):
+    with caplog.at_level(logging.INFO):
+        events, _provider = _run(tbilisi_salon, [[TextDelta(text="Let me "), _blocked_error()]])
+
+    assert events == [
+        {"type": "text", "text": "Let me "},
+        {"type": "error", "code": "assistant_identifier_blocked"},
+    ]
+    [record] = _orchestrator_records(caplog)
+    assert "outcome=identifier_blocked " in record.getMessage()
+    assert _history(tbilisi_salon) == []
+    assert list(_assistant_redis.scan_iter()) == []
+
+
+class _FakeSdkStream:
+    def __init__(self, events: Sequence[Any]) -> None:
+        self._events = events
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self._events)
+
+    def close(self) -> None:
+        pass
+
+
+class _FakeSdkResponses:
+    def __init__(self, *, raise_on_create: BaseException | None, events: Sequence[Any]) -> None:
+        self._raise_on_create = raise_on_create
+        self._events = events
+
+    def create(self, **kwargs: Any) -> _FakeSdkStream:
+        if self._raise_on_create is not None:
+            raise self._raise_on_create
+        return _FakeSdkStream(self._events)
+
+
+class _FakeSdkClient:
+    def __init__(
+        self, *, raise_on_create: BaseException | None = None, events: Sequence[Any] = ()
+    ) -> None:
+        self.responses = _FakeSdkResponses(raise_on_create=raise_on_create, events=events)
+
+
+def _status_error(status: int, code: str) -> openai.APIStatusError:
+    response = httpx2.Response(status, request=_OPENAI_REQUEST)
+    body = {"message": PROVIDER_MESSAGE, "type": "invalid_request_error", "code": code}
+    if status == 429:
+        return openai.RateLimitError(PROVIDER_MESSAGE, response=response, body=body)
+    return openai.BadRequestError(PROVIDER_MESSAGE, response=response, body=body)
+
+
+@pytest.mark.parametrize(
+    ("client", "expected"),
+    [
+        pytest.param(
+            _FakeSdkClient(raise_on_create=_status_error(400, "invalid_value")),
+            ["http_status=400", "error_code=invalid_value"],
+            id="create_400",
+        ),
+        pytest.param(
+            _FakeSdkClient(raise_on_create=_status_error(429, "rate_limit_exceeded")),
+            ["http_status=429", "error_code=rate_limit_exceeded"],
+            id="create_429",
+        ),
+        pytest.param(
+            _FakeSdkClient(
+                events=[
+                    ResponseErrorEvent(
+                        type="error",
+                        message=PROVIDER_MESSAGE,
+                        code="server_error",
+                        param=None,
+                        sequence_number=1,
+                    )
+                ]
+            ),
+            ["error_code=server_error"],
+            id="error_event",
+        ),
+    ],
+)
+def test_provider_error_logs_status_and_code_but_never_the_message(
+    caplog, tbilisi_salon, client, expected
+):
+    provider = OpenAIAssistantProvider(client=client)
+
+    with caplog.at_level(logging.DEBUG):
+        events = _run_provider(tbilisi_salon, provider)
+
+    assert events[-1] == PROVIDER_ERROR
+    [record] = _orchestrator_records(caplog)
+    line = record.getMessage()
+    assert "outcome=provider_error " in line
+    for part in expected:
+        assert f" {part}" in line
+    assert PROVIDER_MESSAGE not in caplog.text

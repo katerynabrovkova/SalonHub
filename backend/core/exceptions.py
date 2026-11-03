@@ -180,11 +180,31 @@ class AssistantProviderError(DomainError):
     adapters wrap vendor exceptions into it; the orchestrator turns it into
     a client `error` event. 502 Bad Gateway, same reasoning as
     PaymentProviderError.
+
+    Stage 17.2c: `http_status` and `error_code` are the provider's HTTP
+    status and error code when it sent them, so the orchestrator can log
+    them. The provider's message text is never stored here.
     """
 
     code = "assistant_provider_error"
     status_code = status.HTTP_502_BAD_GATEWAY
     default_message = "The assistant provider could not process this request."
+
+    def __init__(self, *, http_status: int | None = None, error_code: str | None = None) -> None:
+        self.http_status = http_status
+        self.error_code = error_code
+        super().__init__()
+
+
+class AssistantIdentifierBlockedError(AssistantProviderError):
+    """
+    docs/DECISIONS.md § "Stage 17 sub-step order", 17.2c: the provider
+    blocked the request's `safety_identifier`. The orchestrator sends its
+    own stream error code, so the widget shows a neutral message and no
+    retry button.
+    """
+
+    code = "assistant_identifier_blocked"
 
 
 class AssistantDailyLimitError(DomainError):
