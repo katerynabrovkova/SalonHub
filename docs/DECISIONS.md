@@ -7949,6 +7949,12 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       the response's session id and the event stream; a non-OK response
       becomes `ApiError`. The history GET sends the header, and makes no
       request when there is no id.
+    - Implemented 03.11.2026. Frontend suite 651 passed; all eight
+      mutations killed (storage key, decode without stream, final line
+      dropped, header for a null id, credentials include, history fetch
+      without an id, non-OK read as a stream, signal not passed). A non-OK
+      history response throws `ApiError`; 17.4b decides how the widget
+      handles it.
   - **17.4b Chat in the widget.**
     - The loader passes the salon slug to the widget as a prop.
     - **Greeting** shown by the widget before the first message: "Вітаю!
