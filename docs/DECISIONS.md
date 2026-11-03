@@ -8035,7 +8035,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       `test_network_failure_after_text_shows_the_network_text`.
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
   form, phone auto-minimise, `source=assistant` in both booking forms.
-  Details decided 03.11.2026, after the 17.6 recon, in three sub-steps:
+  Details decided 03.11.2026, after the 17.6 recon, in four sub-steps:
   - **17.6-pre (decided 03.11.2026):** a shared Ukrainian plural helper
     for review counts, used by `SpecialistCard` (which today always writes
     "відгуків", e.g. "1 відгуків") and by the assistant card.
@@ -8070,6 +8070,18 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - **Known gap:** a step-4 submit for a specialist who no longer
       performs the service shows the form's generic error; rare, not
       handled in 17.6.
+    - Implemented 03.11.2026. Frontend suite 753 passed; all ten
+      mutations killed; two 17.4b tests that M8 showed were passing for
+      the wrong reason were rewritten. Checked by hand with OpenAI on
+      desktop and phone: card content, time to step 4, "Інший день або
+      час" to step 3 from the card's day, "Будь-який майстер", cards after
+      a reload, phone minimise after a card click. Found: clicking another
+      time in a card briefly shows the previous time on step 4 until the
+      new server render arrives; to be fixed in 17.6c, done before 17.6b.
+  - **17.6c Pending state on booking navigation** (found 03.11.2026): a
+    same-route `/booking` navigation keeps the previous page on screen
+    until the new server render arrives; show a pending state instead.
+    Approach decided after its recon. Done before 17.6b.
   - **17.6b Booking source.** Both booking forms read the stored assistant
     session id at submit and send `source` `"assistant"` when one exists;
     otherwise no `source` key (the backend defaults to `direct`). The
