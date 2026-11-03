@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,8 +11,34 @@ vi.mock("next/navigation", () => ({
   usePathname: () => nav.pathname,
 }));
 
+// 17.4b: the widget now holds a conversation. Its engine is mocked at the
+// module boundary; the defaults (no stored id, empty history) make no
+// request, so the 17.3c tests above see the same widget as before.
+vi.mock("@/lib/assistant/assistantApi", () => ({
+  sendAssistantMessage: vi.fn(),
+  getAssistantHistory: vi.fn(),
+}));
+
+vi.mock("@/lib/assistant/sessionId", () => ({
+  readSessionId: vi.fn(),
+  storeSessionId: vi.fn(),
+  clearSessionId: vi.fn(),
+}));
+
 // Imported after the mock above so the mocked module is what the widget sees.
+import type { AssistantEvent } from "@/lib/assistant/assistantApi";
+import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
+import { readSessionId } from "@/lib/assistant/sessionId";
+
 import AssistantWidget from "./AssistantWidget";
+
+beforeEach(() => {
+  vi.mocked(sendAssistantMessage).mockReset();
+  vi.mocked(getAssistantHistory).mockReset();
+  vi.mocked(readSessionId).mockReset();
+  vi.mocked(readSessionId).mockReturnValue(null);
+  vi.mocked(getAssistantHistory).mockResolvedValue([]);
+});
 
 // docs/DECISIONS.md § "Stage 17 sub-step order", 17.3c, and § "Stage 17
 // block A" / "block B". Accessible names of the header buttons come from
@@ -54,7 +80,7 @@ function stubMatchMedia() {
 
 function renderWidget(salonName = "Bella") {
   const user = userEvent.setup();
-  const result = render(<AssistantWidget salonName={salonName} />);
+  const result = render(<AssistantWidget salonName={salonName} slug="bella-demo" />);
   return { user, ...result };
 }
 
@@ -180,7 +206,7 @@ describe("AssistantWidget on a phone", () => {
     render(
       <>
         <button type="button">Кнопка сторінки</button>
-        <AssistantWidget salonName="Bella" />
+        <AssistantWidget salonName="Bella" slug="bella-demo" />
         <a href="/services">Посилання сторінки</a>
       </>,
     );
@@ -274,11 +300,11 @@ describe("AssistantWidget page shift", () => {
     await openPanel(user);
 
     nav.pathname = "/booking/pay";
-    rerender(<AssistantWidget salonName="Bella" />);
+    rerender(<AssistantWidget salonName="Bella" slug="bella-demo" />);
     expect(document.documentElement).not.toHaveAttribute(PANEL_ATTRIBUTE);
 
     nav.pathname = "/booking";
-    rerender(<AssistantWidget salonName="Bella" />);
+    rerender(<AssistantWidget salonName="Bella" slug="bella-demo" />);
     expect(document.documentElement).toHaveAttribute(PANEL_ATTRIBUTE);
   });
 
@@ -298,13 +324,154 @@ describe("AssistantWidget across navigation", () => {
     await openChat(user);
 
     nav.pathname = "/client";
-    rerender(<AssistantWidget salonName="Bella" />);
+    rerender(<AssistantWidget salonName="Bella" slug="bella-demo" />);
     expect(container).toBeEmptyDOMElement();
 
     nav.pathname = "/specialists/12";
-    rerender(<AssistantWidget salonName="Bella" />);
+    rerender(<AssistantWidget salonName="Bella" slug="bella-demo" />);
     expect(screen.getByRole("dialog")).toContainElement(
       screen.getByRole("heading", { name: "Асистент Bella" }),
     );
+  });
+});
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.4b, and § "Stage 17
+// block A": the stripe dot means the conversation has at least one stored
+// turn; the conversation survives minimise; opening focuses the input.
+describe("AssistantWidget conversation", () => {
+  const LIVE_DOT = "assistant-live-dot";
+  const INPUT = "Повідомлення";
+
+  function eventChannel() {
+    const buffer: AssistantEvent[] = [];
+    let ended = false;
+    let wake: (() => void) | null = null;
+    function notify() {
+      wake?.();
+      wake = null;
+    }
+    async function* events(): AsyncGenerator<AssistantEvent> {
+      while (true) {
+        if (buffer.length > 0) {
+          yield buffer.shift() as AssistantEvent;
+          continue;
+        }
+        if (ended) {
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+    }
+    return {
+      events: events(),
+      push(...items: AssistantEvent[]) {
+        buffer.push(...items);
+        notify();
+      },
+      end() {
+        ended = true;
+        notify();
+      },
+    };
+  }
+
+  function renderChatWidget() {
+    const user = userEvent.setup();
+    return { user, ...render(<AssistantWidget salonName="Bella" slug="bella-demo" />) };
+  }
+
+  async function sendAndFinish(user: ReturnType<typeof userEvent.setup>, text: string) {
+    const channel = eventChannel();
+    vi.mocked(sendAssistantMessage).mockResolvedValueOnce({
+      sessionId: "server-id",
+      events: channel.events,
+    });
+    await user.type(screen.getByRole("textbox", { name: INPUT }), text);
+    await user.click(screen.getByRole("button", { name: "Надіслати" }));
+    channel.push({ type: "text", text: "Вітаю!" }, { type: "done" });
+    channel.end();
+    await screen.findByText("Вітаю!");
+  }
+
+  it("test_stripe_shows_the_dot_when_history_has_a_message", async () => {
+    vi.mocked(readSessionId).mockReturnValue("stored-id");
+    vi.mocked(getAssistantHistory).mockResolvedValueOnce([
+      { role: "user", content: "Привіт" },
+      { role: "assistant", content: "Вітаю!" },
+    ]);
+
+    renderChatWidget();
+
+    const stripe = screen.getByRole("button", { name: STRIPE });
+    expect(await within(stripe).findByTestId(LIVE_DOT)).toBeInTheDocument();
+  });
+
+  it("test_stripe_shows_the_dot_after_the_first_successful_reply", async () => {
+    const { user } = renderChatWidget();
+    expect(screen.queryByTestId(LIVE_DOT)).not.toBeInTheDocument();
+    await openChat(user);
+
+    await sendAndFinish(user, "Привіт");
+    await user.click(screen.getByRole("button", { name: MINIMISE }));
+
+    const stripe = screen.getByRole("button", { name: STRIPE });
+    expect(within(stripe).getByTestId(LIVE_DOT)).toBeInTheDocument();
+  });
+
+  it("test_stripe_has_no_dot_without_a_conversation", async () => {
+    renderChatWidget();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByRole("button", { name: STRIPE })).toBeInTheDocument();
+    expect(screen.queryByTestId(LIVE_DOT)).not.toBeInTheDocument();
+  });
+
+  it("test_opening_the_chat_focuses_the_message_input", async () => {
+    const { user } = renderChatWidget();
+
+    await openChat(user);
+
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: INPUT }));
+  });
+
+  // Decided 03.11.2026 (17.4b follow-up): after a reply finishes, focus
+  // returns to the input on desktop only; on a phone the keyboard would
+  // cover the reply.
+  it("test_desktop_focus_returns_to_the_input_after_the_reply", async () => {
+    viewportWidth = DESKTOP_WIDTH;
+    const { user } = renderChatWidget();
+    await openChat(user);
+
+    await sendAndFinish(user, "Привіт");
+
+    const input = screen.getByRole("textbox", { name: INPUT });
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("test_phone_focus_does_not_return_to_the_input_after_the_reply", async () => {
+    viewportWidth = PHONE_WIDTH;
+    const { user } = renderChatWidget();
+    await openChat(user);
+
+    await sendAndFinish(user, "Привіт");
+
+    const input = screen.getByRole("textbox", { name: INPUT });
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it("test_messages_survive_minimise_and_reopen", async () => {
+    const { user } = renderChatWidget();
+    await openChat(user);
+    await sendAndFinish(user, "Скільки коштує манікюр?");
+
+    await user.click(screen.getByRole("button", { name: MINIMISE }));
+    await openChat(user);
+
+    expect(screen.getByText("Скільки коштує манікюр?")).toBeInTheDocument();
+    expect(screen.getByText("Вітаю!")).toBeInTheDocument();
   });
 });

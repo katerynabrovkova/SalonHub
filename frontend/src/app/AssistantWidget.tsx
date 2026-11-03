@@ -17,7 +17,12 @@
  *   page through `data-assistant-panel` on <html> and the matching rule in
  *   globals.css; the attribute exists only while the panel is on screen.
  * - No close button (block B). "Згорнути" and Escape minimise; focus moves
- *   into the chat on open and back to the stripe on minimise.
+ *   to the message input on open (17.4b) and back to the stripe on
+ *   minimise.
+ * - 17.4b: the conversation lives in useAssistantConversation, called here
+ *   rather than in the chat view, so it and a streaming reply survive
+ *   minimise and excluded pages. The stripe shows a dot once the
+ *   conversation has at least one stored turn.
  *
  * Neutral styling only; the look is finished in the design pass.
  */
@@ -34,8 +39,11 @@ import {
 
 import { isAssistantPath } from "@/lib/assistant/isAssistantPath";
 
+import AssistantChat, { useAssistantConversation } from "./AssistantChat";
+
 export interface AssistantWidgetProps {
   salonName: string;
+  slug: string;
 }
 
 type Mode = "collapsed" | "window" | "panel";
@@ -110,8 +118,10 @@ function MinimiseIcon() {
 const HEADER_BUTTON =
   "flex h-11 w-11 items-center justify-center rounded text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
-export default function AssistantWidget({ salonName }: AssistantWidgetProps) {
+export default function AssistantWidget({ salonName, slug }: AssistantWidgetProps) {
   const pathname = usePathname();
+  const conversation = useAssistantConversation(slug);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const isDesktop = useSyncExternalStore(subscribeToDesktop, readDesktop, readDesktopOnServer);
   const [mode, setMode] = useState<Mode>("collapsed");
   const headingId = useId();
@@ -130,12 +140,30 @@ export default function AssistantWidget({ salonName }: AssistantWidgetProps) {
       return;
     }
     if (isOpen) {
-      dialogRef.current?.focus();
+      // The input, unless a reply is streaming (then it is disabled).
+      const input = inputRef.current;
+      if (input !== null && !input.disabled) {
+        input.focus();
+      } else {
+        dialogRef.current?.focus();
+      }
     } else if (returnFocusToStripe.current) {
       returnFocusToStripe.current = false;
       stripeRef.current?.focus();
     }
   }, [shown, isOpen]);
+
+  // After a reply finishes (done or any error), focus goes back to the input
+  // on desktop if the chat is open. Not on a phone: the keyboard would cover
+  // the reply (decided 03.11.2026, 17.4b).
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    const finished = wasStreaming.current && !conversation.streaming;
+    wasStreaming.current = conversation.streaming;
+    if (finished && isDesktop && shown && isOpen) {
+      inputRef.current?.focus();
+    }
+  }, [conversation.streaming, isDesktop, shown, isOpen]);
 
   useEffect(() => {
     if (!inPanel) {
@@ -204,8 +232,15 @@ export default function AssistantWidget({ salonName }: AssistantWidgetProps) {
         onClick={() => setMode("window")}
         className="fixed right-0 top-[60%] z-50 flex h-16 w-11 -translate-y-1/2 items-center justify-end"
       >
-        <span className="flex h-full w-[26px] items-center justify-center rounded-l-lg bg-zinc-900 text-white shadow dark:bg-zinc-100 dark:text-zinc-900">
+        <span className="relative flex h-full w-[26px] items-center justify-center rounded-l-lg bg-zinc-900 text-white shadow dark:bg-zinc-100 dark:text-zinc-900">
           <ChatIcon />
+          {conversation.hasConversation ? (
+            <span
+              data-testid="assistant-live-dot"
+              aria-hidden="true"
+              className="absolute left-1 top-1.5 h-2 w-2 rounded-full bg-emerald-500"
+            />
+          ) : null}
         </span>
       </button>
     );
@@ -261,7 +296,7 @@ export default function AssistantWidget({ salonName }: AssistantWidgetProps) {
           </button>
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto" />
+      <AssistantChat conversation={conversation} inputRef={inputRef} />
     </div>
   );
 }

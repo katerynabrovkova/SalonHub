@@ -35,5 +35,5 @@ export default async function AssistantWidgetLoader() {
     return null;
   }
 
-  return <AssistantWidget salonName={salon.name} />;
+  return <AssistantWidget salonName={salon.name} slug={slug} />;
 }

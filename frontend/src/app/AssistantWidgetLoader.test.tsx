@@ -13,8 +13,10 @@ vi.mock("@/lib/tenants/getSalonInfoPage", () => ({
 }));
 
 vi.mock("./AssistantWidget", () => ({
-  default: ({ salonName }: { salonName: string }) => (
-    <div data-testid="assistant-widget">{salonName}</div>
+  default: ({ salonName, slug }: { salonName: string; slug: string }) => (
+    <div data-testid="assistant-widget" data-slug={slug}>
+      {salonName}
+    </div>
   ),
 }));
 
@@ -83,12 +85,16 @@ describe("AssistantWidgetLoader", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("test_enabled_renders_the_widget_with_the_salon_name", async () => {
+  // docs/DECISIONS.md § "Stage 17 sub-step order", 17.4b: the loader also
+  // passes the salon slug, which the widget needs for the assistant URLs.
+  it("test_enabled_renders_the_widget_with_the_salon_name_and_slug", async () => {
     mockedGetSalonInfoPage.mockResolvedValueOnce(salonInfo({ name: "Bella" }));
 
     await renderLoader();
 
-    expect(screen.getByTestId("assistant-widget")).toHaveTextContent("Bella");
+    const widget = screen.getByTestId("assistant-widget");
+    expect(widget).toHaveTextContent("Bella");
+    expect(widget).toHaveAttribute("data-slug", "bella-demo");
   });
 
   it("test_fetches_salon_info_for_the_slug_in_ukrainian", async () => {
