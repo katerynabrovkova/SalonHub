@@ -8081,7 +8081,28 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   - **17.6c Pending state on booking navigation** (found 03.11.2026): a
     same-route `/booking` navigation keeps the previous page on screen
     until the new server render arrives; show a pending state instead.
-    Approach decided after its recon. Done before 17.6b.
+    Approach decided after its recon. Done before 17.6b. Details decided
+    03.11.2026, after the 17.6c recon:
+    - **Cause:** Next 16 keys a page's loading boundary without search
+      params (`layout-router`, `createRouterCacheKey`), so a same-route
+      `/booking` navigation keeps the old content until the new server
+      render arrives; `loading.tsx` and `template.tsx` cannot fix it.
+    - **Fix:** `app/booking/page.tsx` keeps awaiting `searchParams` and
+      all `notFound()` checks outside, then renders
+      `<Suspense key={serialised search params} fallback={pending block}>`
+      around an async `BookingSteps` component in its own file
+      (`app/booking/BookingSteps.tsx`; a page file may not export anything
+      else) that does the data fetching. The pending block is a neutral
+      "Завантаження…" with `role="status"`, in the style of the existing
+      placeholder blocks; the design pass replaces it with a proper
+      loading state.
+    - **Tests:** the 21 existing page tests switch from `BookingPage` to
+      `BookingSteps` without assertion changes; new unit tests check that
+      the key changes with the search params, the fallback, and that
+      invalid params still call `notFound()` before any `Suspense`. The
+      real behaviour is checked by hand with network throttling.
+    - The gate for 17.6c also runs `npm run build`, because page-export
+      rules are checked only by `next build`.
   - **17.6b Booking source.** Both booking forms read the stored assistant
     session id at submit and send `source` `"assistant"` when one exists;
     otherwise no `source` key (the backend defaults to `direct`). The
