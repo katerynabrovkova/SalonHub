@@ -19,8 +19,27 @@
   }
 }
 
+/* Tailwind v4's preflight dropped the pointer cursor on buttons; restore it
+   for enabled ones (the upgrade guide's recommended base rule). */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Assistant side panel (docs/DECISIONS.md § "Stage 17 sub-step order",
+   17.3c): at lg and above the open panel shifts the page instead of covering
+   it. AssistantWidget.tsx sets the attribute only while the panel is on
+   screen; the padding matches the panel's 440 px width. */
+@media (min-width: 1024px) {
+  html[data-assistant-panel] body {
+    padding-right: 440px;
+  }
 }
