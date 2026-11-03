@@ -8035,6 +8035,41 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       `test_network_failure_after_text_shows_the_network_text`.
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
   form, phone auto-minimise, `source=assistant` in both booking forms.
+  Details decided 03.11.2026, after the 17.6 recon, in two sub-steps:
+  - **17.6-pre (decided 03.11.2026):** a shared Ukrainian plural helper
+    for review counts, used by `SpecialistCard` (which today always writes
+    "відгуків", e.g. "1 відгуків") and by the assistant card.
+  - **17.6a Card in the chat.**
+    - **Specialist line:** "<name> · ★ <rating> (<count> <reviews>) ·
+      <minutes> хв"; with no reviews "<name> · Немає відгуків · <minutes>
+      хв"; for "any" "Будь-який майстер · <minutes> хв". The word follows
+      Ukrainian plural rules via `Intl.PluralRules("uk")`: "відгук" (1, 21,
+      31…), "відгуки" (2-4, 22-24…), "відгуків" (0, 5-20, 25-30…, and
+      11-14).
+    - **Money:** three lines "Вартість <price>", "Передоплата онлайн
+      <deposit>" (bold) and "На місці <due>", formatted with
+      `formatPrice`.
+    - **Slots:** 2-3 on one day show a date line ("Сб, 1 листопада") and
+      time chips; on different days each chip shows the day ("Сб 10:00");
+      1 slot shows one button "Записатися на 1 листопада, 10:00"; with 1-3
+      slots also "Інший день або час"; with 0 slots only "Обрати час".
+    - **Links** use `entry=service` with `specialist=<id|any>`: a time goes
+      to step 4 with the encoded slot; "Інший день або час" goes to step 3
+      with `date_from` = the first shown slot's day; "Обрати час" goes to
+      step 3 without `date_from`.
+    - **Sources:** cards come from the live `proposal` event and from
+      history (messages with text or a card are kept); a malformed history
+      card is ignored without breaking its message; retry removes the
+      failed turn's card.
+    - **After a card click** on a phone the chat minimises without moving
+      focus to the stripe; on desktop it stays as it was.
+    - **Known gap:** a step-4 submit for a specialist who no longer
+      performs the service shows the form's generic error; rare, not
+      handled in 17.6.
+  - **17.6b Booking source.** Both booking forms read the stored assistant
+    session id at submit and send `source` `"assistant"` when one exists;
+    otherwise no `source` key (the backend defaults to `direct`). The
+    session id itself is never sent to the booking API.
 - **17.7 Interface details:** AI notice, starter questions, desktop button
   tooltips.
   - A visually hidden "Асистент пише…" inside the status container while
