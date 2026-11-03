@@ -128,7 +128,7 @@ describe("SpecialistDetailPage", () => {
     const element = await SpecialistDetailPage({ params: paramsOf("7") });
     render(element);
 
-    expect(screen.getByText("★ 4.5 (2 відгуків)")).toBeInTheDocument();
+    expect(screen.getByText("★ 4.5 (2 відгуки)")).toBeInTheDocument();
   });
 
   it("test_rating_line_without_reviews", async () => {

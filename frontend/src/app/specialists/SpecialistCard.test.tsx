@@ -17,6 +17,18 @@ function specialist(overrides: Partial<SpecialistCardData> = {}): SpecialistCard
 }
 
 describe("SpecialistCard", () => {
+  // docs/DECISIONS.md § "Stage 17 sub-step order", 17.6-pre.
+  it("test_one_review_uses_the_singular", () => {
+    render(
+      <SpecialistCard
+        specialist={specialist({ average_rating: 5, review_count: 1 })}
+        variant="grid"
+      />,
+    );
+
+    expect(screen.getByText("★ 5.0 (1 відгук)")).toBeInTheDocument();
+  });
+
   it("test_renders_photo_when_present", () => {
     render(<SpecialistCard specialist={specialist()} variant="grid" />);
 
@@ -50,7 +62,7 @@ describe("SpecialistCard", () => {
       />,
     );
 
-    expect(screen.getByText("★ 4.5 (2 відгуків)")).toBeInTheDocument();
+    expect(screen.getByText("★ 4.5 (2 відгуки)")).toBeInTheDocument();
   });
 
   it("test_rating_line_without_reviews", () => {

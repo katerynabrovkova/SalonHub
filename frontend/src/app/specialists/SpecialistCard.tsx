@@ -27,6 +27,7 @@
 import Link from "next/link";
 
 import { initials } from "@/lib/format/initials";
+import { reviewCount } from "@/lib/i18n/reviewCount";
 
 export interface SpecialistCardData {
   /** Required for the "list" variant only (enforced by SpecialistCardProps). */
@@ -49,7 +50,7 @@ function RatingLine({ specialist }: { specialist: SpecialistCardData }) {
   }
   return (
     <p className="text-sm text-zinc-600 dark:text-zinc-400">
-      ★ {specialist.average_rating?.toFixed(1)} ({specialist.review_count} відгуків)
+      ★ {specialist.average_rating?.toFixed(1)} ({reviewCount(specialist.review_count)})
     </p>
   );
 }
