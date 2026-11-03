@@ -8035,10 +8035,14 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       `test_network_failure_after_text_shows_the_network_text`.
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
   form, phone auto-minimise, `source=assistant` in both booking forms.
-  Details decided 03.11.2026, after the 17.6 recon, in two sub-steps:
+  Details decided 03.11.2026, after the 17.6 recon, in three sub-steps:
   - **17.6-pre (decided 03.11.2026):** a shared Ukrainian plural helper
     for review counts, used by `SpecialistCard` (which today always writes
     "відгуків", e.g. "1 відгуків") and by the assistant card.
+    Implemented 03.11.2026. Frontend suite 730 passed; the mutation
+    (always "відгуків") is killed by 8 tests. Two older specialist tests
+    had pinned the wrong form "2 відгуків" and were corrected to
+    "2 відгуки".
   - **17.6a Card in the chat.**
     - **Specialist line:** "<name> · ★ <rating> (<count> <reviews>) ·
       <minutes> хв"; with no reviews "<name> · Немає відгуків · <minutes>
