@@ -7905,6 +7905,13 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       (all booking steps are query params). Everything else has no widget,
       including `/booking/pay`, the auth pages, `/client/**` and `/admin`.
       404 pages under an allowed path may show the widget.
+    - Implemented 03.11.2026. Frontend suite 607 passed; all six mutations
+      killed (prefix match on `/booking`, no catch on a failed fetch,
+      widget shown when disabled, no `lang` `uk`, fetch on a null slug,
+      trailing slash accepted). Checked against the running frontend:
+      `/login` on a salon host and on an unknown salon host both return
+      200. `AssistantWidget` is a placeholder that renders nothing until
+      17.3c.
   - **17.3c Widget on screen.**
     - Stripe, small window, side panel and minimise. An empty salon name
       in the header falls back to plain "Асистент".
