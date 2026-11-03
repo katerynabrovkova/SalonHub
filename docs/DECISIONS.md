@@ -7967,6 +7967,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       the conversation has at least one stored turn. A stored id plus
       empty history shows "Попередня розмова завершилась" above the
       greeting and drops the id.
+    - A failed history request (decided 03.11.2026) shows the plain
+      greeting and keeps the stored id; the expired notice appears only
+      when history comes back empty.
     - **Text only in 17.4:** status, proposal and unknown events are
       ignored; history messages with a card show their text only, and
       messages with empty content are skipped until 17.6.
