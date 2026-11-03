@@ -30,6 +30,35 @@ describe("getSalonInfoPage", () => {
     expect(result).toEqual({ currency: "UAH" });
   });
 
+  // docs/DECISIONS.md § "Stage 17 sub-step order", 17.3b: the assistant
+  // widget's loader asks for the interface language so the salon name in
+  // the header matches it.
+  it("test_sends_lang_when_given", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ currency: "UAH" }) as Response);
+
+    await getSalonInfoPage("bella-demo", "uk");
+
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/?lang=uk`);
+  });
+
+  it("test_returns_name_and_assistant_enabled", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        name: "Белла",
+        currency: "UAH",
+        assistant_enabled: true,
+        assistant_starters: [],
+      }) as Response,
+    );
+
+    const result = await getSalonInfoPage("bella-demo", "uk");
+
+    expect(result.name).toBe("Белла");
+    expect(result.assistant_enabled).toBe(true);
+  });
+
   it("test_throws_on_non_ok_response", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: "boom" }, false) as Response);

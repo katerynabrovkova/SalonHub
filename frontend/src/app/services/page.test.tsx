@@ -63,7 +63,11 @@ beforeEach(() => {
   mockedGetServiceCategories.mockReset();
   mockedGetServicesPage.mockReset();
   mockedGetSalonInfoPage.mockReset();
-  mockedGetSalonInfoPage.mockResolvedValue({ currency: "UAH" });
+  mockedGetSalonInfoPage.mockResolvedValue({
+    name: "Bella",
+    currency: "UAH",
+    assistant_enabled: false,
+  });
 
   mockedHeaders.mockResolvedValue({
     get: (name: string) => (name === SALON_SLUG_HEADER ? "bella-demo" : null),
@@ -157,7 +161,11 @@ describe("ServicesPage: category-list / service-grid split", () => {
     // so a passing rendered-price assertion proves the prop actually flows
     // from getSalonInfoPage's result through to the grid, not just that
     // *some* formatted string happens to appear.
-    mockedGetSalonInfoPage.mockResolvedValueOnce({ currency: "USD" });
+    mockedGetSalonInfoPage.mockResolvedValueOnce({
+      name: "Bella",
+      currency: "USD",
+      assistant_enabled: false,
+    });
     mockedGetServicesPage.mockResolvedValueOnce({
       services: [
         {

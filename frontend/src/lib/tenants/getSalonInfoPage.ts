@@ -8,12 +8,22 @@
  */
 
 export interface SalonInfo {
+  // Resolved by the backend for `?lang=` (docs/DECISIONS.md § Stage 11.5
+  // "API language contract"); can be "".
+  name: string;
   currency: string;
+  assistant_enabled: boolean;
 }
 
-export async function getSalonInfoPage(slug: string): Promise<SalonInfo> {
+/**
+ * `lang` is sent as `?lang=` only when given (docs/DECISIONS.md § "Stage 17
+ * sub-step order", 17.3b); without it the URL is unchanged, so the existing
+ * callers keep the backend's default language resolution.
+ */
+export async function getSalonInfoPage(slug: string, lang?: string): Promise<SalonInfo> {
   const apiBase = process.env.INTERNAL_API_URL;
-  const url = `${apiBase}/api/v1/salons/${slug}/`;
+  const base = `${apiBase}/api/v1/salons/${slug}/`;
+  const url = lang === undefined ? base : `${base}?lang=${encodeURIComponent(lang)}`;
 
   const response = await fetch(url);
   if (!response.ok) {

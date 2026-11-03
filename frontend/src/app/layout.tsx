@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 import "./globals.css";
 
+import AssistantWidgetLoader from "./AssistantWidgetLoader";
 import { AuthProvider } from "./AuthContext";
 
 const geistSans = Geist({
@@ -27,6 +29,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <AuthProvider>{children}</AuthProvider>
+        <Suspense fallback={null}>
+          <AssistantWidgetLoader />
+        </Suspense>
       </body>
     </html>
   );

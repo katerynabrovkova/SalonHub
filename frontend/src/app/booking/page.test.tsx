@@ -733,7 +733,11 @@ describe("BookingPage step 2, entry=specialist: fetches and renders services_det
     mockedHeaders.mockReset();
     mockedGetSpecialistDetailPage.mockReset();
     mockedGetSalonInfoPage.mockReset();
-    mockedGetSalonInfoPage.mockResolvedValue({ currency: "UAH" });
+    mockedGetSalonInfoPage.mockResolvedValue({
+      name: "Bella",
+      currency: "UAH",
+      assistant_enabled: false,
+    });
 
     mockedHeaders.mockResolvedValue({
       get: (name: string) => (name === SALON_SLUG_HEADER ? "bella-demo" : null),
@@ -801,7 +805,11 @@ describe("BookingPage step 2, entry=specialist: fetches and renders services_det
     // a passing rendered-price assertion proves the prop actually flows
     // from getSalonInfoPage's result through to the grid, not just that
     // *some* formatted string happens to appear.
-    mockedGetSalonInfoPage.mockResolvedValueOnce({ currency: "USD" });
+    mockedGetSalonInfoPage.mockResolvedValueOnce({
+      name: "Bella",
+      currency: "USD",
+      assistant_enabled: false,
+    });
     mockedGetSpecialistDetailPage.mockResolvedValueOnce(specialistFixture());
 
     const element = await BookingPage({
