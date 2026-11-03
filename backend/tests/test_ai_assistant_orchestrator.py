@@ -933,3 +933,136 @@ def test_unknown_tool_name_emits_no_status(tbilisi_salon):
 
     assert [event for event in events if event["type"] == "status"] == []
     assert "book_now" not in json.dumps(events)
+
+
+# --- Stage 17.2b: cards in history -----------------------------------------
+
+OTHER_SESSION_ID = "orchestrator-other-session-0123456789abcdefghijklmn"
+
+
+def _run_in_session(
+    salon, session_id: str, script: list[ScriptTurn], *, user_text: str = "Hello"
+) -> tuple[list[dict[str, Any]], MockAssistantProvider]:
+    provider = MockAssistantProvider(script)
+    with tenant_context(salon.id):
+        events = list(
+            run_turn(
+                session_id=session_id,
+                user_text=user_text,
+                lang="en",
+                now=NOW,
+                provider=provider,
+                safety_identifier=SAFETY_IDENTIFIER,
+            )
+        )
+    return events, provider
+
+
+def _proposal_script(service, specialist) -> list[ScriptTurn]:
+    return [
+        [_propose_call("call-1", service, specialist), _finish()],
+        [TextDelta(text="Here is a card for you."), _finish()],
+    ]
+
+
+def _proposal_card(events: list[dict[str, Any]]) -> dict[str, Any]:
+    [card] = [event["card"] for event in events if event["type"] == "proposal"]
+    return card
+
+
+def test_proposal_turn_stores_the_card_on_its_assistant_message(tbilisi_salon, service, specialist):
+    _monday_hours(tbilisi_salon, specialist)
+
+    events, _provider = _run(
+        tbilisi_salon, _proposal_script(service, specialist), user_text="Book me in"
+    )
+
+    assert _history(tbilisi_salon) == [
+        {"role": "user", "content": "Book me in"},
+        {"role": "assistant", "content": "Here is a card for you.", "card": _proposal_card(events)},
+    ]
+
+
+def test_next_turn_replays_role_and_content_only_while_the_card_stays_stored(
+    tbilisi_salon, service, specialist
+):
+    _monday_hours(tbilisi_salon, specialist)
+    first_events, _provider = _run(
+        tbilisi_salon, _proposal_script(service, specialist), user_text="Book me in"
+    )
+
+    _events, provider = _run(
+        tbilisi_salon, [[TextDelta(text="You're welcome."), _finish()]], user_text="Thanks"
+    )
+
+    assert provider.calls[0]["messages"] == (
+        ChatMessage(role="user", content="Book me in"),
+        ChatMessage(role="assistant", content="Here is a card for you."),
+        ChatMessage(role="user", content="Thanks"),
+    )
+    assert _history(tbilisi_salon)[1]["card"] == _proposal_card(first_events)
+
+
+def test_card_stays_on_its_own_message_across_two_turns(tbilisi_salon, service, specialist):
+    _monday_hours(tbilisi_salon, specialist)
+    events, _provider = _run(
+        tbilisi_salon, _proposal_script(service, specialist), user_text="Book me in"
+    )
+    _run(tbilisi_salon, [[TextDelta(text="You're welcome."), _finish()]], user_text="Thanks")
+
+    assert _history(tbilisi_salon) == [
+        {"role": "user", "content": "Book me in"},
+        {"role": "assistant", "content": "Here is a card for you.", "card": _proposal_card(events)},
+        {"role": "user", "content": "Thanks"},
+        {"role": "assistant", "content": "You're welcome."},
+    ]
+
+
+def test_two_sessions_in_one_salon_keep_their_own_cards(tbilisi_salon, service, specialist):
+    _monday_hours(tbilisi_salon, specialist)
+    any_call = ToolCall(
+        id="call-1",
+        name="propose_booking",
+        arguments={"service_id": service.id, "specialist_id": "any", "slots": [SLOT_0900]},
+    )
+    first_events, _provider = _run_in_session(
+        tbilisi_salon, SESSION_ID, _proposal_script(service, specialist)
+    )
+    second_events, _provider = _run_in_session(
+        tbilisi_salon,
+        OTHER_SESSION_ID,
+        [[any_call, _finish()], [TextDelta(text="Any specialist works."), _finish()]],
+    )
+    first_card = _proposal_card(first_events)
+    second_card = _proposal_card(second_events)
+    assert first_card["specialist"]["id"] == specialist.id
+    assert second_card["specialist"] == "any"
+
+    with tenant_context(tbilisi_salon.id):
+        assert load_history(SESSION_ID)[1]["card"] == first_card
+        assert load_history(OTHER_SESSION_ID)[1]["card"] == second_card
+
+
+def test_failed_turn_stores_no_card(tbilisi_salon, service, specialist, _assistant_redis):
+    _monday_hours(tbilisi_salon, specialist)
+    with tenant_context(tbilisi_salon.id):
+        append_turn(SESSION_ID, "Do you do manicures?", "Yes, we do.")
+
+    events, _provider = _run(
+        tbilisi_salon,
+        [
+            [_propose_call("call-1", service, specialist), _finish()],
+            [TextDelta(text="Here is "), AssistantProviderError()],
+        ],
+        user_text="Book me in",
+    )
+
+    assert events[-1] == PROVIDER_ERROR
+    assert _history(tbilisi_salon) == [
+        {"role": "user", "content": "Do you do manicures?"},
+        {"role": "assistant", "content": "Yes, we do."},
+    ]
+    stored = b"".join(
+        item for key in _assistant_redis.keys("*") for item in _assistant_redis.lrange(key, 0, -1)
+    )
+    assert b'"card"' not in stored

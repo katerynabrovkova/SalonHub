@@ -9,6 +9,7 @@ fixture, never the dev DB 3.
 """
 
 import hashlib
+import json
 import re
 
 import pytest
@@ -149,3 +150,45 @@ def test_store_client_in_tests_uses_db_15_not_db_3(redis_db) -> None:
     db = redis_db.connection_pool.connection_kwargs["db"]
     assert db == ASSISTANT_TEST_REDIS_DB
     assert db != 3
+
+
+# --- Stage 17.2b: cards in history -----------------------------------------
+
+CARD = {
+    "service": {"id": 7, "name": "Манікюр", "duration_minutes": 60},
+    "specialist": {"id": 3, "name": "Jane", "average_rating": None, "review_count": 0},
+    "price": "500.00",
+    "deposit": "150.00",
+    "due_at_visit": "350.00",
+    "currency": "UAH",
+    "slots": ["2026-08-17T09:00:00+04:00"],
+}
+
+
+def test_assistant_message_saved_with_a_card_round_trips_with_its_card(salon) -> None:
+    with tenant_context(salon.id):
+        append_turn(SESSION_ID, "Book me in", "Here is a card.", card=CARD)
+        history = load_history(SESSION_ID)
+
+    assert history == [
+        {"role": "user", "content": "Book me in"},
+        {"role": "assistant", "content": "Here is a card.", "card": CARD},
+    ]
+
+
+def test_message_with_a_card_cannot_be_read_from_another_salon(salon, other_salon) -> None:
+    with tenant_context(salon.id):
+        append_turn(SESSION_ID, "Book me in", "Here is a card.", card=CARD)
+
+    with tenant_context(other_salon.id):
+        assert load_history(SESSION_ID) == []
+    with tenant_context(salon.id):
+        assert load_history(SESSION_ID)[-1]["card"] == CARD
+
+
+def test_message_saved_without_a_card_has_only_role_and_content(salon, redis_db) -> None:
+    with tenant_context(salon.id):
+        append_turn(SESSION_ID, "Hello", "Hi")
+
+    items = [json.loads(item) for item in redis_db.lrange(_key(salon.id), 0, -1)]
+    assert [set(item) for item in items] == [{"role", "content"}, {"role", "content"}]

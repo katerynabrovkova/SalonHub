@@ -4,15 +4,16 @@ Chat session history in Redis (docs/DECISIONS.md § Stage 16 planning,
 
 One Redis list per session, keyed by the bound salon and the SHA-256 of the
 session id, holding the last 20 messages as JSON `{role, content}` items
-with a sliding 30-minute expiry. The salon comes only from tenant context.
-Message texts are never logged.
+with a sliding 30-minute expiry. An assistant message whose turn produced a
+proposal card also has `card` (Stage 17.2b); the key is absent otherwise.
+The salon comes only from tenant context. Message texts are never logged.
 """
 
 import hashlib
 import json
 import secrets
 from functools import cache
-from typing import cast
+from typing import Any, cast
 
 import redis
 from django.conf import settings
@@ -50,32 +51,38 @@ def _key(session_id: str) -> str:
     return f"assistant:session:{salon_id}:{digest}"
 
 
-def _message(role: str, content: str) -> str:
-    return json.dumps({"role": role, "content": content}, ensure_ascii=False)
+def _message(role: str, content: str, card: dict[str, Any] | None = None) -> str:
+    message: dict[str, Any] = {"role": role, "content": content}
+    if card is not None:
+        message["card"] = card
+    return json.dumps(message, ensure_ascii=False)
 
 
 def new_session_id() -> str:
     return secrets.token_urlsafe(32)
 
 
-def load_history(session_id: str) -> list[dict[str, str]]:
-    """The session's messages, oldest first; [] when unknown or expired.
-    Reading does not extend the expiry: only a new turn does."""
+def load_history(session_id: str) -> list[dict[str, Any]]:
+    """The session's messages, oldest first, each with its stored card if
+    any; [] when unknown or expired. Reading does not extend the expiry:
+    only a new turn does."""
     # redis-py types its commands for the sync and async clients together;
     # the sync client always returns the list itself.
     items = cast(list[bytes], _client().lrange(_key(session_id), 0, -1))
     return [json.loads(item) for item in items]
 
 
-def append_turn(session_id: str, user_text: str, assistant_text: str) -> None:
+def append_turn(
+    session_id: str, user_text: str, assistant_text: str, card: dict[str, Any] | None = None
+) -> None:
     """
-    Stores one customer message with its reply. One MULTI/EXEC transaction,
-    so two overlapping turns of the same session both survive, each pair
-    kept together.
+    Stores one customer message with its reply, and the reply's proposal
+    card when there is one. One MULTI/EXEC transaction, so two overlapping
+    turns of the same session both survive, each pair kept together.
     """
     key = _key(session_id)
     pipeline = _client().pipeline(transaction=True)
-    pipeline.rpush(key, _message("user", user_text), _message("assistant", assistant_text))
+    pipeline.rpush(key, _message("user", user_text), _message("assistant", assistant_text, card))
     pipeline.ltrim(key, -MAX_MESSAGES, -1)
     pipeline.expire(key, SESSION_TTL_SECONDS)
     pipeline.execute()

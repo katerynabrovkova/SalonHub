@@ -13,7 +13,9 @@ binds it (sub-step 7).
 Text deltas are forwarded as they arrive. A status is sent right before each
 known tool runs, with the tool's name as its step (Stage 17.2a). The
 proposal, if any, is sent after all text, right before `done`. The customer
-message and the full reply text are stored only on success. One log line per
+message and the full reply text, with the proposal card if any (Stage
+17.2b), are stored only on success. History replayed to the provider is
+role and content only, so the model never sees stored cards. One log line per
 message carries the salon id, summed token counts, latency and outcome,
 never any text.
 
@@ -101,6 +103,8 @@ def _is_known_tool(name: str) -> bool:
 
 
 def _history_messages(session_id: str) -> list[ChatMessage]:
+    """Stored history as role and content only: a stored card is never
+    replayed to the model (Stage 17.2b)."""
     return [
         ChatMessage(role=cast(Literal["user", "assistant"], item["role"]), content=item["content"])
         for item in load_history(session_id)
@@ -229,7 +233,7 @@ def run_turn(
                         now=now,
                     )
                     yield {"type": "proposal", "card": card}
-                append_turn(session_id, user_text, "".join(reply_parts))
+                append_turn(session_id, user_text, "".join(reply_parts), card)
                 if not history:
                     _count("conversation", record_conversation_started, salon=salon, now=now)
                 outcome = "ok"

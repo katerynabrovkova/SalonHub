@@ -528,3 +528,44 @@ def test_no_tenant_context_is_left_bound_after_the_stream(monkeypatch, enabled_s
     _events(response)
 
     assert get_current_salon_id() is None
+
+
+# --- Stage 17.2b: cards in history -----------------------------------------
+
+CARD = {
+    "service": {"id": 7, "name": "Manicure", "duration_minutes": 60},
+    "specialist": "any",
+    "price": "500.00",
+    "deposit": "150.00",
+    "due_at_visit": "350.00",
+    "currency": "UAH",
+    "slots": ["2026-08-17T09:00:00+04:00"],
+}
+
+
+def test_history_returns_the_card_on_the_assistant_message(enabled_salon):
+    session_id = new_session_id()
+    with tenant_context(enabled_salon.id):
+        append_turn(session_id, "Book me in", "Here is a card.", card=CARD)
+
+    response = _get_history(enabled_salon.slug, session_id=session_id)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "messages": [
+            {"role": "user", "content": "Book me in"},
+            {"role": "assistant", "content": "Here is a card.", "card": CARD},
+        ]
+    }
+
+
+def test_history_with_another_salons_id_is_empty_even_with_a_card(enabled_salon, other_salon):
+    session_id = new_session_id()
+    with tenant_context(other_salon.id):
+        append_turn(session_id, "Book me in", "Here is a card.", card=CARD)
+
+    response = _get_history(enabled_salon.slug, session_id=session_id)
+
+    assert response.status_code == 200
+    assert response.json() == {"messages": []}
+    assert _history(other_salon, session_id)[-1]["card"] == CARD

@@ -513,7 +513,7 @@ def test_counter_failure_is_logged_without_text_and_does_not_break_the_stream(
     with tenant_context(tbilisi_salon.id):
         assert load_history(SESSION_ID) == [
             {"role": "user", "content": USER_TEXT},
-            {"role": "assistant", "content": "Here."},
+            {"role": "assistant", "content": "Here.", "card": events[2]["card"]},
         ]
     failures = [
         record
