@@ -5901,13 +5901,9 @@ and that the closure was open until it was closed on 27.10.2026.
   one salon's traffic never affects another.
 - **Per salon:** 1000 messages per day, counted in the salon's timezone,
   error code `assistant_daily_limit`.
-- **Widget texts (Stage 17)**, both followed by a "go to booking" button
-  where relevant:
-  - `assistant_daily_limit`: "Я сьогодні наговорився досхочу і пішов на
-    заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без
-    мене:"
-  - `assistant_busy`: "Зараз у мене багато співрозмовниць. Спробуйте,
-    будь ласка, за хвилинку 🤗"
+- **Widget texts (Stage 17)** for `assistant_daily_limit` and
+  `assistant_busy`, with their retry and links: see the 17.5b table in
+  "Stage 17 sub-step order".
 
 ### Product decisions (added 21.10.2026)
 
@@ -6422,8 +6418,8 @@ it is not executed against data and never books anything.
 **6c. Orchestrator.**
 
 - **At most 5 model calls per customer message.** When exceeded, an
-  `error` event with code `assistant_turn_limit` (widget text, Stage 17:
-  "Відповідь обірвалась. Спробуйте ще раз.").
+  `error` event with code `assistant_turn_limit` (widget text: see the
+  17.5b table in "Stage 17 sub-step order").
 - **Invalid tool calls.** A tool call with an unknown name, or arguments
   that do not match the tool's schema (unknown or missing required
   arguments), returns `{"error": "invalid_tool_call"}` to the model and
@@ -6532,9 +6528,8 @@ with the normal error envelope.
   - **Salon + IP key:** the salon id plus DRF's `get_ident()`.
   - Both use DRF's default cache (DB 2).
   - **Refusal:** 429 with code `throttled` and `Retry-After`, as
-    elsewhere. Widget text for a throttled assistant message (Stage 17):
-    "Ви пишете швидше, ніж я встигаю думати 😅 Зачекайте, будь ласка,
-    хвилинку."
+    elsewhere. Widget text for a throttled assistant message: see the
+    17.5b table in "Stage 17 sub-step order".
 - **Daily limit per salon: 1000 accepted messages per salon-local day.**
   Redis key `assistant:daily:<salon_id>:<local ISO date>` in the
   assistant DB (3). `INCR` in the view after validation and before
@@ -7688,10 +7683,11 @@ the widget can deliver:
 - **After a click on a card time or "Інший день або час":** on a phone the
   chat minimises so the booking form is visible; on desktop it stays as it
   was.
-- **`assistant_busy` (503) and throttled (429):** the agreed text and a
-  "Спробувати ще раз" button; no automatic retry. The widget does not
-  need `Retry-After`, so `CORS_EXPOSE_HEADERS` stays unchanged. A busy
-  refusal does not use up the daily limit (Stage 16, 8b).
+- **`assistant_busy` (503) and throttled (429):** the text from the 17.5b
+  table ("Stage 17 sub-step order") and a "Спробувати ще раз" button; no
+  automatic retry. The widget does not need `Retry-After`, so
+  `CORS_EXPOSE_HEADERS` stays unchanged. A busy refusal does not use up
+  the daily limit (Stage 16, 8b).
 - **Expired conversation.** If the widget has a stored session id but
   history comes back empty, it shows "Попередня розмова завершилась"
   above the greeting and drops the stored id. No stored id means a plain
@@ -7761,10 +7757,9 @@ the widget can deliver:
   ("Open items").
 - **Blocked `safety_identifier`.** The backend detects this provider
   error and sends its own error code; how OpenAI signals it is checked in
-  recon, not guessed. The widget shows "На жаль, зараз я не можу
-  відповісти. Записатися можна через форму на сайті." with a link to the
-  services page, and no retry button. Nothing in the text blames the
-  customer, because one IP can be shared by many people.
+  recon, not guessed. The widget shows the text and link from the 17.5b
+  table ("Stage 17 sub-step order"), and no retry button. Nothing in the
+  text blames the customer, because one IP can be shared by many people.
 - **Starter questions:** tapping one sends it at once; the chips
   disappear after the first message.
 - **Mockups:** design canvas, row "Stage 17: віджет асистента", boards
@@ -7995,7 +7990,37 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       (built in GREEN, agreed afterwards); focus returns to the input
       after a reply on desktop only.
 - **17.5 Statuses and errors:** status texts, busy, limits, cut-off reply,
-  blocked customer, "Спробувати ще раз".
+  blocked customer, "Спробувати ще раз". Details decided 03.11.2026, after
+  the 17.5 recon, in two sub-steps:
+  - **17.5a Statuses.**
+    - The step texts from block D ("Stage 17 block D", working
+      indicator), keyed by the 17.2a step names.
+    - Pulsing dots while streaming before any text or status.
+    - A status replaces the dots and is cleared by the next text.
+    - A status after text shows under the text until the next text.
+    - An unknown step keeps the dots.
+  - **17.5b Errors and retry.** This table is the single source for every
+    way a turn can end other than `done`: its text, retry and link.
+
+    | Ending | Text | Retry | Link |
+    |---|---|---|---|
+    | 503 `assistant_busy` | "Зараз у мене багато співрозмовниць. Спробуйте, будь ласка, за хвилинку 🤗" | yes | none |
+    | 429 `throttled` | "Ви пишете швидше, ніж я встигаю думати 😅 Зачекайте, будь ласка, хвилинку." | yes | none |
+    | 429 `assistant_daily_limit` | "Я сьогодні наговорився досхочу і пішов на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:" | no | "Записатись самостійно" → `/services` |
+    | `assistant_identifier_blocked` | "На жаль, зараз я не можу відповісти. Записатися можна через форму на сайті." | no | "Записатись самостійно" → `/services` |
+    | Network failure (fetch or stream read fails because the connection is lost), at any point | "Схоже, зник зв'язок. Перевірте інтернет і спробуйте ще раз." | yes | none |
+    | Reply stopped after text began (`assistant_turn_limit`, `assistant_provider_error`, `internal_error`, or the stream ends without `done`) | "Відповідь обірвалась. Спробуйте ще раз." | yes | none |
+    | Nothing arrived before the failure (`assistant_turn_limit`, `assistant_provider_error`, `internal_error`, or the stream ends without `done`, with no text yet) | "Ой, щось пішло не так, і я не встиг відповісти. Спробуйте, будь ласка, ще раз." | yes | none |
+    | 404 `not_found` (assistant switched off while the page is open) | "Асистент зараз недоступний. Записатися можна через форму на сайті." | no | "Записатись самостійно" → `/services` |
+    | 400 `invalid` (the widget never sends it) | "Ой, щось пішло не так, і я не встиг відповісти. Спробуйте, будь ласка, ще раз." | no | none |
+
+    - **Retry** resends the last customer text with the stored id (or
+      none if nothing is stored), without a second customer bubble. A
+      partial reply stays visible until retry and is then replaced.
+    - The input stays enabled while an error shows; sending a new
+      message hides the retry button.
+    - The 17.4 neutral line "Не вдалося отримати відповідь. Спробуйте ще
+      раз." is removed.
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
   form, phone auto-minimise, `source=assistant` in both booking forms.
 - **17.7 Interface details:** AI notice, starter questions, desktop button
