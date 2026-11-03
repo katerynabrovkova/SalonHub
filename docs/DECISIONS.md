@@ -7999,6 +7999,11 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - A status replaces the dots and is cleared by the next text.
     - A status after text shows under the text until the next text.
     - An unknown step keeps the dots.
+    - Implemented 03.11.2026. Frontend suite 688 passed; all six
+      mutations killed. Checked by hand with OpenAI: dots appear right
+      after sending, step texts replace them, the status clears when text
+      starts and nothing remains after the reply. The dots and status line
+      sit in one `role="status"` container.
   - **17.5b Errors and retry.** This table is the single source for every
     way a turn can end other than `done`: its text, retry and link.
 
@@ -8025,6 +8030,8 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   form, phone auto-minimise, `source=assistant` in both booking forms.
 - **17.7 Interface details:** AI notice, starter questions, desktop button
   tooltips.
+  - A visually hidden "Асистент пише…" inside the status container while
+    the dots show, so screen readers announce that a reply is coming.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
