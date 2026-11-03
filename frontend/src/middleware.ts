@@ -17,18 +17,22 @@ export function middleware(request: NextRequest): NextResponse {
   const host = request.headers.get("host") ?? "";
   const slug = resolveSlugFromHost(host, PLATFORM_DOMAIN);
 
-  if (slug === null) {
-    // Apex / unrecognized host — pass through untouched. The apex placeholder
-    // page is a separate step.
-    return NextResponse.next();
-  }
-
   // Idiomatic Next.js way to pass request-scoped data to Server Components:
   // clone the incoming headers, add ours, and hand them back via
   // NextResponse.next({ request }). A cookie would persist to the browser and a
   // rewrite would change the matched route — neither is wanted; we only need
   // the value readable server-side for this one request.
   const requestHeaders = new Headers(request.headers);
+
+  if (slug === null) {
+    // Apex / www / unrecognized host — no salon. A client-sent x-salon-slug
+    // must never reach the app, or the client would choose the salon
+    // (docs/DECISIONS.md § "Stage 17 sub-step order", 17.3a). The apex
+    // placeholder page is a separate step.
+    requestHeaders.delete(SALON_SLUG_HEADER);
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   requestHeaders.set(SALON_SLUG_HEADER, slug);
 
   return NextResponse.next({ request: { headers: requestHeaders } });
