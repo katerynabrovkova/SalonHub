@@ -6196,7 +6196,10 @@ are reachable only in local dev.
 - **`AssistantProviderError(DomainError)`**, code
   `assistant_provider_error`, status 502, in `core/exceptions.py` next to
   `PaymentProviderError`. Real adapters wrap vendor exceptions into it;
-  the orchestrator turns it into a client `error` event. This differs from
+  the orchestrator turns it into a client `error` event. It has one
+  subclass, `AssistantIdentifierBlockedError`, with its own code
+  `assistant_identifier_blocked` (17.2c in "Stage 17 sub-step order").
+  This differs from
   the WayForPay convention ("WayForPayProvider: first-time technical
   conventions"), where the service layer wraps provider exceptions.
 - **`MockAssistantProvider`** is built with a script: a list of turns.
@@ -6820,7 +6823,10 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   the stream's `error` event, `response.failed`, and `response.incomplete`,
   including after part of the text was streamed. This was proposed in the
   recon and not discussed point by point. The orchestrator then stores
-  nothing, so "Try again" works as decided in "Product decisions".
+  nothing, and these errors stay `assistant_provider_error`, so
+  "Спробувати ще раз" works as decided in "Product decisions". A blocked
+  `safety_identifier` is the one exception (see "The blocked error"
+  below).
 - **Details agreed 26.10.2026:**
   - Tool arguments that are valid JSON but not an object are treated like
     malformed JSON.
@@ -6857,11 +6863,12 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   blocked`", returned "on all future GPT-5 requests for the same
   identifier". It gives no HTTP status or error code, and the error-codes
   guide has no entry for it. The guide speaks of GPT-5 requests; whether
-  the same applies to `gpt-6-luna` is not stated. For now it maps to
-  `assistant_provider_error` like any other vendor error (see "Open items"
-  for Stage 17).
-  - **Added 30.10.2026:** a distinct error code is decided in 17.2c in
-    "Stage 17 sub-step order". Until 17.2c lands, the mapping above stands.
+  the same applies to `gpt-6-luna` is not stated. The adapter detects a
+  block by that phrase (case-insensitive) in the error message or by the
+  code `identifier_blocked`, and raises `AssistantIdentifierBlockedError`,
+  sent to the client as `assistant_identifier_blocked`. The widget shows
+  the neutral message with no retry button ("Stage 17 block D"). Details:
+  17.2c in "Stage 17 sub-step order".
 - **The privacy policy must mention it** (see "Open items").
 - **It inherits the `X-Forwarded-For` issue** recorded in "Open items":
   while `NUM_PROXIES` is unset, a client that reaches the backend directly
@@ -7456,7 +7463,7 @@ cookie. Controls:
   the backend directly. Must be settled in Stage 22 with the proxy layout.
   Found 26.10.2026. The assistant's `safety_identifier` (sub-step 10) is
   derived from the same IP and is affected too (added 26.10.2026).
-- Stage 17: blocked `safety_identifier`; see "Stage 17 block D".
+- Stage 17: blocked `safety_identifier`. Backend done in 17.2c; the widget shows the neutral message without retry in 17.5 (see "Stage 17 block D").
 - Stage 17: both booking forms send `source`; see "Stage 17 block C".
 - Design pass (Stages 18-21): the assistant and the frontend's
   `formatPrice` must write currency the same way. Today the assistant
@@ -7616,7 +7623,7 @@ Already assigned to Stage 17:
 - **Proposal card** rendering, with the button shapes by slot count
   ("Product decisions", refined in "Sub-step 6 details").
 - **Booking `source`** sent by both booking forms; see "Stage 17 block C".
-- **Blocked `safety_identifier`:** see "Stage 17 block D".
+- **Blocked `safety_identifier`:** Backend done in 17.2c; the widget shows the neutral message without retry in 17.5 (see "Stage 17 block D").
 - **Voice input:** see "Stage 17 block D".
 - **AI processing notice** in the widget ("Safety and privacy").
 - **Widget texts** for `assistant_daily_limit` and `assistant_busy`, with
@@ -7855,6 +7862,19 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       code (never the message) for every provider error, so the real shape
       of a block can be learned. The adapter still logs nothing.
     - Rotating the HMAC secret must never be used to get around a block.
+    - Provider errors carry only `http_status` and `error_code`. The SDK
+      exception is never kept, neither in `__cause__` nor in
+      `__context__`, because its message can quote the customer. The turn
+      log shows `http_status` and `error_code` only.
+    - Implemented 03.11.2026. Suite: 1550 passed. All six mutations are
+      killed: M1 (case-sensitive phrase match), M2 (`identifier_blocked`
+      code ignored), M3 (every 400 treated as blocked), M4 (provider
+      message text logged), M5 (orchestrator sends
+      `assistant_provider_error` for a block) and M6 (no detection on
+      `response.failed`). Mutations ran on the first GREEN (1548 tests);
+      the two later changes to how the error is raised (no chained SDK
+      exception) do not touch detection or logging, and are covered by
+      their own red/green tests.
 - **17.3 Widget shell:** salon data fetched server-side; the widget in the
   root layout with the page allowlist; stripe, small window, side panel,
   minimise; not rendered when `assistant_enabled` is `false`. No
