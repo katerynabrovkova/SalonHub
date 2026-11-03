@@ -7880,37 +7880,47 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   on the branch with no resolved salon (apex, `www`, unknown host), so a
   client can never choose the salon by sending that header. The salon is
   always resolved by the server from the host.
+
+  Implemented 03.11.2026. Frontend suite 581 passed; the mutation (no
+  header deletion) is killed by the three no-salon tests. The test helper
+  `forwardedRequestHeaders` mirrors Next.js's internal header forwarding
+  (`resolve-routes.js`), so it must be re-checked whenever Next.js is
+  upgraded.
 - **17.3 Widget shell:** salon data fetched server-side; the widget in the
   root layout with the page allowlist; stripe, small window, side panel,
   minimise; not rendered when `assistant_enabled` is `false`. No
-  conversation yet. The salon-info fetch sends `?lang=` so the header name
-  matches the interface language; an empty salon name falls back to plain
-  "Асистент".
-
-  Details decided 03.11.2026, after the 17.3 recon:
-  - **Allowlist** (exact paths, no trailing slash): `/`, `/services`,
-    `/specialists`, `/specialists/<one segment>`, `/reviews`, `/booking`
-    (all booking steps are query params). Everything else has no widget,
-    including `/booking/pay`, the auth pages, `/client/**` and `/admin`.
-    404 pages under an allowed path may show the widget.
-  - **Server loader.** A server loader in the root layout reads the slug
-    and fetches salon info with `lang=uk`. It renders nothing on a null
-    slug, a failed fetch (unknown salon, backend down) or
-    `assistant_enabled` `false`, so the root layout can never break other
-    pages. It is wrapped in `Suspense` with no fallback.
-  - **State.** The client widget keeps its state across client-side
-    navigation. After a full reload it starts collapsed; the conversation
-    itself comes back in 17.4.
-  - **Desktop** starts at `lg` (1024 px). The small window is fixed in the
-    bottom-right corner. The side panel shifts the page through an
-    attribute on `<html>` and a CSS rule that adds right padding at `lg`
-    and above; the attribute is removed whenever the widget is hidden or
-    not in panel mode.
-  - **Phone.** The opened chat is full screen and modal (dialog semantics,
-    focus trap, no background scroll). The desktop window and panel are
-    non-modal.
-  - **Focus** moves into the chat on open and back to the stripe on
-    minimise. Escape minimises on phone and desktop.
+  conversation yet. Details decided 03.11.2026, after the 17.3 recon, in
+  two sub-steps:
+  - **17.3b Data and visibility.**
+    - `getSalonInfoPage` takes an optional `lang` and returns the `name`
+      and `assistant_enabled` fields. The salon-info fetch sends `?lang=`
+      so the header name matches the interface language.
+    - **Server loader.** A server loader in the root layout reads the slug
+      and fetches salon info with `lang=uk`. It renders nothing on a null
+      slug, a failed fetch (unknown salon, backend down) or
+      `assistant_enabled` `false`, so the root layout can never break
+      other pages. It is wrapped in `Suspense` with no fallback.
+    - **Allowlist** (exact paths, no trailing slash): `/`, `/services`,
+      `/specialists`, `/specialists/<one segment>`, `/reviews`, `/booking`
+      (all booking steps are query params). Everything else has no widget,
+      including `/booking/pay`, the auth pages, `/client/**` and `/admin`.
+      404 pages under an allowed path may show the widget.
+  - **17.3c Widget on screen.**
+    - Stripe, small window, side panel and minimise. An empty salon name
+      in the header falls back to plain "Асистент".
+    - **Desktop** starts at `lg` (1024 px). The small window is fixed in
+      the bottom-right corner. The side panel shifts the page through an
+      attribute on `<html>` and a CSS rule that adds right padding at `lg`
+      and above; the attribute is removed whenever the widget is hidden or
+      not in panel mode.
+    - **Phone.** The opened chat is full screen and modal (dialog
+      semantics, focus trap, no background scroll). The desktop window and
+      panel are non-modal.
+    - **Focus** moves into the chat on open and back to the stripe on
+      minimise. Escape minimises on phone and desktop.
+    - **State.** The client widget keeps its state across client-side
+      navigation. After a full reload it starts collapsed; the
+      conversation itself comes back in 17.4.
   - **Out of 17.3:** the live-conversation dot (17.4) and starter
     questions in the salon-info type (17.7).
 - **17.4 Conversation:** sending, streamed reply, session id stored after
