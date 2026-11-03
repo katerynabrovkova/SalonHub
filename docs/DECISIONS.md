@@ -7983,6 +7983,17 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       is aborted on unmount. Focus on open goes to the input.
     - The real-browser CORS check (plan from the 17.4 recon) is recorded
       in this entry when done.
+    - Implemented 03.11.2026. Frontend suite 676 passed; all nine
+      mutations killed, plus the desktop focus-return mutation.
+      Real-browser check (Chrome, mock-free with OpenAI): preflight allows
+      `x-assistant-session` and echoes the page origin; the POST exposes
+      and returns `X-Assistant-Session`; the id in `sessionStorage` matches
+      it and is sent on the next message; a reply survives minimise;
+      history and the dot come back after a reload; an unknown stored id
+      shows the expired notice and drops the id; no raw events appear in
+      the chat. Also decided: Enter sends, Shift+Enter is a new line
+      (built in GREEN, agreed afterwards); focus returns to the input
+      after a reply on desktop only.
 - **17.5 Statuses and errors:** status texts, busy, limits, cut-off reply,
   blocked customer, "Спробувати ще раз".
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
@@ -7994,6 +8005,10 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   - Remove the model's greeting from the instructions (the widget greets,
     see 17.4b) and rewrite the Stage 16 rule "Greet only in the first
     reply" (~6890) in place.
+  - Fill Ukrainian names for every BellaBeauty service in admin (a
+    missing `uk` name falls back to English in assistant replies, for
+    example "coating and reinforcement"). The blank wait before the first
+    word is covered by 17.5 status texts; recheck the wait after 17.5.
 - **17.9 Voice input:** recon, backend endpoint, widget button.
 - **17.10 Stage 17 closure.**
 
