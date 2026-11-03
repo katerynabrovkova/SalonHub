@@ -8026,6 +8026,13 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       message hides the retry button.
     - The 17.4 neutral line "Не вдалося отримати відповідь. Спробуйте ще
       раз." is removed.
+    - Implemented 03.11.2026. Frontend suite 719 passed; all eight
+      mutations killed. Checked by hand: offline before sending shows the
+      network text with retry; retry after going back online resends once
+      with one customer bubble. A connection lost mid-reply could not be
+      reproduced by hand (Chrome's offline mode does not cut an open
+      response); it is covered by
+      `test_network_failure_after_text_shows_the_network_text`.
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
   form, phone auto-minimise, `source=assistant` in both booking forms.
 - **17.7 Interface details:** AI notice, starter questions, desktop button
