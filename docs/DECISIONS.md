@@ -5869,7 +5869,9 @@ and that the closure was open until it was closed on 27.10.2026.
 - **A GET endpoint returns the live history** so the widget can restore
   it after a reload; empty once expired.
 - **Message texts only** (no tool results), last 20 messages, max 2000
-  characters per customer message. No "start over" endpoint for now.
+  characters per customer message. An assistant message may also carry
+  its proposal card, which history returns; replay to the model is role
+  and content only. No "start over" endpoint for now.
 
 ### Language
 
@@ -6059,9 +6061,10 @@ Each sub-step gets its own red/green/commit cycle.
    - **4c. `check_availability`** (filters, 14-day cap, at most 20
      slots). Two-salon and same-salon isolation tests.
 5. **Session store in Redis DB 3:** salon in the key, sliding 30-minute
-   TTL, last 20 messages, texts only, customer message stored only with a
-   successful reply. Test: a session id from another salon resolves to
-   nothing.
+   TTL, last 20 messages, texts only (an assistant message may also carry
+   its proposal card, returned by history but never replayed to the
+   model), customer message stored only with a successful reply. Test:
+   a session id from another salon resolves to nothing.
 6. **Conversation orchestrator:** model/tool loop, system instructions,
    proposal validation and card data (tenant-scoped ids, stale slots
    dropped, up to 3 slots). Mock only. Split into three sub-steps, each
@@ -6328,17 +6331,19 @@ Additions for 4c (22.10.2026):
   is.
 - **Module `ai_assistant/session_store.py`** with `new_session_id()`,
   `load_history(session_id)` and
-  `append_turn(session_id, user_text, assistant_text)`. The salon comes
+  `append_turn(session_id, user_text, assistant_text, card=None)`, where
+  `card` is the turn's proposal card, if any. The salon comes
   only from tenant context; both read and write raise
   `TenantContextMissingError` without it.
 - **Storage:** one Redis list per session at key
   `assistant:session:<salon_id>:<sha256 hex of the session id>`; each
-  item is a JSON object `{role, content}`. `append_turn` pushes the user
-  and assistant messages, trims to the last 20 and sets the 30-minute
-  expiry in one `MULTI`/`EXEC` transaction. `load_history` does not
-  extend the expiry; only a new turn does.
-  - **Added 30.10.2026:** an assistant item also carries `card` when its
-    turn produced a proposal card; see 17.2b in "Stage 17 sub-step order".
+  item is a JSON object `{role, content}`; an assistant item also has
+  `card` when its turn produced a proposal card, and has no `card` key
+  otherwise. `load_history` returns items unchanged, card included; the
+  orchestrator replays only role and content to the model. `append_turn`
+  pushes the user and assistant messages, trims to the last 20 and sets
+  the 30-minute expiry in one `MULTI`/`EXEC` transaction. `load_history`
+  does not extend the expiry; only a new turn does.
 - **Session id:** `secrets.token_urlsafe(32)`. Only its hash is in the
   key, like guest tokens, so a Redis snapshot or key listing does not
   reveal usable ids.
@@ -6434,9 +6439,12 @@ it is not executed against data and never books anything.
   call.
 - **Text deltas** are forwarded to the client as they arrive, also before
   later tool rounds.
-- **Stored turn:** the full reply text of the message; tool results and
-  proposals are not stored. The customer message and reply are stored
-  only on success ("Product decisions", Retry).
+- **Stored turn:** the full reply text of the message, plus its proposal
+  card on the assistant message when there is one; tool calls and tool
+  results are not stored. Replay to the model is role and content only,
+  so the model never sees a stored card. The customer message and reply
+  are stored only on success, so a failed turn stores no card
+  ("Product decisions", Retry).
 - **Logging:** token counts are summed across the message's model calls
   for the log line (salon, tokens, latency, errors; never text).
 - **The new session id** reaches the widget in a response header
@@ -6493,11 +6501,10 @@ Instruction rules added 23.10.2026 (in `ai_assistant/instructions.py`):
 - **POST with no header, or with an unknown, expired or other-salon id:**
   a new conversation starts silently with a new id in the response
   header. No error, and no hint whether the old id existed.
-- **GET history:** `{"messages": [{role, content}]}`. No header, or an
-  unknown, expired or other-salon id → `{"messages": []}` (200, not
-  404).
-  - **Added 30.10.2026:** an assistant message with a stored proposal card
-    also has `card`; see 17.2b in "Stage 17 sub-step order".
+- **GET history:** `{"messages": [{role, content}]}`; an assistant
+  message with a stored proposal card also has `card`, returned unchanged.
+  No header, or an unknown, expired or other-salon id →
+  `{"messages": []}` (200, not 404).
 - **The view's generator binds `tenant_context(salon_id)` itself** and
   converts any unexpected exception into
   `{"type": "error", "code": "internal_error"}`. Details go only to the
@@ -7825,6 +7832,14 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       never sees stored cards.
     - Failed turns store no card. A stored card keeps the price and
       language of its turn; the booking form shows the real price.
+    - Implemented 03.11.2026. Suite: 1536 passed. All five mutations are
+      killed: M1 (card replayed to the provider), M2 (`card` always
+      stored, `null` when absent), M3 (card on the user message), M4
+      (card stored on a failed turn) and M5 (`load_history` drops the
+      card). One older analytics test,
+      `test_counter_failure_is_logged_without_text_and_does_not_break_the_stream`,
+      pinned the exact history shape after a proposal turn; its expected
+      assistant message now includes the card.
   - **17.2c Blocked `safety_identifier`.**
     - New `AssistantIdentifierBlockedError` (subclass of
       `AssistantProviderError`), stream error code

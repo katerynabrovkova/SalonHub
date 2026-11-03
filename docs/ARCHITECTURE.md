@@ -532,7 +532,9 @@ capped by a number of model calls and an overall deadline (values in
 `docs/DECISIONS.md` § Stage 16). Text is streamed to the client as typed events as it
 arrives. The customer sees only the name of a known tool, in a status event right
 before it runs; tool arguments, tool results and provider events are never shown to
-the customer, and tool calls and their results are never stored in the session. The
+the customer, and tool calls and raw tool results are never stored in the session.
+The only exception is the proposal card, stored with its assistant message for
+display and never replayed to the model. The
 proposal tool is intercepted by the orchestrator: it
 validates the ids and slots and computes the card data, with money from the same
 functions as booking, and books nothing. Usage limits are checked before a reply
