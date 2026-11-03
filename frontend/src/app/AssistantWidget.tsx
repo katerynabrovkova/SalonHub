@@ -1,16 +1,267 @@
 "use client";
 
 /**
- * Assistant widget placeholder (docs/DECISIONS.md § "Stage 17 sub-step
- * order", 17.3b). Renders nothing for now; 17.3c builds the stripe, window
- * and side panel here.
+ * Assistant widget shell (docs/DECISIONS.md § "Stage 17 sub-step order",
+ * 17.3c; § "Stage 17 block A" and "block B"). No conversation yet: the chat
+ * body stays empty until 17.4.
+ *
+ * - Shown only on allowlisted paths (isAssistantPath). On any other path it
+ *   renders nothing but stays mounted in the root layout, so its state
+ *   survives the visit; a full reload starts collapsed.
+ * - Collapsed: a stripe on the right edge, slightly below the middle (26 px
+ *   visible inside a 44 px tap area).
+ * - Phone (< lg): the opened chat is full screen and modal — focus trap, no
+ *   background scroll.
+ * - Desktop (lg, 1024 px, and up): a non-modal small window in the corner
+ *   (360 x 500), resizable into a 440 px side panel. The panel shifts the
+ *   page through `data-assistant-panel` on <html> and the matching rule in
+ *   globals.css; the attribute exists only while the panel is on screen.
+ * - No close button (block B). "Згорнути" and Escape minimise; focus moves
+ *   into the chat on open and back to the stripe on minimise.
+ *
+ * Neutral styling only; the look is finished in the design pass.
  */
+
+import { usePathname } from "next/navigation";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent,
+} from "react";
+
+import { isAssistantPath } from "@/lib/assistant/isAssistantPath";
 
 export interface AssistantWidgetProps {
   salonName: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- placeholder: 17.3c uses salonName for the header
-export default function AssistantWidget(props: AssistantWidgetProps) {
-  return null;
+type Mode = "collapsed" | "window" | "panel";
+
+// Tailwind's `lg`, the same breakpoint as the globals.css panel rule.
+const DESKTOP_QUERY = "(min-width: 1024px)";
+const PANEL_ATTRIBUTE = "data-assistant-panel";
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function subscribeToDesktop(onChange: () => void): () => void {
+  const query = window.matchMedia(DESKTOP_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function readDesktop(): boolean {
+  return window.matchMedia(DESKTOP_QUERY).matches;
+}
+
+// The server has no viewport; the widget starts collapsed there, so the
+// phone default never shows as a wrong layout.
+function readDesktopOnServer(): boolean {
+  return false;
+}
+
+const iconProps = {
+  width: 20,
+  height: 20,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+};
+
+function ChatIcon() {
+  return (
+    <svg {...iconProps} width={16} height={16}>
+      <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
+    </svg>
+  );
+}
+
+function ExpandIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+    </svg>
+  );
+}
+
+function ShrinkIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
+    </svg>
+  );
+}
+
+function MinimiseIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+const HEADER_BUTTON =
+  "flex h-11 w-11 items-center justify-center rounded text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800";
+
+export default function AssistantWidget({ salonName }: AssistantWidgetProps) {
+  const pathname = usePathname();
+  const isDesktop = useSyncExternalStore(subscribeToDesktop, readDesktop, readDesktopOnServer);
+  const [mode, setMode] = useState<Mode>("collapsed");
+  const headingId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const stripeRef = useRef<HTMLButtonElement>(null);
+  // Set by minimise() only, so mounting collapsed never steals focus.
+  const returnFocusToStripe = useRef(false);
+
+  const shown = isAssistantPath(pathname);
+  const isOpen = mode !== "collapsed";
+  const inPanel = shown && isDesktop && mode === "panel";
+  const isModal = shown && isOpen && !isDesktop;
+
+  useEffect(() => {
+    if (!shown) {
+      return;
+    }
+    if (isOpen) {
+      dialogRef.current?.focus();
+    } else if (returnFocusToStripe.current) {
+      returnFocusToStripe.current = false;
+      stripeRef.current?.focus();
+    }
+  }, [shown, isOpen]);
+
+  useEffect(() => {
+    if (!inPanel) {
+      return;
+    }
+    const root = document.documentElement;
+    root.setAttribute(PANEL_ATTRIBUTE, "");
+    return () => root.removeAttribute(PANEL_ATTRIBUTE);
+  }, [inPanel]);
+
+  useEffect(() => {
+    if (!isModal) {
+      return;
+    }
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [isModal]);
+
+  function minimise() {
+    returnFocusToStripe.current = true;
+    setMode("collapsed");
+  }
+
+  function trapTab(event: KeyboardEvent<HTMLDivElement>) {
+    const focusable = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE),
+    );
+    event.preventDefault();
+    if (focusable.length === 0) {
+      return;
+    }
+    const index = focusable.indexOf(document.activeElement as HTMLElement);
+    const last = focusable.length - 1;
+    const next = event.shiftKey
+      ? index <= 0
+        ? last
+        : index - 1
+      : index === -1 || index === last
+        ? 0
+        : index + 1;
+    focusable[next].focus();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      minimise();
+    } else if (event.key === "Tab" && isModal) {
+      trapTab(event);
+    }
+  }
+
+  if (!shown) {
+    return null;
+  }
+
+  if (!isOpen) {
+    return (
+      <button
+        ref={stripeRef}
+        type="button"
+        aria-label="Відкрити асистента"
+        onClick={() => setMode("window")}
+        className="fixed right-0 top-[60%] z-50 flex h-16 w-11 -translate-y-1/2 items-center justify-end"
+      >
+        <span className="flex h-full w-[26px] items-center justify-center rounded-l-lg bg-zinc-900 text-white shadow dark:bg-zinc-100 dark:text-zinc-900">
+          <ChatIcon />
+        </span>
+      </button>
+    );
+  }
+
+  const title = salonName === "" ? "Асистент" : `Асистент ${salonName}`;
+  const resizeLabel = mode === "panel" ? "Зменшити" : "Розгорнути";
+
+  let frame: string;
+  if (!isDesktop) {
+    frame = "inset-0";
+  } else if (mode === "panel") {
+    frame = "inset-y-0 right-0 w-[440px] border-l";
+  } else {
+    frame =
+      "right-4 bottom-4 h-[500px] max-h-[calc(100vh-2rem)] w-[360px] rounded-lg border shadow-lg";
+  }
+
+  return (
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal={isModal ? true : undefined}
+      aria-labelledby={headingId}
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+      className={`fixed z-50 flex flex-col border-zinc-200 bg-white text-zinc-900 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 ${frame}`}
+    >
+      <header className="flex items-center justify-between gap-2 border-b border-zinc-200 py-1 pl-4 pr-1 dark:border-zinc-700">
+        <h2 id={headingId} className="truncate text-base font-semibold">
+          {title}
+        </h2>
+        <div className="flex shrink-0 items-center">
+          {isDesktop ? (
+            <button
+              type="button"
+              aria-label={resizeLabel}
+              title={resizeLabel}
+              onClick={() => setMode(mode === "panel" ? "window" : "panel")}
+              className={HEADER_BUTTON}
+            >
+              {mode === "panel" ? <ShrinkIcon /> : <ExpandIcon />}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="Згорнути"
+            title={isDesktop ? "Згорнути" : undefined}
+            onClick={minimise}
+            className={HEADER_BUTTON}
+          >
+            <MinimiseIcon />
+          </button>
+        </div>
+      </header>
+      <div className="flex-1 overflow-y-auto" />
+    </div>
+  );
 }
