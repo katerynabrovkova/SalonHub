@@ -8115,9 +8115,11 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       (`@starting-style`); older browsers without it show a static 90%
       bar. With `prefers-reduced-motion`: a static partial bar, no growth
       and no fade.
-    - Implemented 05.11.2026. Frontend suite 796 passed; all nine
+    - Implemented 05.11.2026. Frontend suite 792 passed; all nine
       mutations killed, M9 (a call site back on the plain `useRouter`)
-      only by the lint rule. Checked by hand: the bar on links, router
+      only by the lint rule. After the progress-look follow-up: 796
+      passed; its mutation (no finishing state) killed by 2 tests. Checked
+      by hand: the bar on links, router
       calls and card links, no flash on fast navigations, nothing on
       Ctrl-click or back/forward, the growing and fading bar, and the
       static bar with reduced motion.
@@ -8136,6 +8138,21 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     straight to the correct step. If the card link points to the current
     URL, the chat minimises at once. The 10 s safety timeout also
     minimises it. Desktop is unchanged. Done before 17.6b.
+    - A manual minimise (button or Escape) while a card navigation is
+      pending cancels the waiting minimise, so a chat the customer reopens
+      is not closed under her (decided 05.11.2026). Typing in the chat
+      input while it is pending cancels it the same way, so a customer who
+      starts writing is not interrupted (decided 05.11.2026).
+    - Implemented 05.11.2026. Frontend suite 808 passed; all mutations
+      killed (minimise at the click, no minimise on URL change, same-URL
+      click waits, no safety timeout, manual minimise or typing does not
+      cancel the wait). Checked by hand in phone emulation on Slow 3G: the
+      chat stays open with the progress bar visible above it, then
+      minimises straight onto the correct step. The bar is drawn above the
+      widget (`z-[60]`); at the same level as the chat it was hidden under
+      the full-screen chat on phone and under the side panel on desktop. A
+      first manual check that still showed minimise-at-click was stale dev
+      code, confirmed with temporary logs.
   - **17.6b Booking source.** Both booking forms read the stored assistant
     session id at submit and send `source` `"assistant"` when one exists;
     otherwise no `source` key (the backend defaults to `direct`). The
@@ -8144,6 +8161,12 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   tooltips.
   - A visually hidden "Асистент пише…" inside the status container while
     the dots show, so screen readers announce that a reply is coming.
+  - Draft message (decided 05.11.2026): the unsent text in the chat input
+    survives minimise, navigation between pages and a full reload (kept
+    in `sessionStorage` next to the session id, same lifetime as the
+    conversation), and is cleared after sending. Not synced across
+    devices: the assistant is anonymous and unsent text is not stored on
+    the server.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
