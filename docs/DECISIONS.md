@@ -8037,7 +8037,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       `test_network_failure_after_text_shows_the_network_text`.
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
   form, phone auto-minimise, `source=assistant` in both booking forms.
-  Details decided 03.11.2026, after the 17.6 recon, in five sub-steps:
+  Details decided 03.11.2026, after the 17.6 recon, in six sub-steps:
   - **17.6-pre (decided 03.11.2026):** a shared Ukrainian plural helper
     for review counts, used by `SpecialistCard` (which today always writes
     "відгуків", e.g. "1 відгуків") and by the assistant card.
@@ -8115,9 +8115,27 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       (`@starting-style`); older browsers without it show a static 90%
       bar. With `prefers-reduced-motion`: a static partial bar, no growth
       and no fade.
+    - Implemented 05.11.2026. Frontend suite 796 passed; all nine
+      mutations killed, M9 (a call site back on the plain `useRouter`)
+      only by the lint rule. Checked by hand: the bar on links, router
+      calls and card links, no flash on fast navigations, nothing on
+      Ctrl-click or back/forward, the growing and fading bar, and the
+      static bar with reduced motion.
   - **17.6d Booking step while navigating:** `booking/layout.tsx` wraps
     the step with `inert`, `aria-busy="true"` and a dim style while the
     pending state is visible (same 150 ms delay). Done before 17.6b.
+    - Implemented 05.11.2026. Frontend suite 800 passed; all three
+      mutations killed. `/booking/pay` is under the same layout and dims
+      too.
+  - **17.6e Chat minimise on phone after a card click (decided
+    05.11.2026, from the manual check):** on phone the chat minimised at
+    the moment of a card click, which uncovered the previous page before
+    the new one arrived; that was the flash seen on phone. Now, on phone,
+    a card click keeps the chat open until the navigation ends (the URL
+    changes), then minimises it, so the customer goes from the chat
+    straight to the correct step. If the card link points to the current
+    URL, the chat minimises at once. The 10 s safety timeout also
+    minimises it. Desktop is unchanged. Done before 17.6b.
   - **17.6b Booking source.** Both booking forms read the stored assistant
     session id at submit and send `source` `"assistant"` when one exists;
     otherwise no `source` key (the backend defaults to `direct`). The
