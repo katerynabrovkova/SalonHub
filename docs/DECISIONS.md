@@ -7566,7 +7566,9 @@ items already assigned to Stage 17 elsewhere in this section.
     - a `salon_id` guard on the registration verification token
       [Deferred list];
     - the privacy policy page [Stage 16 "Open items"]. The condition
-      stays: the assistant is not enabled for real customers without it.
+      stays: the assistant is not enabled for real customers without it;
+    - Next 16 deprecates the middleware file convention in favour of
+      proxy; rename `middleware.ts` before it is removed.
   - Deliberately not scheduled:
     - human handoff and a knowledge base that learns from staff answers
       [Stage 16 "Deferred"]: needs the deferred second notification
@@ -8035,7 +8037,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       `test_network_failure_after_text_shows_the_network_text`.
 - **17.6 Card and booking:** the card in the chat, handoff to the booking
   form, phone auto-minimise, `source=assistant` in both booking forms.
-  Details decided 03.11.2026, after the 17.6 recon, in four sub-steps:
+  Details decided 03.11.2026, after the 17.6 recon, in five sub-steps:
   - **17.6-pre (decided 03.11.2026):** a shared Ukrainian plural helper
     for review counts, used by `SpecialistCard` (which today always writes
     "відгуків", e.g. "1 відгуків") and by the assistant card.
@@ -8078,31 +8080,33 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       a reload, phone minimise after a card click. Found: clicking another
       time in a card briefly shows the previous time on step 4 until the
       new server render arrives; to be fixed in 17.6c, done before 17.6b.
-  - **17.6c Pending state on booking navigation** (found 03.11.2026): a
-    same-route `/booking` navigation keeps the previous page on screen
-    until the new server render arrives; show a pending state instead.
-    Approach decided after its recon. Done before 17.6b. Details decided
-    03.11.2026, after the 17.6c recon:
-    - **Cause:** Next 16 keys a page's loading boundary without search
-      params (`layout-router`, `createRouterCacheKey`), so a same-route
-      `/booking` navigation keeps the old content until the new server
-      render arrives; `loading.tsx` and `template.tsx` cannot fix it.
-    - **Fix:** `app/booking/page.tsx` keeps awaiting `searchParams` and
-      all `notFound()` checks outside, then renders
-      `<Suspense key={serialised search params} fallback={pending block}>`
-      around an async `BookingSteps` component in its own file
-      (`app/booking/BookingSteps.tsx`; a page file may not export anything
-      else) that does the data fetching. The pending block is a neutral
-      "Завантаження…" with `role="status"`, in the style of the existing
-      placeholder blocks; the design pass replaces it with a proper
-      loading state.
-    - **Tests:** the 21 existing page tests switch from `BookingPage` to
-      `BookingSteps` without assertion changes; new unit tests check that
-      the key changes with the search params, the fallback, and that
-      invalid params still call `notFound()` before any `Suspense`. The
-      real behaviour is checked by hand with network throttling.
-    - The gate for 17.6c also runs `npm run build`, because page-export
-      rules are checked only by `next build`.
+  - **17.6c Navigation progress, site-wide (decided 05.11.2026):** a
+    custom solution, no library. Done before 17.6b.
+    - **Replaces** the keyed-`Suspense` fix decided 03.11.2026, which was
+      tried and discarded on 03.11.2026: measurements showed the stale
+      content is visible mainly before the first byte, which no
+      server-side boundary can cover. Prefetching was considered and left
+      for later.
+    - `lib/navigation/pendingNavigation.ts`: a store with start, end,
+      idempotent start and a 10 s safety timeout.
+    - `lib/navigation/shouldTrackClick.ts`: a pure classifier. Tracks
+      plain left clicks on same-origin links to a different URL; ignores
+      modifier and middle clicks, `target` other than `_self`, `download`,
+      external, hash-only and same-URL links.
+    - `lib/navigation/useNavigatingRouter.ts`: a `useRouter` whose
+      `push`/`replace` call `start()` first when the target differs. It
+      replaces `useRouter` at the 16 `router.push`/`router.replace` call
+      sites.
+    - `app/NavigationProgress.tsx` in the root layout, inside `Suspense`:
+      a capture-phase click listener; ends on a `usePathname` /
+      `useSearchParams` change; renders a thin neutral top bar
+      (`aria-hidden`) and sets an `<html data-navigating>` attribute.
+    - The pending state becomes visible only after 150 ms, so a
+      navigation that finishes sooner shows nothing. Back/forward does not
+      start it.
+  - **17.6d Booking step while navigating:** `booking/layout.tsx` wraps
+    the step with `inert`, `aria-busy="true"` and a dim style while the
+    pending state is visible (same 150 ms delay). Done before 17.6b.
   - **17.6b Booking source.** Both booking forms read the stored assistant
     session id at submit and send `source` `"assistant"` when one exists;
     otherwise no `source` key (the backend defaults to `direct`). The
