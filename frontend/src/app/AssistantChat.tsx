@@ -33,6 +33,10 @@
  *   link where offered (lib/assistant/failure.ts). Retry resends the last
  *   customer text without a second bubble and replaces the partial reply.
  * - The request is aborted on unmount.
+ * - The draft (17.7b) lives in the hook and in sessionStorage
+ *   (lib/assistant/draft.ts): written on every change, cleared on send
+ *   whatever the outcome, kept when the conversation expires. Retry resends
+ *   the earlier text and leaves the draft alone.
  */
 
 import {
@@ -49,6 +53,7 @@ import Link from "next/link";
 
 import { ApiError } from "@/lib/api/errors";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
+import { clearDraft, readDraft, storeDraft } from "@/lib/assistant/draft";
 import { failureFor, type Failure, type FailureCause } from "@/lib/assistant/failure";
 import { parseProposalCard, type ProposalCard } from "@/lib/assistant/proposalCard";
 import {
@@ -102,6 +107,11 @@ export interface AssistantConversation {
   status: string | null;
   /** The streaming reply has its first text. */
   replyStarted: boolean;
+  /** The unsent text in the chat input (17.7b). */
+  draft: string;
+  /** Updates the draft and its stored copy. */
+  setDraft: (text: string) => void;
+  /** Sends the text and clears the draft, whatever the turn's outcome. */
   send: (text: string) => void;
   /** Resends the last customer text after a failure that offers retry. */
   retry: () => void;
@@ -127,6 +137,14 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
     setExpired(true);
   }
   const [hasConversation, setHasConversation] = useState(false);
+  // 17.7b: held here, not in the view, so it survives minimise and excluded
+  // pages; stored on every change, so a real reload keeps it. The server
+  // render has no storage, so it reads "" there.
+  const [draft, setDraftState] = useState(readDraft);
+  const setDraft = useCallback((text: string) => {
+    setDraftState(text);
+    storeDraft(text);
+  }, []);
   const [status, setStatus] = useState<string | null>(null);
   const [replyStarted, setReplyStarted] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
@@ -392,6 +410,10 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
         return;
       }
       lastTextRef.current = text;
+      // Decided 05.11.2026 (17.7b): cleared on send, whether the turn
+      // succeeds or fails.
+      setDraftState("");
+      clearDraft();
       const userId = nextIdRef.current++;
       userIdRef.current = userId;
       setMessages((current) => [...current, { id: userId, role: "user", content: text }]);
@@ -420,6 +442,8 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
     hasConversation,
     status,
     replyStarted,
+    draft,
+    setDraft,
     send,
     retry,
   };
@@ -437,9 +461,18 @@ export default function AssistantChat({
   inputRef,
   onCardNavigate,
 }: AssistantChatProps) {
-  const { messages, streaming, failure, expired, status, replyStarted, send, retry } =
-    conversation;
-  const [draft, setDraft] = useState("");
+  const {
+    messages,
+    streaming,
+    failure,
+    expired,
+    status,
+    replyStarted,
+    draft,
+    setDraft,
+    send,
+    retry,
+  } = conversation;
   const endRef = useRef<HTMLDivElement>(null);
 
   // 17.5a: a known status shows its text under the last bubble; before any
@@ -458,7 +491,6 @@ export default function AssistantChat({
       return;
     }
     send(draft);
-    setDraft("");
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
