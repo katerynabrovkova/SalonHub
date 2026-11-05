@@ -37,3 +37,37 @@ export function clearSessionId(): void {
     // Ignored -- see the module comment.
   }
 }
+
+/*
+ * 17.7a: a stored conversation was found expired, and the customer has not
+ * seen the notice yet. Kept under its own key until the chat is opened on an
+ * allowed page, so the notice survives pages where the widget is hidden and
+ * several full page loads; the session id itself is cleared at once.
+ * Clearing one never clears the other.
+ */
+
+const EXPIRED_KEY = "salonhub:assistant-expired";
+
+export function markConversationExpired(): void {
+  try {
+    sessionStorage.setItem(EXPIRED_KEY, "1");
+  } catch {
+    // Ignored -- see the module comment.
+  }
+}
+
+export function readConversationExpired(): boolean {
+  try {
+    return sessionStorage.getItem(EXPIRED_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+export function clearConversationExpired(): void {
+  try {
+    sessionStorage.removeItem(EXPIRED_KEY);
+  } catch {
+    // Ignored -- see the module comment.
+  }
+}

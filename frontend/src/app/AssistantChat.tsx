@@ -9,8 +9,15 @@
  * where the widget renders nothing. `AssistantChat` only renders it.
  *
  * - History loads once per mount, only when a session id is stored. Empty
- *   history means the conversation expired: notice, id dropped. A failed
- *   request keeps the id and shows the plain greeting.
+ *   history means the conversation expired: the id is dropped at once and
+ *   the expiry waits in storage (17.7a) until the chat is open on an
+ *   allowed page, where the notice shows once. A failed request keeps the
+ *   id and shows the plain greeting.
+ * - 17.7a, a page that stays loaded: opening a chat that holds a
+ *   conversation, or the tab becoming visible with the chat open, re-checks
+ *   history; a send answered with a different session id counts too. An
+ *   expired conversation is not erased: a divider marks where the new one
+ *   starts, one per gap.
  * - The session id is stored only after `done`; the backend returns an id
  *   even for a first message that fails and stores nothing (block B).
  * - Statuses (17.5a): the last status event's step is kept until the next
@@ -44,7 +51,14 @@ import { ApiError } from "@/lib/api/errors";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
 import { failureFor, type Failure, type FailureCause } from "@/lib/assistant/failure";
 import { parseProposalCard, type ProposalCard } from "@/lib/assistant/proposalCard";
-import { clearSessionId, readSessionId, storeSessionId } from "@/lib/assistant/sessionId";
+import {
+  clearConversationExpired,
+  clearSessionId,
+  markConversationExpired,
+  readConversationExpired,
+  readSessionId,
+  storeSessionId,
+} from "@/lib/assistant/sessionId";
 import { statusText } from "@/lib/assistant/statusText";
 
 import AssistantProposalCard from "./AssistantProposalCard";
@@ -64,8 +78,16 @@ export interface ChatMessage {
   card?: ProposalCard;
 }
 
+/** Marks where a new conversation starts after an expired one (17.7a). */
+export interface ChatDivider {
+  id: number;
+  role: "divider";
+}
+
+export type ChatEntry = ChatMessage | ChatDivider;
+
 export interface AssistantConversation {
-  messages: ChatMessage[];
+  messages: ChatEntry[];
   streaming: boolean;
   /** How the last reply failed (17.5b table row), or null. */
   failure: Failure | null;
@@ -85,11 +107,25 @@ export interface AssistantConversation {
   retry: () => void;
 }
 
-export function useAssistantConversation(slug: string): AssistantConversation {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+/**
+ * `open`: the chat is open on an allowed page (the widget passes it). It is
+ * required on purpose: the expired notice and the history re-checks depend
+ * on it, so no caller may get them by default (17.7a).
+ */
+export function useAssistantConversation(slug: string, open: boolean): AssistantConversation {
+  const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
+  // 17.7a: an expiry the customer has not seen yet, from storage (an earlier
+  // page load) or found by this mount; shown as the notice once the chat is
+  // open, then cleared from storage. The server render has no storage, so
+  // it reads false there.
+  const [noticeOwed, setNoticeOwed] = useState(readConversationExpired);
   const [expired, setExpired] = useState(false);
+  if (open && noticeOwed) {
+    setNoticeOwed(false);
+    setExpired(true);
+  }
   const [hasConversation, setHasConversation] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [replyStarted, setReplyStarted] = useState(false);
@@ -100,6 +136,26 @@ export function useAssistantConversation(slug: string): AssistantConversation {
   // The last customer text and the reply bubble of the last turn, for retry.
   const lastTextRef = useRef<string | null>(null);
   const replyIdRef = useRef<number | null>(null);
+  // The customer bubble of the last turn: a divider found on send goes
+  // above it (17.7a).
+  const userIdRef = useRef<number | null>(null);
+  // The chat holds a conversation (restored history or a finished turn), so
+  // opening it or returning to the tab re-checks history (17.7a).
+  const liveRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (expired) {
+      clearConversationExpired();
+    }
+  }, [expired]);
 
   useEffect(() => {
     const stored = readSessionId();
@@ -114,9 +170,12 @@ export function useAssistantConversation(slug: string): AssistantConversation {
           return;
         }
         if (history.length === 0) {
+          // Cleared at once so the booking source stays honest; the notice
+          // waits in storage until the chat is opened on an allowed page.
           clearSessionId();
           sessionIdRef.current = null;
-          setExpired(true);
+          markConversationExpired();
+          setNoticeOwed(true);
           return;
         }
         // A message is kept when it has text or a well-formed card; a
@@ -136,6 +195,7 @@ export function useAssistantConversation(slug: string): AssistantConversation {
         }
         // Prepended: a message sent before history arrived stays last.
         setMessages((current) => [...restored, ...current]);
+        liveRef.current = true;
         setHasConversation(true);
       },
       () => {
@@ -146,6 +206,66 @@ export function useAssistantConversation(slug: string): AssistantConversation {
       active = false;
     };
   }, [slug]);
+
+  /**
+   * 17.7a, a page that stays loaded: asks whether the held conversation is
+   * still alive. Empty history means it expired: the old messages stay, a
+   * divider goes at the bottom, the id is dropped. A live conversation or a
+   * failed request changes nothing. Skipped while a reply streams, and the
+   * answer is ignored if a turn has started or the id changed meanwhile.
+   */
+  const recheck = useCallback(() => {
+    const id = sessionIdRef.current;
+    if (id === null || !liveRef.current || streamingRef.current) {
+      return;
+    }
+    getAssistantHistory(slug, id).then(
+      (history) => {
+        if (
+          !mountedRef.current ||
+          history.length > 0 ||
+          sessionIdRef.current !== id ||
+          streamingRef.current
+        ) {
+          return;
+        }
+        clearSessionId();
+        sessionIdRef.current = null;
+        liveRef.current = false;
+        setHasConversation(false);
+        const dividerId = nextIdRef.current++;
+        setMessages((current) => [...current, { id: dividerId, role: "divider" }]);
+      },
+      () => {
+        // Failed request: nothing changes.
+      },
+    );
+  }, [slug]);
+
+  // Re-check on every open of a chat that holds a conversation (not on a
+  // chat that is open from the first render: the mount request covers it).
+  const wasOpenRef = useRef(open);
+  useEffect(() => {
+    const opened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (opened) {
+      recheck();
+    }
+  }, [open, recheck]);
+
+  // ...and when the tab becomes visible again with the chat open.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        recheck();
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [open, recheck]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -170,9 +290,27 @@ export function useAssistantConversation(slug: string): AssistantConversation {
       function updateReply(patch: Partial<ChatMessage>) {
         setMessages((current) =>
           current.some((message) => message.id === replyId)
-            ? current.map((message) => (message.id === replyId ? { ...message, ...patch } : message))
+            ? current.map((message) =>
+                message.id === replyId ? { ...(message as ChatMessage), ...patch } : message,
+              )
             : [...current, { id: replyId, role: "assistant", content: "", ...patch }],
         );
+      }
+
+      // 17.7a fallback: a finished turn answered the stored id with a new
+      // one, so the conversation expired before this turn. Checked only at
+      // `done`, like storing the id (block B): a failed turn's id means
+      // nothing, so its retry still sends the old id and the divider comes
+      // once, when the retry finishes. It goes above this turn's customer
+      // bubble.
+      function markExpiredBeforeThisTurn() {
+        const userId = userIdRef.current;
+        const dividerId = nextIdRef.current++;
+        setMessages((current) => {
+          const index = current.findIndex((message) => message.id === userId);
+          const at = index === -1 ? current.length : index;
+          return [...current.slice(0, at), { id: dividerId, role: "divider" }, ...current.slice(at)];
+        });
       }
 
       function showReply(content: string) {
@@ -184,12 +322,8 @@ export function useAssistantConversation(slug: string): AssistantConversation {
         let replyText = "";
         let cause: FailureCause | null = null;
         try {
-          const reply = await sendAssistantMessage(
-            slug,
-            text,
-            sessionIdRef.current,
-            controller.signal,
-          );
+          const sentId = sessionIdRef.current;
+          const reply = await sendAssistantMessage(slug, text, sentId, controller.signal);
           for await (const event of reply.events) {
             if (event.type === "text") {
               replyText += event.text;
@@ -200,10 +334,14 @@ export function useAssistantConversation(slug: string): AssistantConversation {
               setStatus(event.step);
             } else if (event.type === "done") {
               done = true;
+              if (sentId !== null && reply.sessionId !== null && reply.sessionId !== sentId) {
+                markExpiredBeforeThisTurn();
+              }
               if (reply.sessionId !== null) {
                 storeSessionId(reply.sessionId);
                 sessionIdRef.current = reply.sessionId;
               }
+              liveRef.current = true;
               setHasConversation(true);
               break;
             } else if (event.type === "error") {
@@ -255,6 +393,7 @@ export function useAssistantConversation(slug: string): AssistantConversation {
       }
       lastTextRef.current = text;
       const userId = nextIdRef.current++;
+      userIdRef.current = userId;
       setMessages((current) => [...current, { id: userId, role: "user", content: text }]);
       runTurn(text);
     },
@@ -339,25 +478,38 @@ export default function AssistantChat({
         <p className="self-start rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800">{GREETING}</p>
         {messages.length > 0 ? (
           <ul aria-label="Розмова" className="flex flex-col gap-3">
-            {messages.map((message) => (
-              <li
-                key={message.id}
-                className={
-                  message.role === "user"
-                    ? "max-w-[85%] self-end whitespace-pre-wrap rounded-lg bg-zinc-900 px-3 py-2 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    : "max-w-[85%] self-start whitespace-pre-wrap rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800"
-                }
-              >
-                {message.card === undefined ? (
-                  message.content
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {message.content !== "" ? <p>{message.content}</p> : null}
-                    <AssistantProposalCard card={message.card} onNavigate={onCardNavigate} />
+            {messages.map((message) =>
+              message.role === "divider" ? (
+                <li key={message.id}>
+                  {/* A separator's content is presentational, hence the label. */}
+                  <div
+                    role="separator"
+                    aria-label={EXPIRED_NOTICE}
+                    className="flex items-center gap-2 text-xs text-zinc-500 before:h-px before:flex-1 before:bg-zinc-200 after:h-px after:flex-1 after:bg-zinc-200 dark:text-zinc-400 dark:before:bg-zinc-700 dark:after:bg-zinc-700"
+                  >
+                    {EXPIRED_NOTICE}
                   </div>
-                )}
-              </li>
-            ))}
+                </li>
+              ) : (
+                <li
+                  key={message.id}
+                  className={
+                    message.role === "user"
+                      ? "max-w-[85%] self-end whitespace-pre-wrap rounded-lg bg-zinc-900 px-3 py-2 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                      : "max-w-[85%] self-start whitespace-pre-wrap rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800"
+                  }
+                >
+                  {message.card === undefined ? (
+                    message.content
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {message.content !== "" ? <p>{message.content}</p> : null}
+                      <AssistantProposalCard card={message.card} onNavigate={onCardNavigate} />
+                    </div>
+                  )}
+                </li>
+              ),
+            )}
           </ul>
         ) : null}
         <div role="status" className="self-start text-zinc-500 dark:text-zinc-400">

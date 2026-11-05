@@ -15,6 +15,9 @@ vi.mock("@/lib/assistant/sessionId", () => ({
   readSessionId: vi.fn(),
   storeSessionId: vi.fn(),
   clearSessionId: vi.fn(),
+  markConversationExpired: vi.fn(),
+  readConversationExpired: vi.fn(),
+  clearConversationExpired: vi.fn(),
 }));
 
 // Imported after the mocks above so the mocked modules are what the chat sees.
@@ -87,8 +90,8 @@ function replyWith(sessionId: string | null = "server-id") {
 
 // The conversation lives in a hook so the widget can keep it while the chat
 // is minimised or the page is excluded; the tests drive both together.
-function Chat({ slug = "bella-demo" }: { slug?: string }) {
-  const conversation = useAssistantConversation(slug);
+function Chat({ slug = "bella-demo", open = false }: { slug?: string; open?: boolean }) {
+  const conversation = useAssistantConversation(slug, open);
   return <AssistantChat conversation={conversation} />;
 }
 
@@ -313,7 +316,7 @@ describe("AssistantChat history", () => {
   it("test_stored_id_with_empty_history_shows_the_expired_notice_and_clears_the_id", async () => {
     mockedRead.mockReturnValue("stored-id");
     mockedHistory.mockResolvedValueOnce([]);
-    renderChat();
+    render(<Chat open />);
 
     const notice = await screen.findByText(EXPIRED);
     const greeting = screen.getByText(GREETING);

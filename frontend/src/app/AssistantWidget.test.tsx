@@ -26,6 +26,9 @@ vi.mock("@/lib/assistant/sessionId", () => ({
   readSessionId: vi.fn(),
   storeSessionId: vi.fn(),
   clearSessionId: vi.fn(),
+  markConversationExpired: vi.fn(),
+  readConversationExpired: vi.fn(),
+  clearConversationExpired: vi.fn(),
 }));
 
 // Imported after the mock above so the mocked module is what the widget sees.

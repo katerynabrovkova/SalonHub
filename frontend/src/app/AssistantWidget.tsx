@@ -125,10 +125,13 @@ const HEADER_BUTTON =
 
 export default function AssistantWidget({ salonName, slug }: AssistantWidgetProps) {
   const pathname = usePathname();
-  const conversation = useAssistantConversation(slug);
+  const [mode, setMode] = useState<Mode>("collapsed");
+  const shown = isAssistantPath(pathname);
+  const isOpen = mode !== "collapsed";
+  // 17.7a: "open" for the conversation means open on an allowed page.
+  const conversation = useAssistantConversation(slug, shown && isOpen);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isDesktop = useSyncExternalStore(subscribeToDesktop, readDesktop, readDesktopOnServer);
-  const [mode, setMode] = useState<Mode>("collapsed");
   const headingId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const stripeRef = useRef<HTMLButtonElement>(null);
@@ -144,8 +147,6 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
     };
   }, []);
 
-  const shown = isAssistantPath(pathname);
-  const isOpen = mode !== "collapsed";
   const inPanel = shown && isDesktop && mode === "panel";
   const isModal = shown && isOpen && !isDesktop;
 
