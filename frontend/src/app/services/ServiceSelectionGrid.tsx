@@ -12,7 +12,7 @@
  * wraps the entire grid + confirm button as a single client boundary,
  * receiving the service list as a prop from the Server Component parent.
  */
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useState } from "react";
 
 import { formatPrice } from "@/lib/pricing/formatPrice";
@@ -48,7 +48,7 @@ export default function ServiceSelectionGrid({
   confirmTarget,
   currency,
 }: ServiceSelectionGridProps) {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   function handleConfirm() {

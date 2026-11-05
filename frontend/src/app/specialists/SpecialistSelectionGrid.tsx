@@ -19,7 +19,7 @@
  * grouping; mutual exclusion is still driven by the single `selected` state
  * value below, not by native radio-group behavior.
  */
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useState } from "react";
 
 import type { Specialist } from "@/lib/specialists/getSpecialistsPage";
@@ -41,7 +41,7 @@ export default function SpecialistSelectionGrid({
   specialists,
   serviceId,
 }: SpecialistSelectionGridProps) {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const [selected, setSelected] = useState<Selection>(null);
 
   function handleConfirm() {

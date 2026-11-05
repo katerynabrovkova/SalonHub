@@ -26,7 +26,7 @@
  * the strip.
  */
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useState } from "react";
 
 const WINDOW_DAYS = 14;
@@ -109,7 +109,7 @@ export default function DateTimeSelectionGrid({
   specialist,
   slotTaken = false,
 }: DateTimeSelectionGridProps) {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const days = Array.from({ length: WINDOW_DAYS }, (_, i) => addDays(dateFrom, i));

@@ -18,7 +18,7 @@
  * handled by rendering nothing rather than crashing, in case that
  * invariant is ever violated by a future caller.
  */
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useState, type FormEvent } from "react";
 
 import { useAuth } from "@/app/AuthContext";
@@ -50,7 +50,7 @@ export default function AccountBookingForm({
   startDatetime,
   linked,
 }: AccountBookingFormProps) {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const { me, refresh } = useAuth();
   const { customerName, setCustomerName, customerPhone, setCustomerPhone } = useBookingContactInfo();
   const [error, setError] = useState<string | null>(null);

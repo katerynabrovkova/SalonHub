@@ -29,7 +29,7 @@
  */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 
 import { useAuth } from "@/app/AuthContext";
@@ -88,7 +88,7 @@ function resetErrorMessage(err: unknown): string {
 }
 
 export default function ResetPasswordForm({ slug }: ResetPasswordFormProps) {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const { logout } = useAuth();
   const hash = useSyncExternalStore(subscribeToHash, readHash, readServerHash);
   // undefined: the hash has not been read yet; null: no usable link.

@@ -18,7 +18,7 @@
  */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useState, type FormEvent } from "react";
 
 import { useAuth } from "@/app/AuthContext";
@@ -67,7 +67,7 @@ function isInvalidPassword(err: unknown): boolean {
 }
 
 export default function ChangePasswordForm() {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const { logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");

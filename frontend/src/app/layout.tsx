@@ -5,6 +5,7 @@ import "./globals.css";
 
 import AssistantWidgetLoader from "./AssistantWidgetLoader";
 import { AuthProvider } from "./AuthContext";
+import NavigationProgress from "./NavigationProgress";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,6 +29,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <Suspense fallback={null}>
+          <NavigationProgress />
+        </Suspense>
         <AuthProvider>{children}</AuthProvider>
         <Suspense fallback={null}>
           <AssistantWidgetLoader />

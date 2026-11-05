@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { useAuth } from "@/app/AuthContext";
@@ -38,7 +38,7 @@ function readServerSearch(): string | null {
 }
 
 export default function LoginPage() {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

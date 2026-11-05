@@ -17,7 +17,7 @@
  */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 
 import { useAuth } from "@/app/AuthContext";
 
@@ -45,7 +45,7 @@ function ProfileRow({ label, value, href }: ProfileRowProps) {
 }
 
 export default function ClientProfilePage() {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const { me, logout } = useAuth();
 
   async function handleLogout() {

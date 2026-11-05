@@ -43,3 +43,51 @@ body {
     padding-right: 440px;
   }
 }
+
+/* Navigation progress bar (docs/DECISIONS.md § "Stage 17 sub-step order",
+   17.6c): a timed imitation, since the browser cannot know real progress.
+   Running: starts empty (@starting-style) and transitions to 90% on one
+   steep-then-flat curve — ~30% within the first ~0.3 s, then slowing, never
+   reaching the end on its own. Finishing (NavigationProgress.tsx keeps it
+   mounted 200 ms): transitions from wherever it is to 100% and fades out. */
+.navigation-progress {
+  transform-origin: left;
+}
+
+.navigation-progress[data-state="running"] {
+  transform: scaleX(0.9);
+  transition: transform 8s cubic-bezier(0.05, 0.8, 0.2, 1);
+}
+
+@starting-style {
+  .navigation-progress[data-state="running"] {
+    transform: scaleX(0);
+  }
+}
+
+.navigation-progress[data-state="finishing"] {
+  transform: scaleX(1);
+  opacity: 0;
+  transition:
+    transform 200ms ease-out,
+    opacity 200ms ease-in;
+}
+
+/* Reduced motion: a static partial bar, filled at the end, no fade. */
+@media (prefers-reduced-motion: reduce) {
+  .navigation-progress[data-state="running"] {
+    transform: scaleX(0.3);
+    transition: none;
+  }
+
+  @starting-style {
+    .navigation-progress[data-state="running"] {
+      transform: scaleX(0.3);
+    }
+  }
+
+  .navigation-progress[data-state="finishing"] {
+    opacity: 1;
+    transition: none;
+  }
+}

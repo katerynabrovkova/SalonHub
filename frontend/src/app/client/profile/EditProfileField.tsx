@@ -18,7 +18,7 @@
  */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/app/AuthContext";
@@ -63,7 +63,7 @@ export default function EditProfileField({
   inputType,
   maxLength,
 }: EditProfileFieldProps) {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const { me, refresh } = useAuth();
   const [value, setValue] = useState(me?.[field] ?? "");
   const [error, setError] = useState<string | null>(null);

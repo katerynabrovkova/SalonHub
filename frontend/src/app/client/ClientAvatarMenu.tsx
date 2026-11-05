@@ -21,7 +21,7 @@
  */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useEffect, useRef, useState } from "react";
 
 import { useAuth } from "@/app/AuthContext";
@@ -31,7 +31,7 @@ function initialOf(label: string): string {
 }
 
 export default function ClientAvatarMenu() {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const { me, logout } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);

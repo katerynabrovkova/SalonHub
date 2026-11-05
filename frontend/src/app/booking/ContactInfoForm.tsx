@@ -17,7 +17,7 @@
  * `backend/notifications/services.py`), which `PaymentStatus.tsx` reads on
  * mount (docs/DECISIONS.md § Stage 14 step 5).
  */
-import { useRouter } from "next/navigation";
+import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useState, type FormEvent } from "react";
 
 import { createGuestBooking } from "@/lib/booking/createGuestBooking";
@@ -73,7 +73,7 @@ export default function ContactInfoForm({
   specialist,
   startDatetime,
 }: ContactInfoFormProps) {
-  const router = useRouter();
+  const router = useNavigatingRouter();
   const {
     customerName,
     setCustomerName,
