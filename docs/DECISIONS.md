@@ -8157,6 +8157,11 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     session id at submit and send `source` `"assistant"` when one exists;
     otherwise no `source` key (the backend defaults to `direct`). The
     session id itself is never sent to the booking API.
+    - Implemented 05.11.2026. Frontend suite 818 passed; all four
+      mutations killed. Checked by hand in Django admin: a booking from a
+      card is `assistant`; a booking in a new tab without a conversation
+      is `direct`; a booking found in the catalogue in a tab with a
+      conversation is `assistant`.
 - **17.7 Interface details:** AI notice, starter questions, desktop button
   tooltips.
   - A visually hidden "Асистент пише…" inside the status container while
