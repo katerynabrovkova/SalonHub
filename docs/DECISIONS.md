@@ -8198,10 +8198,15 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       chat is open on an allowed page), with no default.
   - **17.7b Draft message** (decided 05.11.2026): the unsent text in the
     chat input survives minimise, navigation between pages and a full
-    reload (kept in `sessionStorage` next to the session id, same
-    lifetime as the conversation), and is cleared after sending. Not
-    synced across devices: the assistant is anonymous and unsent text is
-    not stored on the server.
+    reload (kept in `sessionStorage` next to the session id, for the life
+    of the tab, not of the server conversation: it stays when the
+    conversation expires, whether by the notice, a divider or a new id on
+    send), and is cleared after sending. Not synced across devices: the
+    assistant is anonymous and unsent text is not stored on the server.
+    - Decided 05.11.2026: the draft is cleared when the customer sends,
+      whether the turn succeeds or fails. A failed turn's text is then
+      not kept after a reload; accepted as a rare case, revisit only if
+      it proves annoying. Blank or whitespace-only text is not stored.
   - **17.7c Interface details:** AI notice, starter questions, desktop
     button tooltips.
     - A visually hidden "Асистент пише…" inside the status container
