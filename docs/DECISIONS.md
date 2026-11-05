@@ -8162,16 +8162,41 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       card is `assistant`; a booking in a new tab without a conversation
       is `direct`; a booking found in the catalogue in a tab with a
       conversation is `assistant`.
-- **17.7 Interface details:** AI notice, starter questions, desktop button
-  tooltips.
-  - A visually hidden "Асистент пише…" inside the status container while
-    the dots show, so screen readers announce that a reply is coming.
-  - Draft message (decided 05.11.2026): the unsent text in the chat input
-    survives minimise, navigation between pages and a full reload (kept
-    in `sessionStorage` next to the session id, same lifetime as the
-    conversation), and is cleared after sending. Not synced across
-    devices: the assistant is anonymous and unsent text is not stored on
-    the server.
+- **17.7 Expired conversation, draft and interface details.** Split
+  05.11.2026 into three sub-steps:
+  - **17.7a Expired conversation** (decided 05.11.2026, found in the
+    05.11.2026 manual check; fixes gaps in 17.4b):
+    - The "expired" state is kept in `sessionStorage` next to the session
+      id until the customer opens the chat on an allowed page, so the
+      notice cannot be lost on pages where the widget is hidden or across
+      several full page loads. It is shown once, then cleared from
+      storage. The session id is still cleared at once, so the booking
+      source stays honest.
+    - While a page stays loaded, the widget re-checks history when the
+      customer opens a chat that already holds a conversation, and when
+      the tab becomes visible again with the chat open. As a fallback, if
+      a send returns a session id different from the stored one, the
+      conversation is treated as expired at that point.
+    - On a loaded page an expired conversation is not erased: old
+      messages stay, and a divider "Попередня розмова завершилась" marks
+      where the new conversation starts (at the bottom right away when
+      detected on open or tab return, or above the new customer message
+      when detected on send). Each gap longer than the session lifetime
+      gives one divider. After a full reload only the current
+      conversation is shown, as today.
+    - Possible later levers, not now: a longer session lifetime than 30
+      minutes, or collapsing older parts.
+  - **17.7b Draft message** (decided 05.11.2026): the unsent text in the
+    chat input survives minimise, navigation between pages and a full
+    reload (kept in `sessionStorage` next to the session id, same
+    lifetime as the conversation), and is cleared after sending. Not
+    synced across devices: the assistant is anonymous and unsent text is
+    not stored on the server.
+  - **17.7c Interface details:** AI notice, starter questions, desktop
+    button tooltips.
+    - A visually hidden "Асистент пише…" inside the status container
+      while the dots show, so screen readers announce that a reply is
+      coming.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
