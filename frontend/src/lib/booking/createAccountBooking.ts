@@ -27,6 +27,9 @@ export interface CreateAccountBookingParams {
    * omitted, `customer_name`/`customer_phone` are left out of the request
    * body entirely (not sent as null). */
   contact?: { name: string; phone: string };
+  /** Where the booking came from (17.6b). Sent only when given; the
+   * backend defaults to "direct". Never the assistant session id. */
+  source?: "direct" | "assistant";
 }
 
 export async function createAccountBooking({
@@ -35,6 +38,7 @@ export async function createAccountBooking({
   specialist,
   startDatetime,
   contact,
+  source,
 }: CreateAccountBookingParams): Promise<unknown> {
   const body: Record<string, unknown> = {
     service,
@@ -44,6 +48,9 @@ export async function createAccountBooking({
   if (contact !== undefined) {
     body.customer_name = contact.name;
     body.customer_phone = contact.phone;
+  }
+  if (source !== undefined) {
+    body.source = source;
   }
 
   return apiRequest(slug, "/appointments/", {

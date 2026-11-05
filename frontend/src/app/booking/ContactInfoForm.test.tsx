@@ -14,7 +14,14 @@ vi.mock("@/lib/booking/createGuestBooking", () => ({
   createGuestBooking: (...args: unknown[]) => createGuestBookingMock(...args),
 }));
 
+// 17.6b: no stored assistant session by default, so the tests above see
+// the same form as before.
+vi.mock("@/lib/assistant/sessionId", () => ({
+  readSessionId: vi.fn(() => null),
+}));
+
 import { ApiError } from "@/lib/api/errors";
+import { readSessionId } from "@/lib/assistant/sessionId";
 
 import { BookingContactInfoProvider, useBookingContactInfo } from "./BookingContactInfoContext";
 import ContactInfoForm from "./ContactInfoForm";
@@ -279,5 +286,49 @@ describe("ContactInfoForm", () => {
 
     // Clean up the dangling promise so it doesn't leak into other tests.
     resolveCreate(SUCCESS_RESULT);
+  });
+});
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.6b: the form reads the
+// stored assistant session id at submit time and passes source "assistant"
+// when one exists; otherwise no source. The id itself is never passed on.
+describe("ContactInfoForm booking source (17.6b)", () => {
+  beforeEach(() => {
+    vi.mocked(readSessionId).mockReturnValue(null);
+  });
+
+  async function submit() {
+    const user = userEvent.setup();
+    createGuestBookingMock.mockResolvedValueOnce(SUCCESS_RESULT);
+    render(
+      <BookingContactInfoProvider>
+        <ContactInfoForm {...BASE_PROPS} />
+      </BookingContactInfoProvider>,
+    );
+    await fillForm(user);
+    return async () => {
+      await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
+      await waitFor(() => expect(createGuestBookingMock).toHaveBeenCalledTimes(1));
+      return createGuestBookingMock.mock.calls[0][0] as Record<string, unknown>;
+    };
+  }
+
+  it("test_stored_session_id_at_submit_sends_source_assistant", async () => {
+    const click = await submit();
+    // Stored after render, before submit: read at submit time.
+    vi.mocked(readSessionId).mockReturnValue("sess-secret-123");
+
+    const params = await click();
+
+    expect(params.source).toBe("assistant");
+    expect(JSON.stringify(params)).not.toContain("sess-secret-123");
+  });
+
+  it("test_no_stored_session_id_sends_no_source", async () => {
+    const click = await submit();
+
+    const params = await click();
+
+    expect("source" in params).toBe(false);
   });
 });

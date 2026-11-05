@@ -23,6 +23,7 @@ import { useState, type FormEvent } from "react";
 
 import { useAuth } from "@/app/AuthContext";
 import { ApiError } from "@/lib/api/errors";
+import { readSessionId } from "@/lib/assistant/sessionId";
 import { createAccountBooking } from "@/lib/booking/createAccountBooking";
 import { isSlotGoneError } from "@/lib/booking/isSlotGoneError";
 import { isSpecialistNotOfferingError } from "@/lib/booking/step3Errors";
@@ -74,6 +75,8 @@ export default function AccountBookingForm({
         specialist,
         startDatetime,
         ...(linked ? {} : { contact: { name: customerName, phone: customerPhone } }),
+        // 17.6b: read at submit time; the id itself is never sent.
+        ...(readSessionId() !== null ? { source: "assistant" as const } : {}),
       });
       await refresh();
       router.push("/client");

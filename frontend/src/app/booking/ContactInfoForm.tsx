@@ -20,6 +20,7 @@
 import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useState, type FormEvent } from "react";
 
+import { readSessionId } from "@/lib/assistant/sessionId";
 import { createGuestBooking } from "@/lib/booking/createGuestBooking";
 import { isSlotGoneError } from "@/lib/booking/isSlotGoneError";
 import { isSpecialistNotOfferingError } from "@/lib/booking/step3Errors";
@@ -101,6 +102,8 @@ export default function ContactInfoForm({
         customerName,
         customerEmail,
         customerPhone,
+        // 17.6b: read at submit time; the id itself is never sent.
+        ...(readSessionId() !== null ? { source: "assistant" as const } : {}),
       });
       router.push(`/booking/pay#appointment_id=${result.appointment.id}&token=${result.guestToken}`);
       return;

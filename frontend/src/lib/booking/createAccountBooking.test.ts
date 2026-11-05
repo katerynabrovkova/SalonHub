@@ -110,3 +110,45 @@ describe("createAccountBooking", () => {
     ).rejects.toBe(error);
   });
 });
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.6b: `source` is sent
+// only when given; the assistant session id itself is never sent.
+describe("createAccountBooking source (17.6b)", () => {
+  const PARAMS = {
+    slug: "bella-demo",
+    service: "5",
+    specialist: "any",
+    startDatetime: "2026-08-17T09:00:00+03:00",
+  };
+
+  function sentBody(): Record<string, unknown> {
+    const [, , options] = mockedApiRequest.mock.calls[0];
+    return JSON.parse((options as RequestInit).body as string) as Record<string, unknown>;
+  }
+
+  it("test_source_assistant_is_sent_in_the_body", async () => {
+    mockedApiRequest.mockResolvedValueOnce({});
+
+    await createAccountBooking({ ...PARAMS, source: "assistant" });
+
+    expect(sentBody()).toMatchObject({ source: "assistant" });
+  });
+
+  it("test_without_source_the_body_has_no_source_key", async () => {
+    mockedApiRequest.mockResolvedValueOnce({});
+
+    await createAccountBooking(PARAMS);
+
+    expect("source" in sentBody()).toBe(false);
+  });
+
+  it("test_the_assistant_session_id_is_never_sent", async () => {
+    sessionStorage.setItem("salonhub:assistant-session", "sess-secret-123");
+    mockedApiRequest.mockResolvedValueOnce({});
+
+    await createAccountBooking({ ...PARAMS, source: "assistant" });
+
+    expect(JSON.stringify(mockedApiRequest.mock.calls[0])).not.toContain("sess-secret-123");
+    sessionStorage.clear();
+  });
+});

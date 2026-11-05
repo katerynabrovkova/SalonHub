@@ -179,3 +179,61 @@ describe("createGuestBooking", () => {
     expect(url).toBe("http://public-base:9999/api/v1/salons/bella-demo/bookings/");
   });
 });
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.6b: `source` is sent
+// only when given; the assistant session id itself is never sent.
+describe("createGuestBooking source (17.6b)", () => {
+  function mockSuccess() {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          appointment: {
+            id: 1,
+            status: "pending_payment",
+            start_datetime: "2026-08-17T09:00:00+03:00",
+            end_datetime: "2026-08-17T10:15:00+03:00",
+          },
+          guest_token: "tok-abc",
+        },
+        201,
+      ) as Response,
+    );
+  }
+
+  function sentBody(): Record<string, unknown> {
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    return JSON.parse(init?.body as string) as Record<string, unknown>;
+  }
+
+  it("test_source_assistant_is_sent_in_the_body", async () => {
+    mockSuccess();
+
+    await createGuestBooking({ ...BASE_PARAMS, source: "assistant" });
+
+    expect(sentBody()).toMatchObject({ source: "assistant" });
+  });
+
+  it("test_without_source_the_body_has_no_source_key", async () => {
+    mockSuccess();
+
+    await createGuestBooking(BASE_PARAMS);
+
+    expect("source" in sentBody()).toBe(false);
+  });
+
+  it("test_the_assistant_session_id_is_never_sent", async () => {
+    sessionStorage.setItem("salonhub:assistant-session", "sess-secret-123");
+    mockSuccess();
+
+    await createGuestBooking({ ...BASE_PARAMS, source: "assistant" });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).not.toContain("sess-secret-123");
+    expect(String(init?.body)).not.toContain("sess-secret-123");
+    const headers = new Headers(init?.headers);
+    for (const [name, value] of headers) {
+      expect(`${name}: ${value}`).not.toContain("sess-secret-123");
+    }
+    sessionStorage.clear();
+  });
+});

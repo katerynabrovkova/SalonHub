@@ -44,6 +44,9 @@ export interface CreateGuestBookingParams {
   customerName: string;
   customerEmail: string;
   customerPhone: string;
+  /** Where the booking came from (17.6b). Sent only when given; the
+   * backend defaults to "direct". Never the assistant session id. */
+  source?: "direct" | "assistant";
 }
 
 function isErrorEnvelope(
@@ -66,6 +69,7 @@ export async function createGuestBooking({
   customerName,
   customerEmail,
   customerPhone,
+  source,
 }: CreateGuestBookingParams): Promise<CreateGuestBookingResult> {
   const apiBase = process.env.NEXT_PUBLIC_API_URL;
 
@@ -79,6 +83,7 @@ export async function createGuestBooking({
       customer_name: customerName,
       customer_email: customerEmail,
       customer_phone: customerPhone,
+      ...(source !== undefined ? { source } : {}),
     }),
   });
 
