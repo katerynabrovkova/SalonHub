@@ -96,7 +96,7 @@ export default function NavigationProgress() {
     <div
       aria-hidden="true"
       data-state={visible ? "running" : "finishing"}
-      className="navigation-progress fixed inset-x-0 top-0 z-50 h-0.5 bg-neutral-400"
+      className="navigation-progress fixed inset-x-0 top-0 z-[60] h-0.5 bg-neutral-400"
     />
   );
 }

@@ -34,10 +34,15 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type FormEvent,
   type KeyboardEvent,
 } from "react";
 
 import { isAssistantPath } from "@/lib/assistant/isAssistantPath";
+import {
+  isPending as isNavigationPending,
+  subscribe as subscribeToNavigation,
+} from "@/lib/navigation/pendingNavigation";
 
 import AssistantChat, { useAssistantConversation } from "./AssistantChat";
 
@@ -129,6 +134,15 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
   const stripeRef = useRef<HTMLButtonElement>(null);
   // Set by minimise() only, so mounting collapsed never steals focus.
   const returnFocusToStripe = useRef(false);
+  // Unsubscribes the wait started by a phone card click (17.6e).
+  const stopWaitingForNavigation = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const waiting = stopWaitingForNavigation;
+    return () => {
+      waiting.current?.();
+    };
+  }, []);
 
   const shown = isAssistantPath(pathname);
   const isOpen = mode !== "collapsed";
@@ -185,18 +199,56 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
     };
   }, [isModal]);
 
+  // A manual minimise (button or Escape) or typing in the input cancels a
+  // waiting card minimise (decided 05.11.2026, 17.6e). This also covers a
+  // manual reopen while waiting: the chat stays open while it waits, so
+  // reopening it by hand always follows a manual minimise.
+  function cancelWaitingMinimise() {
+    stopWaitingForNavigation.current?.();
+    stopWaitingForNavigation.current = null;
+  }
+
   function minimise() {
+    cancelWaitingMinimise();
     returnFocusToStripe.current = true;
     setMode("collapsed");
   }
 
-  // 17.6a / block B: after a card link click the phone chat minimises so
-  // the booking form is visible. Focus is left alone (not moved to the
-  // stripe): the page is changing under it. Desktop stays as it was.
-  function handleCardNavigate() {
-    if (!isDesktop) {
-      setMode("collapsed");
+  function handleInput(event: FormEvent<HTMLDivElement>) {
+    if (event.target === inputRef.current) {
+      cancelWaitingMinimise();
     }
+  }
+
+  // 17.6a / block B, 17.6e: after a card link click the phone chat
+  // minimises so the booking form is visible, but only once the navigation
+  // has ended, so the previous page is never uncovered on the way. The
+  // pending state comes from the shared store: NavigationProgress's
+  // capture-phase listener has already started it (or not, for a link to
+  // the current URL) by the time this onClick runs, and ends it on the URL
+  // change or the 10 s safety timeout. Nothing pending: minimise at once.
+  // Focus is left alone (not moved to the stripe): the page is changing
+  // under it. Desktop stays as it was.
+  function handleCardNavigate() {
+    if (isDesktop) {
+      return;
+    }
+    if (!isNavigationPending()) {
+      setMode("collapsed");
+      return;
+    }
+    if (stopWaitingForNavigation.current !== null) {
+      return;
+    }
+    const unsubscribe = subscribeToNavigation(() => {
+      if (isNavigationPending()) {
+        return;
+      }
+      unsubscribe();
+      stopWaitingForNavigation.current = null;
+      setMode("collapsed");
+    });
+    stopWaitingForNavigation.current = unsubscribe;
   }
 
   function trapTab(event: KeyboardEvent<HTMLDivElement>) {
@@ -276,6 +328,7 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
       aria-labelledby={headingId}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
+      onInput={handleInput}
       className={`fixed z-50 flex flex-col border-zinc-200 bg-white text-zinc-900 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 ${frame}`}
     >
       <header className="flex items-center justify-between gap-2 border-b border-zinc-200 py-1 pl-4 pr-1 dark:border-zinc-700">
