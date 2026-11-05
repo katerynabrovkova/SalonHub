@@ -8207,6 +8207,11 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       whether the turn succeeds or fails. A failed turn's text is then
       not kept after a reload; accepted as a rare case, revisit only if
       it proves annoying. Blank or whitespace-only text is not stored.
+    - Implemented 05.11.2026. Frontend suite 864 passed; all seven
+      mutations killed. The draft lives in `useAssistantConversation`
+      and is written to storage on every change, since a real reload
+      runs no unmount. Chosen during GREEN and recorded afterwards:
+      retry resends the earlier text and leaves the draft alone.
   - **17.7c Interface details:** AI notice, starter questions, desktop
     button tooltips.
     - A visually hidden "Асистент пише…" inside the status container
