@@ -8186,6 +8186,16 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       conversation is shown, as today.
     - Possible later levers, not now: a longer session lifetime than 30
       minutes, or collapsing older parts.
+    - Implemented 05.11.2026. Frontend suite 840 passed; all eight
+      mutations killed (M8 only after a test for a failed re-check was
+      added). Chosen during GREEN and recorded afterwards: the
+      different-id check runs when the turn finishes (`done`), not when
+      the response arrives, because a failed turn's id is ignored as in
+      block B; its retry still sends the old id and the divider comes
+      once. A failed history re-check (error response or lost
+      connection) leaves the conversation as it is.
+      `useAssistantConversation` takes a required `open` argument (the
+      chat is open on an allowed page), with no default.
   - **17.7b Draft message** (decided 05.11.2026): the unsent text in the
     chat input survives minimise, navigation between pages and a full
     reload (kept in `sessionStorage` next to the session id, same
@@ -8206,6 +8216,11 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     missing `uk` name falls back to English in assistant replies, for
     example "coating and reinforcement"). The blank wait before the first
     word is covered by 17.5 status texts; recheck the wait after 17.5.
+  - Decide the reply-language rule: the customer's language or the
+    site's.
+  - Make the assistant's grammatical gender match the widget texts.
+  - Stop the model apologising for turns from a conversation it no
+    longer has (after an expiry).
 - **17.9 Voice input:** recon, backend endpoint, widget button.
 - **17.10 Stage 17 closure.**
 
