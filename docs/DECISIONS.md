@@ -8095,8 +8095,12 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       external, hash-only and same-URL links.
     - `lib/navigation/useNavigatingRouter.ts`: a `useRouter` whose
       `push`/`replace` call `start()` first when the target differs. It
-      replaces `useRouter` at the 16 `router.push`/`router.replace` call
-      sites.
+      replaces `useRouter` at every `router.push`/`router.replace` call
+      site (18 in 12 files on 05.11.2026). An ESLint
+      `no-restricted-imports` rule forbids `useRouter` from
+      `next/navigation` everywhere except
+      `lib/navigation/useNavigatingRouter.ts`, so a new call site cannot
+      skip the progress bar.
     - `app/NavigationProgress.tsx` in the root layout, inside `Suspense`:
       a capture-phase click listener; ends on a `usePathname` /
       `useSearchParams` change; renders a thin neutral top bar
@@ -8104,6 +8108,13 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - The pending state becomes visible only after 150 ms, so a
       navigation that finishes sooner shows nothing. Back/forward does not
       start it.
+    - The bar imitates progress (decided 05.11.2026, from the manual
+      check): it grows quickly to about 30%, slows down towards 90% and
+      never ends on its own; when the URL changes it fills to 100% and
+      fades over 200 ms; `data-navigating` is removed at once. CSS only
+      (`@starting-style`); older browsers without it show a static 90%
+      bar. With `prefers-reduced-motion`: a static partial bar, no growth
+      and no fade.
   - **17.6d Booking step while navigating:** `booking/layout.tsx` wraps
     the step with `inert`, `aria-busy="true"` and a dim style while the
     pending state is visible (same 150 ms delay). Done before 17.6b.
