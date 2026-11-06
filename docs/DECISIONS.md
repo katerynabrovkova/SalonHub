@@ -7751,10 +7751,11 @@ the widget can deliver:
   text comes back. Same assistant-enabled check and per-customer
   `safety_identifier` as the chat. The privacy policy must mention that
   OpenAI processes voice.
-- **AI notice:** one line above the input, always visible: "Відповідає
-  ШІ, він може помилятися." with a link "Як ми обробляємо дані" to the
-  privacy policy route. The header shows only "Асистент <salon name>", no
-  AI subtitle. Until the privacy page exists the link returns 404; "the
+- **AI notice:** one line above the input, always visible: the sentence
+  "Відповідає ШІ, він може помилятися." alone, which is itself the link
+  to the privacy policy route (see 17.7c). The header shows only
+  "Асистент <salon name>", no AI subtitle. Until the privacy page exists
+  the link returns 404; "the
   widget link opens the privacy page" is part of the privacy-policy gate
   ("Open items").
 - **Blocked `safety_identifier`.** The backend detects this provider
@@ -8256,12 +8257,19 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
         `VerificationBanner`, since the widget had no warm colour yet;
         revisit in the design pass. The booking link is now styled as a
         full-width button.
-    - **AI notice** (decided 06.11.2026): one line between the messages
-      and the input, always visible, including while a failure block
-      shows. The link "Як ми обробляємо дані" points to `/privacy` (404
-      until the Stage 22 page exists) and opens in a new tab, with a
-      visually hidden "(відкривається в новій вкладці)"; nothing happens
-      to the chat.
+    - **AI notice** (decided 06.11.2026, changed the same day): one line
+      between the messages and the input, always visible, including while
+      a failure block shows: the sentence "Відповідає ШІ, він може
+      помилятися." alone, centred, 11px, with no border line above it. The
+      whole sentence is the link to `/privacy` (404 until the Stage 22
+      page exists), opening in a new tab; nothing happens to the chat. At
+      rest it looks like plain text; it is underlined on hover and on
+      keyboard focus, with a visible focus ring. Its accessible name is
+      the sentence plus a visually hidden "Як ми обробляємо дані,
+      відкривається в новій вкладці". Contrast at least 4.5:1 in light
+      and dark. Reason for the change: a quiet note, as in ChatGPT,
+      rather than a panel; the earlier two-part line with a separate link
+      also wrapped badly in the small window.
     - **Starter questions** (decided 06.11.2026): chips show only while
       the conversation has no messages besides the greeting: none after
       restored history; shown again in an empty chat after an expiry
