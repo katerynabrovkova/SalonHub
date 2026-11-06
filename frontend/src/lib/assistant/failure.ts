@@ -4,7 +4,7 @@
  * single source for these texts, retry and links).
  *
  * The widget describes how the turn ended; this module decides the text,
- * whether "Спробувати ще раз" is offered and whether the "book it yourself"
+ * whether "Повторити" is offered and whether the "book it yourself"
  * link to the services page is shown. An unknown code gets the "nothing
  * arrived" row, with retry.
  */

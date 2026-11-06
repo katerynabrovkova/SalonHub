@@ -29,9 +29,10 @@
  *   card included. Unknown events are ignored.
  * - Any other ending (an `error` event, a refusal before the stream, a lost
  *   connection, a stream ending without `done`) shows its 17.5b table row:
- *   text, "Спробувати ще раз" where offered, and the "book it yourself"
- *   link where offered (lib/assistant/failure.ts). Retry resends the last
- *   customer text without a second bubble and replaces the partial reply.
+ *   text, "Повторити" where offered, and the "book it yourself" link where
+ *   offered (lib/assistant/failure.ts), in one full-width block at the end
+ *   of the message list (17.7c). Retry resends the last customer text
+ *   without a second bubble and replaces the partial reply.
  * - The request is aborted on unmount.
  * - The draft (17.7b) lives in the hook and in sessionStorage
  *   (lib/assistant/draft.ts): written on every change, cleared on send
@@ -510,6 +511,37 @@ export default function AssistantChat({
     }
   }
 
+  // 17.7c (mockup "AI 8"): one full-width block per failure, the 17.5b text
+  // on top and its action below, full width. Colours are the amber notice
+  // of client/VerificationBanner.tsx; the action keeps the widget's button
+  // style. Still one `role="status"` container, as in 17.5b.
+  const failureBlock =
+    failure === null ? null : (
+      <div
+        role="status"
+        className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+      >
+        <p>{failure.text}</p>
+        {failure.retry ? (
+          <button
+            type="button"
+            onClick={retry}
+            className="min-h-11 w-full rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
+          >
+            Повторити
+          </button>
+        ) : null}
+        {failure.link !== null ? (
+          <Link
+            href={failure.link.href}
+            className="flex min-h-11 w-full items-center justify-center rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
+          >
+            {failure.link.label}
+          </Link>
+        ) : null}
+      </div>
+    );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 text-sm">
@@ -517,7 +549,7 @@ export default function AssistantChat({
           <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">{EXPIRED_NOTICE}</p>
         ) : null}
         <p className="self-start rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800">{GREETING}</p>
-        {messages.length > 0 ? (
+        {messages.length > 0 || failure !== null ? (
           <ul aria-label="Розмова" className="flex flex-col gap-3">
             {messages.map((message) =>
               message.role === "divider" ? (
@@ -551,6 +583,8 @@ export default function AssistantChat({
                 </li>
               ),
             )}
+            {/* 17.7c: the failure is the list's last item, full width. */}
+            {failureBlock !== null ? <li>{failureBlock}</li> : null}
           </ul>
         ) : null}
         <div role="status" className="self-start text-zinc-500 dark:text-zinc-400">
@@ -571,28 +605,6 @@ export default function AssistantChat({
           ) : null}
           {statusLine !== null ? <span className="text-xs">{statusLine}</span> : null}
         </div>
-        {failure !== null ? (
-          <div
-            role="status"
-            className="flex flex-col items-start gap-2 text-zinc-600 dark:text-zinc-400"
-          >
-            <p>{failure.text}</p>
-            {failure.retry ? (
-              <button
-                type="button"
-                onClick={retry}
-                className="min-h-11 rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
-              >
-                Спробувати ще раз
-              </button>
-            ) : null}
-            {failure.link !== null ? (
-              <Link href={failure.link.href} className="underline">
-                {failure.link.label}
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
         <div ref={endRef} />
       </div>
 

@@ -305,7 +305,7 @@ describe("AssistantWidget draft is cleared (17.7b)", () => {
 describe("AssistantWidget draft and an expired conversation (17.7b)", () => {
   const SESSION_KEY = "salonhub:assistant-session";
   const EXPIRED = "Попередня розмова завершилась";
-  const RETRY = "Спробувати ще раз";
+  const RETRY = "Повторити";
   const OLD = [
     { role: "user" as const, content: "Привіт" },
     { role: "assistant" as const, content: "Вітаю!" },

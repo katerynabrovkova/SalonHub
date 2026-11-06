@@ -473,7 +473,7 @@ describe("AssistantChat statuses", () => {
 
 // docs/DECISIONS.md § "Stage 17 sub-step order", 17.5b and its table.
 describe("AssistantChat errors and retry", () => {
-  const RETRY = "Спробувати ще раз";
+  const RETRY = "Повторити";
   const BOOK_YOURSELF = "Записатись самостійно";
   const BUSY = "Зараз у мене багато співрозмовниць. Спробуйте, будь ласка, за хвилинку 🤗";
   const NETWORK = "Схоже, зник зв'язок. Перевірте інтернет і спробуйте ще раз.";
@@ -748,6 +748,191 @@ describe("AssistantChat errors and retry", () => {
     await screen.findByText("Слухаю");
     expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
   });
+
+  // docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c, failure-block item
+  // of 06.11.2026 (mockup "AI 8"): each failure is one block inside the
+  // message list, not inside an assistant bubble, holding its 17.5b text and
+  // its action; the retry button reads "Повторити". Structure only: the
+  // layout is checked by hand, so the block is found without naming markup.
+  describe("failure block (17.7c)", () => {
+    const OLD_RETRY = "Спробувати ще раз";
+    const PARTIAL = "Ось що я знайш";
+
+    type Action = "retry" | "link" | "none";
+    interface Kind {
+      name: string;
+      arrange: () => void;
+      text: string;
+      action: Action;
+    }
+
+    const KINDS: Kind[] = [
+      {
+        name: "busy",
+        arrange: () =>
+          mockedSend.mockRejectedValueOnce(new ApiError(503, "assistant_busy", "Busy")),
+        text: BUSY,
+        action: "retry",
+      },
+      {
+        name: "throttled",
+        arrange: () => mockedSend.mockRejectedValueOnce(new ApiError(429, "throttled", "Slow")),
+        text: "Ви пишете швидше, ніж я встигаю думати 😅 Зачекайте, будь ласка, хвилинку.",
+        action: "retry",
+      },
+      {
+        name: "daily_limit",
+        arrange: () =>
+          mockedSend.mockRejectedValueOnce(new ApiError(429, "assistant_daily_limit", "Limit")),
+        text: "Я сьогодні наговорився досхочу і пішов на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:",
+        action: "link",
+      },
+      {
+        name: "identifier_blocked",
+        arrange: () => failWithEvents({ type: "error", code: "assistant_identifier_blocked" }),
+        text: "На жаль, зараз я не можу відповісти. Записатися можна через форму на сайті.",
+        action: "link",
+      },
+      {
+        name: "network_before_text",
+        arrange: () => mockedSend.mockRejectedValueOnce(new TypeError("Failed to fetch")),
+        text: NETWORK,
+        action: "retry",
+      },
+      {
+        name: "network_after_text",
+        arrange: () => {
+          const channel = failingChannel();
+          mockedSend.mockResolvedValueOnce({ sessionId: "server-id", events: channel.events });
+          channel.push({ type: "text", text: PARTIAL });
+          channel.fail(new TypeError("network error"));
+        },
+        text: NETWORK,
+        action: "retry",
+      },
+      {
+        name: "cut_off_after_text",
+        arrange: () =>
+          failWithEvents(
+            { type: "text", text: PARTIAL },
+            { type: "error", code: "assistant_provider_error" },
+          ),
+        text: CUT_OFF,
+        action: "retry",
+      },
+      {
+        name: "nothing_arrived",
+        arrange: () => failWithEvents({ type: "error", code: "assistant_turn_limit" }),
+        text: NOTHING_ARRIVED,
+        action: "retry",
+      },
+      {
+        name: "not_found",
+        arrange: () => mockedSend.mockRejectedValueOnce(new ApiError(404, "not_found", "Gone")),
+        text: "Асистент зараз недоступний. Записатися можна через форму на сайті.",
+        action: "link",
+      },
+      {
+        name: "invalid",
+        arrange: () => mockedSend.mockRejectedValueOnce(new ApiError(400, "invalid", "Bad")),
+        text: NOTHING_ARRIVED,
+        action: "none",
+      },
+    ];
+
+    /** The nearest element holding both nodes. */
+    function commonAncestor(first: Element, second: Element): Element {
+      let node: Element | null = first;
+      while (node !== null && !node.contains(second)) {
+        node = node.parentElement;
+      }
+      return node as Element;
+    }
+
+    async function showFailure(kind: Kind) {
+      kind.arrange();
+      const { user } = renderChat();
+      await send(user, "Привіт");
+      const text = await screen.findByText(kind.text);
+      return { user, text };
+    }
+
+    /** The block: inside the message list, and not in an assistant bubble. */
+    function expectBlockInTheList(block: Element) {
+      const list = screen.getByRole("list", { name: "Розмова" });
+      expect(block).not.toBe(list);
+      expect(list).toContainElement(block as HTMLElement);
+      const item = block.closest("li");
+      if (item !== null) {
+        expect(item.textContent).toBe(block.textContent);
+      }
+    }
+
+    it.each(KINDS)("test_failure_text_and_action_share_one_block_in_the_list_($name)", async (kind) => {
+      const { text } = await showFailure(kind);
+
+      const action =
+        kind.action === "retry"
+          ? screen.getByRole("button", { name: RETRY })
+          : kind.action === "link"
+            ? screen.getByRole("link", { name: BOOK_YOURSELF })
+            : null;
+      const block = action === null ? text : commonAncestor(text, action);
+
+      expectBlockInTheList(block);
+    });
+
+    it.each(KINDS.filter((kind) => kind.action === "retry"))(
+      "test_retryable_failure_has_povtoryty_and_no_old_retry_text_($name)",
+      async (kind) => {
+        const { text } = await showFailure(kind);
+
+        const button = screen.getByRole("button", { name: RETRY });
+        expectBlockInTheList(commonAncestor(text, button));
+        expect(screen.queryByText(OLD_RETRY)).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: OLD_RETRY })).not.toBeInTheDocument();
+        expect(screen.queryByRole("link", { name: OLD_RETRY })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText(OLD_RETRY)).not.toBeInTheDocument();
+      },
+    );
+
+    it.each(KINDS.filter((kind) => kind.action === "link"))(
+      "test_non_retryable_failure_has_the_booking_link_in_the_block_and_no_retry_($name)",
+      async (kind) => {
+        const { text } = await showFailure(kind);
+
+        const link = screen.getByRole("link", { name: BOOK_YOURSELF });
+        expect(link).toHaveAttribute("href", "/services");
+        expectBlockInTheList(commonAncestor(text, link));
+        expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: OLD_RETRY })).not.toBeInTheDocument();
+      },
+    );
+
+    it("test_povtoryty_retries_the_same_text_and_the_block_goes_away", async () => {
+      mockedSend.mockRejectedValueOnce(new ApiError(503, "assistant_busy", "Busy"));
+      const retried = replyWith("server-id");
+      const { user } = renderChat();
+      await send(user, "Привіт");
+      await screen.findByText(BUSY);
+
+      await user.click(screen.getByRole("button", { name: RETRY }));
+      retried.push({ type: "text", text: "Від 500 грн." }, { type: "done" });
+      retried.end();
+
+      expect(await screen.findByText("Від 500 грн.")).toBeInTheDocument();
+      expect(mockedSend).toHaveBeenCalledTimes(2);
+      expect(mockedSend).toHaveBeenLastCalledWith(
+        "bella-demo",
+        "Привіт",
+        null,
+        expect.any(AbortSignal),
+      );
+      expect(screen.getAllByText("Привіт")).toHaveLength(1);
+      expect(screen.queryByText(BUSY)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
+    });
+  });
 });
 
 // docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c, item of 06.11.2026:
@@ -757,7 +942,7 @@ describe("AssistantChat errors and retry", () => {
 describe("AssistantChat while a reply streams (17.7c)", () => {
   const DOTS = "assistant-typing-dots";
   const DRAFT_KEY = "salonhub:assistant-draft";
-  const RETRY = "Спробувати ще раз";
+  const RETRY = "Повторити";
   const LATER = "А в неділю?";
 
   // The draft lives in real sessionStorage; keep it from leaking between tests.
@@ -1045,7 +1230,7 @@ describe("AssistantChat proposal card", () => {
     await screen.findByText(SERVICE_NAME);
 
     const retried = replyWith("server-id");
-    await user.click(screen.getByRole("button", { name: "Спробувати ще раз" }));
+    await user.click(screen.getByRole("button", { name: "Повторити" }));
     retried.push({ type: "text", text: "Спробуйте інший день" }, { type: "done" });
     retried.end();
 
