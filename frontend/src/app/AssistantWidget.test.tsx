@@ -786,3 +786,114 @@ describe("AssistantWidget conversation", () => {
     });
   });
 });
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c, AI notice item of
+// 06.11.2026, and § "Stage 17 block D" (AI notice).
+describe("AssistantWidget AI notice (17.7c)", () => {
+  const NOTICE = "ШІ може помилятися. Перевіряйте важливу інформацію.";
+  const INPUT = "Повідомлення";
+  // 17.7c, changed 06.11.2026: the sentence alone is the link.
+  const HIDDEN_PART = "Як ми обробляємо дані, відкривається в новій вкладці";
+
+  function isBefore(first: Element, second: Element): boolean {
+    return Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+
+  /** The notice: the link whose accessible name starts with the sentence. */
+  function noticeLink(): HTMLElement {
+    return screen.getByRole("link", { name: (name) => name.startsWith(NOTICE) });
+  }
+
+  /** The element's text without its visually hidden (sr-only) parts. */
+  function visibleText(element: Element): string {
+    const copy = element.cloneNode(true) as Element;
+    copy.querySelectorAll(".sr-only").forEach((hidden) => hidden.remove());
+    return (copy.textContent ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  it.each(VIEWPORTS)(
+    "test_notice_comes_after_the_input_form_($name)",
+    async ({ width }) => {
+      viewportWidth = width;
+      vi.mocked(readSessionId).mockReturnValue("stored-id");
+      // Live on every request, so reopening finds no expiry (17.7a).
+      vi.mocked(getAssistantHistory).mockResolvedValue([
+        { role: "user", content: "Привіт" },
+        { role: "assistant", content: "Вітаю!" },
+      ]);
+      const { user } = renderWidget();
+      await openChat(user);
+      await screen.findByText("Вітаю!");
+
+      const list = screen.getByRole("list", { name: "Розмова" });
+      const notice = noticeLink();
+      const input = screen.getByRole("textbox", { name: INPUT });
+      expect(notice).toBeVisible();
+      expect(screen.getByRole("dialog")).toContainElement(notice);
+      const form = input.closest("form") as HTMLFormElement;
+      expect(list).not.toContainElement(notice);
+      expect(form).not.toContainElement(notice);
+      expect(isBefore(list, notice)).toBe(true);
+      expect(isBefore(form, notice)).toBe(true);
+    },
+  );
+
+  it("test_notice_link_opens_the_privacy_page_in_a_new_tab", async () => {
+    const { user } = renderWidget();
+    await openChat(user);
+
+    const link = noticeLink();
+    expect(visibleText(link)).toBe(NOTICE);
+    expect(link).toHaveAttribute("href", "/privacy");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link.getAttribute("rel") ?? "").toMatch(/(^|\s)noopener(\s|$)/);
+  });
+
+  it("test_notice_name_adds_the_hidden_destination", async () => {
+    const { user } = renderWidget();
+    await openChat(user);
+
+    const link = noticeLink();
+    expect(link).toHaveAccessibleName(expect.stringContaining(NOTICE));
+    expect(link).toHaveAccessibleName(expect.stringContaining(HIDDEN_PART));
+    expect(within(link).getByText(HIDDEN_PART)).toHaveClass("sr-only");
+  });
+
+  it("test_no_visible_how_we_process_data_text_in_the_chat", async () => {
+    const { user } = renderWidget();
+    const dialog = await openChat(user);
+
+    expect(visibleText(dialog)).not.toContain("Як ми обробляємо дані");
+  });
+});
+
+// docs/DECISIONS.md § "Stage 17 block B" (header buttons) and § "Stage 17
+// sub-step order", 17.7c (decided 06.11.2026): the native `title` is the
+// desktop hover tooltip, equal to the aria-label; built in 17.3c.
+describe("AssistantWidget header tooltips (17.7c)", () => {
+  function expectTitleEqualsLabel(button: HTMLElement) {
+    expect(button).toHaveAttribute("title", button.getAttribute("aria-label") ?? "");
+  }
+
+  it("test_desktop_header_buttons_have_a_title_equal_to_their_label", async () => {
+    viewportWidth = DESKTOP_WIDTH;
+    const { user } = renderWidget();
+    await openChat(user);
+
+    expectTitleEqualsLabel(screen.getByRole("button", { name: TO_PANEL }));
+    expectTitleEqualsLabel(screen.getByRole("button", { name: MINIMISE }));
+
+    await user.click(screen.getByRole("button", { name: TO_PANEL }));
+
+    expectTitleEqualsLabel(screen.getByRole("button", { name: TO_WINDOW }));
+    expectTitleEqualsLabel(screen.getByRole("button", { name: MINIMISE }));
+  });
+
+  it("test_phone_minimise_button_has_no_title", async () => {
+    viewportWidth = PHONE_WIDTH;
+    const { user } = renderWidget();
+    await openChat(user);
+
+    expect(screen.getByRole("button", { name: MINIMISE })).not.toHaveAttribute("title");
+  });
+});

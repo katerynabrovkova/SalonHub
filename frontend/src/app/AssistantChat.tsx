@@ -42,6 +42,10 @@
  *   enabled, so text typed meanwhile is the draft; only sending is blocked
  *   (the send button is disabled, Enter does not send). After a send the
  *   view calls `onSend`, where the widget moves focus by device.
+ * - 17.7c: the AI notice is one line below the input, always visible; the
+ *   whole text is the link, opening `/privacy` in a new tab, with a
+ *   visually hidden destination in its name. While the dots show, a visually
+ *   hidden "Асистент пише…" in the status container is what is announced.
  */
 
 import {
@@ -76,6 +80,14 @@ import AssistantProposalCard from "./AssistantProposalCard";
 const GREETING =
   "Вітаю! Я допоможу дізнатися ціни, обрати послугу і знайти вільний час у нашому салоні. Що Вас цікавить?";
 const EXPIRED_NOTICE = "Попередня розмова завершилась";
+// 17.7c and "Stage 17 block D" (AI notice). `/privacy` returns 404 until the
+// Stage 22 privacy page exists.
+const AI_NOTICE = "ШІ може помилятися. Перевіряйте важливу інформацію.";
+// Visually hidden, so the link's name says where it leads (17.7c).
+const AI_NOTICE_DESTINATION = "Як ми обробляємо дані, відкривається в новій вкладці";
+const PRIVACY_HREF = "/privacy";
+// 17.7c: visually hidden, announced while the dots show.
+const TYPING_TEXT = "Асистент пише…";
 
 // Same limit as the backend serializer (ai_assistant/serializers.py).
 const MAX_MESSAGE_LENGTH = 2000;
@@ -588,6 +600,8 @@ export default function AssistantChat({
           </ul>
         ) : null}
         <div role="status" className="self-start text-zinc-500 dark:text-zinc-400">
+          {/* 17.7c: the dots are aria-hidden, so this is what is announced. */}
+          {showDots ? <span className="sr-only">{TYPING_TEXT}</span> : null}
           {showDots ? (
             <span
               data-testid="assistant-typing-dots"
@@ -608,10 +622,7 @@ export default function AssistantChat({
         <div ref={endRef} />
       </div>
 
-      <form
-        onSubmit={submit}
-        className="flex items-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-700"
-      >
+      <form onSubmit={submit} className="flex items-end gap-2 px-3 pt-3 pb-1">
         <textarea
           ref={inputRef}
           aria-label="Повідомлення"
@@ -631,6 +642,21 @@ export default function AssistantChat({
           Надіслати
         </button>
       </form>
+      {/* 17.7c (changed twice 06.11.2026): the AI notice is a quiet line
+          below the input form, always visible; the whole text is the link.
+          The bottom padding keeps it off the window edge and, on a phone,
+          above the home indicator. */}
+      <p className="px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] text-center text-[11px] text-zinc-500 dark:text-zinc-400">
+        <Link
+          href={PRIVACY_HREF}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+        >
+          {AI_NOTICE}
+          <span className="sr-only"> {AI_NOTICE_DESTINATION}</span>
+        </Link>
+      </p>
     </div>
   );
 }

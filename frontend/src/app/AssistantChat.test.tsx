@@ -1238,3 +1238,91 @@ describe("AssistantChat proposal card", () => {
     expect(screen.queryByText(SERVICE_NAME)).not.toBeInTheDocument();
   });
 });
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c, AI notice item of
+// 06.11.2026: always visible, including while a failure block shows. Its
+// place and link on phone and desktop: AssistantWidget.test.
+describe("AssistantChat AI notice (17.7c)", () => {
+  const NOTICE = "ШІ може помилятися. Перевіряйте важливу інформацію.";
+  const BUSY = "Зараз у мене багато співрозмовниць. Спробуйте, будь ласка, за хвилинку 🤗";
+
+  it("test_notice_stays_after_the_input_form_while_a_failure_shows", async () => {
+    mockedSend.mockRejectedValueOnce(new ApiError(503, "assistant_busy", "Busy"));
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await screen.findByText(BUSY);
+
+    const list = screen.getByRole("list", { name: "Розмова" });
+    // 17.7c, changed 06.11.2026: the sentence alone is the link.
+    const notice = screen.getByRole("link", { name: (name) => name.startsWith(NOTICE) });
+    const input = screen.getByRole("textbox", { name: INPUT });
+    expect(notice).toBeVisible();
+    const form = input.closest("form") as HTMLFormElement;
+    expect(list).not.toContainElement(notice);
+    expect(form).not.toContainElement(notice);
+    expect(list.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(form.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c: a visually hidden
+// "Асистент пише…" in the status container while the dots show (decided
+// 06.11.2026: only then; a status line replacing the dots is announced
+// itself).
+describe("AssistantChat hidden typing text (17.7c)", () => {
+  const DOTS = "assistant-typing-dots";
+  const TYPING = "Асистент пише…";
+  const CHECKING = "Перевіряю вільний час…";
+
+  /** The status container that holds the dots. */
+  function statusContainer(): HTMLElement {
+    return screen.getByTestId(DOTS).closest('[role="status"]') as HTMLElement;
+  }
+
+  /** The hidden text is in the container, sr-only, and not aria-hidden. */
+  function expectTypingTextIn(container: HTMLElement) {
+    const typing = within(container).getByText(TYPING);
+    expect(typing).toHaveClass("sr-only");
+    expect(typing.closest('[aria-hidden="true"]')).toBeNull();
+  }
+
+  it("test_typing_text_is_in_the_status_container_while_the_dots_show", async () => {
+    replyWith();
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await screen.findByTestId(DOTS);
+
+    expectTypingTextIn(statusContainer());
+  });
+
+  it("test_a_status_line_replaces_the_typing_text", async () => {
+    const channel = replyWith();
+    const { user } = renderChat();
+    await send(user, "Чи є час у суботу?");
+    await screen.findByTestId(DOTS);
+    const container = statusContainer();
+    expectTypingTextIn(container);
+
+    channel.push({ type: "status", step: "check_availability" });
+
+    expect(await within(container).findByText(CHECKING)).toBeInTheDocument();
+    expect(screen.queryByText(TYPING)).not.toBeInTheDocument();
+  });
+
+  it("test_nothing_is_announced_after_the_reply_ends", async () => {
+    const channel = replyWith("server-id");
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await screen.findByTestId(DOTS);
+    expectTypingTextIn(statusContainer());
+
+    channel.push({ type: "status", step: "check_availability" }, { type: "done" });
+    channel.end();
+    // The id is stored only at `done`, so this waits for the end of the turn.
+    await waitFor(() => expect(mockedStore).toHaveBeenCalledWith("server-id"));
+
+    expect(screen.queryByText(TYPING)).not.toBeInTheDocument();
+    expect(screen.queryByText(CHECKING)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(DOTS)).not.toBeInTheDocument();
+  });
+});
