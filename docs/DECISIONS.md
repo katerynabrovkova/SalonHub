@@ -8312,6 +8312,14 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       matches the screen.
     - Reason: the conversation, cards and draft already survive a reload;
       the open state was the only piece that did not.
+    - Implemented 06.11.2026. Frontend suite 934 passed; all mutations
+      killed (seven, plus the pin-at-click one after the restored-chat card
+      test was added). The restore uses `useSyncExternalStore` with a
+      collapsed server snapshot, as in `PaymentStatus`, not a `setState`
+      in an effect (`react-hooks/set-state-in-effect`); agreed before the
+      code was written. The customer's first change is pinned in state and
+      takes over from the stored value; a phone card click pins the current
+      mode before storing "collapsed".
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
