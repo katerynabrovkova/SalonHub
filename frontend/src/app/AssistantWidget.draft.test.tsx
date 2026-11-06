@@ -203,8 +203,9 @@ describe("AssistantWidget draft survives (17.7b)", () => {
     await first.user.type(input(), DRAFT);
     first.unmount();
 
-    const second = renderWidget();
-    await openChat(second.user);
+    renderWidget();
+    // 17.7d: the chat comes back open after a full reload.
+    await screen.findByRole("dialog");
 
     expect(input()).toHaveValue(DRAFT);
   });
@@ -218,8 +219,9 @@ describe("AssistantWidget draft is cleared (17.7b)", () => {
     await first.user.clear(input());
     first.unmount();
 
-    const second = renderWidget();
-    await openChat(second.user);
+    renderWidget();
+    // 17.7d: the chat comes back open after a full reload.
+    await screen.findByRole("dialog");
 
     expect(input()).toHaveValue("");
     expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();
@@ -235,8 +237,9 @@ describe("AssistantWidget draft is cleared (17.7b)", () => {
     expect(input()).toHaveValue("");
     first.unmount();
 
-    const second = renderWidget();
-    await openChat(second.user);
+    renderWidget();
+    // 17.7d: the chat comes back open after a full reload.
+    await screen.findByRole("dialog");
 
     expect(input()).toHaveValue("");
     expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();
@@ -269,8 +272,9 @@ describe("AssistantWidget draft is cleared (17.7b)", () => {
     await screen.findByText(failureText);
     first.unmount();
 
-    const second = renderWidget();
-    await openChat(second.user);
+    renderWidget();
+    // 17.7d: the chat comes back open after a full reload.
+    await screen.findByRole("dialog");
 
     expect(input()).toHaveValue("");
     expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();

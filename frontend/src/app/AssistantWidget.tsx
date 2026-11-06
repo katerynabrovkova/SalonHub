@@ -7,7 +7,9 @@
  *
  * - Shown only on allowlisted paths (isAssistantPath). On any other path it
  *   renders nothing but stays mounted in the root layout, so its state
- *   survives the visit; a full reload starts collapsed.
+ *   survives the visit. 17.7d: the mode is kept in sessionStorage and
+ *   restored right after hydration after a full reload, without taking
+ *   focus.
  * - Collapsed: a stripe on the right edge, slightly below the middle (26 px
  *   visible inside a 44 px tap area).
  * - Phone (< lg): the opened chat is full screen and modal — focus trap, no
@@ -39,6 +41,7 @@ import {
 } from "react";
 
 import { isAssistantPath } from "@/lib/assistant/isAssistantPath";
+import { readWidgetMode, storeWidgetMode, type WidgetMode } from "@/lib/assistant/widgetMode";
 import {
   isPending as isNavigationPending,
   subscribe as subscribeToNavigation,
@@ -51,7 +54,7 @@ export interface AssistantWidgetProps {
   slug: string;
 }
 
-type Mode = "collapsed" | "window" | "panel";
+type Mode = WidgetMode;
 
 // Tailwind's `lg`, the same breakpoint as the globals.css panel rule.
 const DESKTOP_QUERY = "(min-width: 1024px)";
@@ -74,6 +77,17 @@ function readDesktop(): boolean {
 // phone default never shows as a wrong layout.
 function readDesktopOnServer(): boolean {
   return false;
+}
+
+// 17.7d: the stored mode changes only through the widget itself, which
+// pins it in state, so there is nothing to subscribe to.
+function subscribeNever(): () => void {
+  return () => {};
+}
+
+// The server cannot read sessionStorage: its markup is always the stripe.
+function readModeOnServer(): WidgetMode {
+  return "collapsed";
 }
 
 const iconProps = {
@@ -125,7 +139,14 @@ const HEADER_BUTTON =
 
 export default function AssistantWidget({ salonName, slug }: AssistantWidgetProps) {
   const pathname = usePathname();
-  const [mode, setMode] = useState<Mode>("collapsed");
+  // 17.7d: the stored mode, read like the PaymentStatus hash. The server
+  // snapshot is "collapsed", so the server markup and the hydrating render
+  // are the stripe and the stored mode applies right after hydration. The
+  // subscription never fires; the customer's first change of mode (or a
+  // phone card click) pins it in `chosenMode`, which takes over from then on.
+  const storedMode = useSyncExternalStore(subscribeNever, readWidgetMode, readModeOnServer);
+  const [chosenMode, setChosenMode] = useState<Mode | null>(null);
+  const mode = chosenMode ?? storedMode;
   const shown = isAssistantPath(pathname);
   const isOpen = mode !== "collapsed";
   // 17.7a: "open" for the conversation means open on an allowed page.
@@ -137,6 +158,19 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
   const stripeRef = useRef<HTMLButtonElement>(null);
   // Set by minimise() only, so mounting collapsed never steals focus.
   const returnFocusToStripe = useRef(false);
+  // 17.7d: every mode change the customer makes is stored for the tab.
+  function setMode(next: Mode) {
+    setChosenMode(next);
+    storeWidgetMode(next);
+  }
+
+  // Read by the open effect below without re-running it: null means the
+  // chat is open only because a stored mode was restored, which takes no
+  // focus (17.7d). Declared before it, so it is current in the same commit.
+  const chosenModeRef = useRef(chosenMode);
+  useEffect(() => {
+    chosenModeRef.current = chosenMode;
+  }, [chosenMode]);
   // Unsubscribes the wait started by a phone card click (17.6e).
   const stopWaitingForNavigation = useRef<(() => void) | null>(null);
 
@@ -162,6 +196,11 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
       return;
     }
     if (isOpen) {
+      // A restored chat (17.7d) takes no focus; only an open by the
+      // customer does.
+      if (chosenModeRef.current === null) {
+        return;
+      }
       // The input, unless a reply is streaming: then the dialog, as before
       // 17.7c made the input stay enabled while streaming.
       const input = inputRef.current;
@@ -239,8 +278,15 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
   }
 
   function handleInput(event: FormEvent<HTMLDivElement>) {
-    if (event.target === inputRef.current) {
-      cancelWaitingMinimise();
+    if (event.target !== inputRef.current) {
+      return;
+    }
+    // 17.7d (decided 06.11.2026): the card click stored "collapsed"; typing
+    // keeps the chat open, so its open mode is stored again.
+    const wasWaiting = stopWaitingForNavigation.current !== null;
+    cancelWaitingMinimise();
+    if (wasWaiting) {
+      storeWidgetMode(mode);
     }
   }
 
@@ -257,6 +303,11 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
     if (isDesktop) {
       return;
     }
+    // 17.7d: stored at the click, so a reload during the navigation shows
+    // the stripe, not the chat over the booking page. The current mode is
+    // pinned first, so the chat stays open on screen until the minimise.
+    setChosenMode(mode);
+    storeWidgetMode("collapsed");
     if (!isNavigationPending()) {
       setMode("collapsed");
       return;

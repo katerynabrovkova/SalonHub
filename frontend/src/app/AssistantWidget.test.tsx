@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mutable pathname read by the mocked usePathname, so a test can move the
@@ -34,13 +35,16 @@ vi.mock("@/lib/assistant/sessionId", () => ({
 // Imported after the mock above so the mocked module is what the widget sees.
 import type { AssistantEvent } from "@/lib/assistant/assistantApi";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
-import { readSessionId, storeSessionId } from "@/lib/assistant/sessionId";
+import { readConversationExpired, readSessionId, storeSessionId } from "@/lib/assistant/sessionId";
 import { end } from "@/lib/navigation/pendingNavigation";
 
 import AssistantWidget from "./AssistantWidget";
 import NavigationProgress from "./NavigationProgress";
 
 beforeEach(() => {
+  // 17.7d: the widget mode is stored in real sessionStorage; keep it (and
+  // the 17.7b draft) from leaking between tests.
+  sessionStorage.clear();
   vi.mocked(sendAssistantMessage).mockReset();
   vi.mocked(getAssistantHistory).mockReset();
   vi.mocked(readSessionId).mockReset();
@@ -56,6 +60,8 @@ const MINIMISE = "Згорнути";
 const TO_PANEL = "Розгорнути";
 const TO_WINDOW = "Зменшити";
 const PANEL_ATTRIBUTE = "data-assistant-panel";
+// 17.7d: the stored widget mode (lib/assistant/widgetMode.ts).
+const MODE_KEY = "salonhub:assistant-mode";
 
 const PHONE_WIDTH = 375;
 const DESKTOP_WIDTH = 1280;
@@ -126,15 +132,16 @@ describe("AssistantWidget visibility", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("test_starts_collapsed_after_a_full_reload", async () => {
+  // 17.7d (decided 06.11.2026), replacing the 17.3c "starts collapsed".
+  it("test_restores_the_open_chat_after_a_full_reload", async () => {
     const { user, unmount } = renderWidget();
     await openChat(user);
     unmount();
 
     renderWidget();
 
-    expect(screen.getByRole("button", { name: STRIPE })).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: STRIPE })).not.toBeInTheDocument();
   });
 });
 
@@ -340,6 +347,154 @@ describe("AssistantWidget across navigation", () => {
     expect(screen.getByRole("dialog")).toContainElement(
       screen.getByRole("heading", { name: "Асистент Bella" }),
     );
+  });
+});
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.7d (decided
+// 06.11.2026): the mode is kept in sessionStorage for the life of the tab
+// and restored right after mount; the server render (and so the first
+// client render) stays collapsed; a restored chat does not take focus. The
+// phone card-click cases are in "after a card click (17.6e)".
+describe("AssistantWidget open state after reload (17.7d)", () => {
+  const EXPIRED = "Попередня розмова завершилась";
+  const INPUT = "Повідомлення";
+
+  afterEach(() => {
+    vi.mocked(readConversationExpired).mockReset();
+  });
+
+  it("test_opening_stores_window", async () => {
+    const { user } = renderWidget();
+
+    await openChat(user);
+
+    expect(sessionStorage.getItem(MODE_KEY)).toBe("window");
+  });
+
+  it("test_resizing_stores_panel_then_window", async () => {
+    viewportWidth = DESKTOP_WIDTH;
+    const { user } = renderWidget();
+    await openChat(user);
+
+    await user.click(screen.getByRole("button", { name: TO_PANEL }));
+    expect(sessionStorage.getItem(MODE_KEY)).toBe("panel");
+
+    await user.click(screen.getByRole("button", { name: TO_WINDOW }));
+    expect(sessionStorage.getItem(MODE_KEY)).toBe("window");
+  });
+
+  it.each(["button", "escape"] as const)("test_minimising_stores_collapsed_(%s)", async (how) => {
+    const { user } = renderWidget();
+    await openChat(user);
+
+    if (how === "button") {
+      await user.click(screen.getByRole("button", { name: MINIMISE }));
+    } else {
+      await user.keyboard("{Escape}");
+    }
+
+    expect(sessionStorage.getItem(MODE_KEY)).toBe("collapsed");
+  });
+
+  it.each([
+    { mode: "window", panel: false, resize: TO_PANEL },
+    { mode: "panel", panel: true, resize: TO_WINDOW },
+  ])("test_desktop_restores_the_stored_mode_after_mount_($mode)", async ({ mode, panel, resize }) => {
+    viewportWidth = DESKTOP_WIDTH;
+    sessionStorage.setItem(MODE_KEY, mode);
+
+    renderWidget();
+
+    expect(await screen.findByRole("dialog")).not.toHaveAttribute("aria-modal");
+    expect(screen.getByRole("button", { name: resize })).toBeInTheDocument();
+    if (panel) {
+      expect(document.documentElement).toHaveAttribute(PANEL_ATTRIBUTE);
+    } else {
+      expect(document.documentElement).not.toHaveAttribute(PANEL_ATTRIBUTE);
+    }
+  });
+
+  it.each(["window", "panel"])(
+    "test_phone_restores_an_open_mode_as_the_full_screen_chat_(%s)",
+    async (mode) => {
+      viewportWidth = PHONE_WIDTH;
+      sessionStorage.setItem(MODE_KEY, mode);
+
+      renderWidget();
+
+      expect(await screen.findByRole("dialog")).toHaveAttribute("aria-modal", "true");
+      expect(document.documentElement).not.toHaveAttribute(PANEL_ATTRIBUTE);
+    },
+  );
+
+  // The server cannot read sessionStorage, so its markup (and the first
+  // client render, which must match it) is the stripe. jsdom has a
+  // sessionStorage, so reading it during render would show up here.
+  it.each(["window", "panel"])(
+    "test_server_render_is_collapsed_whatever_is_stored_(%s)",
+    (mode) => {
+      sessionStorage.setItem(MODE_KEY, mode);
+
+      const html = renderToString(<AssistantWidget salonName="Bella" slug="bella-demo" />);
+
+      expect(html).toContain(`aria-label="${STRIPE}"`);
+      expect(html).not.toContain('role="dialog"');
+    },
+  );
+
+  it.each(VIEWPORTS)(
+    "test_restored_chat_takes_no_focus_until_the_customer_opens_it_($name)",
+    async ({ width }) => {
+      viewportWidth = width;
+      sessionStorage.setItem(MODE_KEY, "window");
+      const { user } = renderWidget();
+
+      const dialog = await screen.findByRole("dialog");
+      expect(document.activeElement).not.toBe(dialog);
+      expect(dialog).not.toContainElement(document.activeElement as HTMLElement);
+
+      await user.click(screen.getByRole("button", { name: MINIMISE }));
+      await openChat(user);
+
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: INPUT }));
+    },
+  );
+
+  it("test_remount_on_an_excluded_page_renders_nothing_then_the_stored_mode_opens", async () => {
+    sessionStorage.setItem(MODE_KEY, "window");
+    nav.pathname = "/login";
+    const { container, rerender } = renderWidget();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(container).toBeEmptyDOMElement();
+
+    nav.pathname = "/services";
+    rerender(<AssistantWidget salonName="Bella" slug="bella-demo" />);
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      name: "found_on_this_load",
+      arrange: () => {
+        vi.mocked(readSessionId).mockReturnValue("stored-id");
+        vi.mocked(getAssistantHistory).mockResolvedValue([]);
+      },
+    },
+    {
+      name: "flag_from_an_earlier_load",
+      arrange: () => {
+        vi.mocked(readConversationExpired).mockReturnValue(true);
+      },
+    },
+  ])("test_restored_open_chat_shows_the_expired_notice_($name)", async ({ arrange }) => {
+    arrange();
+    sessionStorage.setItem(MODE_KEY, "window");
+
+    renderWidget();
+
+    await screen.findByRole("dialog");
+    expect(await screen.findByText(EXPIRED)).toBeInTheDocument();
   });
 });
 
@@ -771,6 +926,83 @@ describe("AssistantWidget conversation", () => {
 
       expect(screen.getByRole("dialog")).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: INPUT })).toHaveValue("А ще питання");
+    });
+
+    // 17.7d (decided 06.11.2026): the card click stores "collapsed" at the
+    // click, so a full reload during the navigation shows the stripe.
+    it("test_phone_card_click_stores_collapsed_at_once_so_a_remount_shows_the_stripe", async () => {
+      viewportWidth = PHONE_WIDTH;
+      const { user } = renderWithProgress();
+      const link = await openCardReply(user);
+      vi.useFakeTimers();
+
+      fireEvent.click(link);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(sessionStorage.getItem(MODE_KEY)).toBe("collapsed");
+
+      cleanup();
+      render(<AssistantWidget salonName="Bella" slug="bella-demo" />);
+
+      expect(screen.getByRole("button", { name: STRIPE })).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    // 17.7d: a chat restored open after a reload, then a phone card click:
+    // it stays open until the navigation ends, then minimises. The re-render
+    // before the URL change stands for any re-render during the navigation
+    // (a parent update, a stream event); "collapsed" is already stored by
+    // then, so the chat must not read it back and close early.
+    it("test_phone_restored_chat_stays_open_after_a_card_click_until_the_navigation_ends", async () => {
+      viewportWidth = PHONE_WIDTH;
+      sessionStorage.setItem(MODE_KEY, "window");
+      vi.mocked(readSessionId).mockReturnValue("stored-id");
+      vi.mocked(getAssistantHistory).mockResolvedValue([
+        { role: "user", content: "Запишіть мене" },
+        {
+          role: "assistant",
+          content: "",
+          card: {
+            service: { id: 7, name: "Манікюр з покриттям", duration_minutes: 60 },
+            specialist: "any",
+            price: "500.00",
+            deposit: "100.00",
+            due_at_visit: "400.00",
+            currency: "UAH",
+            slots: [],
+          },
+        },
+      ]);
+      const { rerenderAll } = renderWithProgress();
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      const link = await screen.findByRole("link", { name: "Обрати час" });
+      vi.useFakeTimers();
+
+      fireEvent.click(link);
+      expect(sessionStorage.getItem(MODE_KEY)).toBe("collapsed");
+      rerenderAll();
+      advance(5_000);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      changeUrl(rerenderAll);
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    // 17.7d (decided 06.11.2026): typing that cancels the pending minimise
+    // stores the open mode again, so the stored mode matches the screen.
+    it("test_phone_typing_after_a_card_click_stores_the_open_mode_again", async () => {
+      viewportWidth = PHONE_WIDTH;
+      const { user } = renderWithProgress();
+      const link = await openCardReply(user);
+      vi.useFakeTimers();
+
+      fireEvent.click(link);
+      expect(sessionStorage.getItem(MODE_KEY)).toBe("collapsed");
+      fireEvent.input(screen.getByRole("textbox", { name: INPUT }), {
+        target: { value: "А ще питання" },
+      });
+
+      expect(sessionStorage.getItem(MODE_KEY)).toBe("window");
     });
 
     it("test_desktop_card_click_leaves_the_chat_open_after_the_url_changes", async () => {

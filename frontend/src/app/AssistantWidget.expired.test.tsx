@@ -160,8 +160,9 @@ describe("AssistantWidget expired conversation across full loads (17.7a)", () =>
     expect(sessionStorage.getItem(EXPIRED_KEY)).toBeNull();
     second.unmount();
 
-    const third = renderWidget();
-    await openChat(third.user);
+    renderWidget();
+    // 17.7d: the chat comes back open after a full reload.
+    await screen.findByRole("dialog");
     await tick();
     expect(screen.queryByText(EXPIRED)).not.toBeInTheDocument();
   });
