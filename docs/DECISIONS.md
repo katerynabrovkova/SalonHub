@@ -6819,7 +6819,7 @@ below were checked in OpenAI's docs (developers.openai.com) and on PyPI on
   including after part of the text was streamed. This was proposed in the
   recon and not discussed point by point. The orchestrator then stores
   nothing, and these errors stay `assistant_provider_error`, so
-  "Спробувати ще раз" works as decided in "Product decisions". A blocked
+  retry works as decided in "Product decisions". A blocked
   `safety_identifier` is the one exception (see "The blocked error"
   below).
 - **Details agreed 26.10.2026:**
@@ -7686,8 +7686,8 @@ the widget can deliver:
   chat minimises so the booking form is visible; on desktop it stays as it
   was.
 - **`assistant_busy` (503) and throttled (429):** the text from the 17.5b
-  table ("Stage 17 sub-step order") and a "Спробувати ще раз" button; no
-  automatic retry. The widget does not need `Retry-After`, so
+  table ("Stage 17 sub-step order") and a "Повторити" button (see 17.7c);
+  no automatic retry. The widget does not need `Retry-After`, so
   `CORS_EXPOSE_HEADERS` stays unchanged. A busy refusal does not use up
   the daily limit (Stage 16, 8b).
 - **Expired conversation.** If the widget has a stored session id but
@@ -7993,7 +7993,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       (built in GREEN, agreed afterwards); focus returns to the input
       after a reply on desktop only (see also 17.7c).
 - **17.5 Statuses and errors:** status texts, busy, limits, cut-off reply,
-  blocked customer, "Спробувати ще раз". Details decided 03.11.2026, after
+  blocked customer, "Повторити" (see 17.7c). Details decided 03.11.2026, after
   the 17.5 recon, in two sub-steps:
   - **17.5a Statuses.**
     - The step texts from block D ("Stage 17 block D", working
@@ -8010,7 +8010,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   - **17.5b Errors and retry.** This table is the single source for every
     way a turn can end other than `done`: its text, retry and link.
 
-    | Ending | Text | Retry | Link |
+    | Ending | Text | Retry ("Повторити") | Link |
     |---|---|---|---|
     | 503 `assistant_busy` | "Зараз у мене багато співрозмовниць. Спробуйте, будь ласка, за хвилинку 🤗" | yes | none |
     | 429 `throttled` | "Ви пишете швидше, ніж я встигаю думати 😅 Зачекайте, будь ласка, хвилинку." | yes | none |
@@ -8225,9 +8225,27 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       so the customer can tap it and type while the reply streams. The
       old reason (no overlapping turns, no server-side lock) still holds,
       because sending stays blocked.
+      - Implemented 06.11.2026. Frontend suite 872 passed; all mutations
+        killed (seven, plus an Enter-only desktop variant after a test for
+        Enter on desktop was added). Sending stays blocked by both the chat
+        view's check and the hook's own. The focus return after a reply
+        stays, for a retry and for focus moved elsewhere during the reply;
+        opening the chat mid-reply still focuses the dialog. The phone
+        keyboard was checked only in DevTools device mode; recheck on a
+        real phone after deployment.
     - A visually hidden "Асистент пише…" inside the status container
       while the dots show, so screen readers announce that a reply is
       coming.
+    - Decided 06.11.2026: a failure shows as one full-width block inside
+      the message list, not aligned like an assistant bubble, with its
+      text and its action (retry button or link) inside the same block,
+      as drawn in the Stage 16 mockup "AI 8: ліміти і помилки" on the
+      Design canvas. Every failure kind uses this block; the 17.5b texts
+      stay. Every retry button reads "Повторити" instead of "Спробувати
+      ще раз", because the texts already say "спробуйте ще раз"; the
+      17.5b table carries the button text. The link for the daily limit,
+      blocked and 404 cases keeps "Записатись самостійно". 17.5 did not
+      follow the AI 8 mockup; the widget is brought in line with it now.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
