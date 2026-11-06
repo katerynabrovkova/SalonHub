@@ -7991,7 +7991,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       shows the expired notice and drops the id; no raw events appear in
       the chat. Also decided: Enter sends, Shift+Enter is a new line
       (built in GREEN, agreed afterwards); focus returns to the input
-      after a reply on desktop only.
+      after a reply on desktop only (see also 17.7c).
 - **17.5 Statuses and errors:** status texts, busy, limits, cut-off reply,
   blocked customer, "Спробувати ще раз". Details decided 03.11.2026, after
   the 17.5 recon, in two sub-steps:
@@ -8218,8 +8218,11 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - Decided 06.11.2026: while a reply streams, the input stays enabled
       so the customer can keep typing; only sending is blocked (the send
       button is disabled and Enter does not send) until the turn
-      finishes. Text typed meanwhile is the 17.7b draft. After sending,
-      focus stays in the input, so the phone keyboard does not close. The
+      finishes. Text typed meanwhile is the 17.7b draft. On desktop, focus
+      stays in the input after sending and after the reply. On a phone,
+      the input loses focus after sending, so the keyboard closes and the
+      reply is visible (the 03.11.2026 reason); the input stays enabled,
+      so the customer can tap it and type while the reply streams. The
       old reason (no overlapping turns, no server-side lock) still holds,
       because sending stays blocked.
     - A visually hidden "Асистент пише…" inside the status container
