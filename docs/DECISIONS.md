@@ -8307,6 +8307,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - A phone card click stores "collapsed" at the click, so a reload
       during that navigation does not reopen the chat over the booking
       page.
+    - Decided 06.11.2026: when typing cancels that pending minimise
+      (17.6e), the current open mode is stored again, so the stored mode
+      matches the screen.
     - Reason: the conversation, cards and draft already survive a reload;
       the open state was the only piece that did not.
 - **17.8 Assistant polish:** manual check through the real widget; tone
