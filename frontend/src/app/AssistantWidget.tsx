@@ -150,14 +150,22 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
   const inPanel = shown && isDesktop && mode === "panel";
   const isModal = shown && isOpen && !isDesktop;
 
+  // Read by the open effect below without re-running it on every turn.
+  // Declared before it, so it is current when both run in one commit.
+  const streamingRef = useRef(conversation.streaming);
+  useEffect(() => {
+    streamingRef.current = conversation.streaming;
+  }, [conversation.streaming]);
+
   useEffect(() => {
     if (!shown) {
       return;
     }
     if (isOpen) {
-      // The input, unless a reply is streaming (then it is disabled).
+      // The input, unless a reply is streaming: then the dialog, as before
+      // 17.7c made the input stay enabled while streaming.
       const input = inputRef.current;
-      if (input !== null && !input.disabled) {
+      if (input !== null && !streamingRef.current) {
         input.focus();
       } else {
         dialogRef.current?.focus();
@@ -168,9 +176,24 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
     }
   }, [shown, isOpen]);
 
+  // 17.7c (decided 06.11.2026): after a send, focus stays in the input on
+  // desktop (a click on the send button would take it); on a phone the
+  // input loses focus so the keyboard closes and the reply is visible. The
+  // input stays enabled, so a tap on it brings the keyboard back.
+  function handleSend() {
+    const input = inputRef.current;
+    if (isDesktop) {
+      input?.focus();
+    } else {
+      input?.blur();
+    }
+  }
+
   // After a reply finishes (done or any error), focus goes back to the input
   // on desktop if the chat is open. Not on a phone: the keyboard would cover
-  // the reply (decided 03.11.2026, 17.4b).
+  // the reply (decided 03.11.2026, 17.4b). Still needed after 17.7c for a
+  // turn that began with no focus in the input: a retry (its button goes
+  // away), or focus moved elsewhere in the chat while the reply streamed.
   const wasStreaming = useRef(false);
   useEffect(() => {
     const finished = wasStreaming.current && !conversation.streaming;
@@ -363,6 +386,7 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
         conversation={conversation}
         inputRef={inputRef}
         onCardNavigate={handleCardNavigate}
+        onSend={handleSend}
       />
     </div>
   );

@@ -181,7 +181,10 @@ describe("AssistantWidget draft survives (17.7b)", () => {
     await user.type(input(), "Запишіть мене");
     await user.click(screen.getByRole("button", { name: SEND }));
     const link = await screen.findByRole("link", { name: "Обрати час" });
-    await waitFor(() => expect(input()).toBeEnabled());
+    // The id is stored only at `done`, so this waits for the end of the turn.
+    await waitFor(() =>
+      expect(sessionStorage.getItem("salonhub:assistant-session")).toBe("server-id"),
+    );
     await user.type(input(), DRAFT);
 
     await user.click(link);
@@ -341,9 +344,8 @@ describe("AssistantWidget draft and an expired conversation (17.7b)", () => {
     expectDraftKept();
   });
 
-  // On a plain send the input was just sent and is disabled until `done`,
-  // so no draft exists when that divider appears. A draft does exist when a
-  // retry finishes with a new id: the customer typed it after the failure.
+  // A retry that finishes with a new id brings the divider while a draft,
+  // typed after the failure, is in the input; the draft must stay.
   it("test_draft_stays_with_the_new_id_divider_after_a_retry", async () => {
     sessionStorage.setItem(SESSION_KEY, "stored-id");
     mockedHistory.mockResolvedValue(OLD);
@@ -372,7 +374,8 @@ describe("AssistantWidget draft and an expired conversation (17.7b)", () => {
 
     await screen.findByText("У суботу є 10:00.");
     expect(screen.getByRole("separator")).toHaveTextContent(EXPIRED);
-    await waitFor(() => expect(input()).toBeEnabled());
+    // The id is stored only at `done`, so this waits for the end of the turn.
+    await waitFor(() => expect(sessionStorage.getItem(SESSION_KEY)).toBe("new-id"));
     expectDraftKept();
   });
 });

@@ -34,7 +34,7 @@ vi.mock("@/lib/assistant/sessionId", () => ({
 // Imported after the mock above so the mocked module is what the widget sees.
 import type { AssistantEvent } from "@/lib/assistant/assistantApi";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
-import { readSessionId } from "@/lib/assistant/sessionId";
+import { readSessionId, storeSessionId } from "@/lib/assistant/sessionId";
 import { end } from "@/lib/navigation/pendingNavigation";
 
 import AssistantWidget from "./AssistantWidget";
@@ -451,11 +451,13 @@ describe("AssistantWidget conversation", () => {
     viewportWidth = DESKTOP_WIDTH;
     const { user } = renderChatWidget();
     await openChat(user);
+    const storedBefore = vi.mocked(storeSessionId).mock.calls.length;
 
     await sendAndFinish(user, "Привіт");
 
     const input = screen.getByRole("textbox", { name: INPUT });
-    await waitFor(() => expect(input).toBeEnabled());
+    // The id is stored only at `done`, so this waits for the end of the turn.
+    await waitFor(() => expect(storeSessionId).toHaveBeenCalledTimes(storedBefore + 1));
     expect(document.activeElement).toBe(input);
   });
 
@@ -463,12 +465,92 @@ describe("AssistantWidget conversation", () => {
     viewportWidth = PHONE_WIDTH;
     const { user } = renderChatWidget();
     await openChat(user);
+    const storedBefore = vi.mocked(storeSessionId).mock.calls.length;
 
     await sendAndFinish(user, "Привіт");
 
     const input = screen.getByRole("textbox", { name: INPUT });
-    await waitFor(() => expect(input).toBeEnabled());
+    // The id is stored only at `done`, so this waits for the end of the turn.
+    await waitFor(() => expect(storeSessionId).toHaveBeenCalledTimes(storedBefore + 1));
     expect(document.activeElement).not.toBe(input);
+  });
+
+  // docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c, item of
+  // 06.11.2026: on desktop focus stays in the input; on a phone the input
+  // loses focus after sending (the keyboard closes) but stays enabled.
+  describe("focus while a reply streams (17.7c)", () => {
+    const LATER = "А в неділю?";
+
+    // The draft lives in real sessionStorage; keep it from leaking.
+    afterEach(() => sessionStorage.clear());
+
+    async function startTurn(user: ReturnType<typeof userEvent.setup>, how: "button" | "enter") {
+      const channel = eventChannel();
+      vi.mocked(sendAssistantMessage).mockResolvedValueOnce({
+        sessionId: "server-id",
+        events: channel.events,
+      });
+      await openChat(user);
+      const input = screen.getByRole("textbox", { name: INPUT });
+      await user.type(input, "Привіт");
+      if (how === "button") {
+        await user.click(screen.getByRole("button", { name: "Надіслати" }));
+      } else {
+        await user.keyboard("{Enter}");
+      }
+      return { channel, input };
+    }
+
+    it("test_desktop_focus_stays_in_the_input_after_the_click_and_after_the_turn", async () => {
+      viewportWidth = DESKTOP_WIDTH;
+      const { user } = renderChatWidget();
+      const { channel, input } = await startTurn(user, "button");
+
+      expect(document.activeElement).toBe(input);
+
+      const storedBefore = vi.mocked(storeSessionId).mock.calls.length;
+      channel.push({ type: "text", text: "Вітаю!" }, { type: "done" });
+      channel.end();
+      await screen.findByText("Вітаю!");
+      await waitFor(() => expect(storeSessionId).toHaveBeenCalledTimes(storedBefore + 1));
+
+      expect(document.activeElement).toBe(input);
+    });
+
+    it("test_desktop_focus_stays_in_the_input_after_enter_and_after_the_turn", async () => {
+      viewportWidth = DESKTOP_WIDTH;
+      const { user } = renderChatWidget();
+      const { channel, input } = await startTurn(user, "enter");
+
+      expect(document.activeElement).toBe(input);
+
+      const storedBefore = vi.mocked(storeSessionId).mock.calls.length;
+      channel.push({ type: "text", text: "Вітаю!" }, { type: "done" });
+      channel.end();
+      await screen.findByText("Вітаю!");
+      await waitFor(() => expect(storeSessionId).toHaveBeenCalledTimes(storedBefore + 1));
+
+      expect(document.activeElement).toBe(input);
+    });
+
+    it.each(["button", "enter"] as const)(
+      "test_phone_input_is_unfocused_after_sending_and_accepts_typing_after_a_tap_while_streaming_(%s)",
+      async (how) => {
+        viewportWidth = PHONE_WIDTH;
+        const { user } = renderChatWidget();
+        const { input } = await startTurn(user, how);
+
+        expect(document.activeElement).not.toBe(input);
+        expect(input).toBeEnabled();
+
+        await user.click(input);
+        expect(document.activeElement).toBe(input);
+        await user.keyboard(LATER);
+
+        expect(input).toHaveValue(LATER);
+        expect(screen.queryByText("Вітаю!")).not.toBeInTheDocument();
+      },
+    );
   });
 
   // docs/DECISIONS.md § "Stage 17 sub-step order", 17.6a, and block B:

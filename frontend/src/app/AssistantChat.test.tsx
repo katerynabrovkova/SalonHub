@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantEvent } from "@/lib/assistant/assistantApi";
 
@@ -106,6 +106,7 @@ async function send(user: ReturnType<typeof userEvent.setup>, text: string) {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   mockedSend.mockReset();
   mockedHistory.mockReset();
   mockedRead.mockReset();
@@ -171,17 +172,20 @@ describe("AssistantChat sending", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("test_input_is_disabled_while_streaming_and_enabled_after_done", async () => {
+  // 17.7c, item of 06.11.2026: the input stays enabled; sending is blocked.
+  it("test_input_stays_enabled_while_streaming_and_sending_is_blocked_until_done", async () => {
     const channel = replyWith();
     const { user } = renderChat();
     await send(user, "Привіт");
 
-    expect(screen.getByRole("textbox", { name: INPUT })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: INPUT })).toBeEnabled();
+    expect(screen.getByRole("button", { name: SEND })).toBeDisabled();
 
     channel.push({ type: "text", text: "Вітаю" }, { type: "done" });
     channel.end();
 
-    await waitFor(() => expect(screen.getByRole("textbox", { name: INPUT })).toBeEnabled());
+    await user.type(screen.getByRole("textbox", { name: INPUT }), "Ще");
+    await waitFor(() => expect(screen.getByRole("button", { name: SEND })).toBeEnabled());
   });
 
   it("test_session_id_is_stored_after_done", async () => {
@@ -459,7 +463,8 @@ describe("AssistantChat statuses", () => {
     );
     channel.end();
 
-    await waitFor(() => expect(screen.getByRole("textbox", { name: INPUT })).toBeEnabled());
+    // The id is stored only at `done`, so this waits for the end of the turn.
+    await waitFor(() => expect(mockedStore).toHaveBeenCalledWith("server-id"));
     expect(screen.queryByTestId(DOTS)).not.toBeInTheDocument();
     expect(screen.queryByText(CHECKING)).not.toBeInTheDocument();
     expect(screen.queryByText("Дивлюся послуги…")).not.toBeInTheDocument();
@@ -742,6 +747,113 @@ describe("AssistantChat errors and retry", () => {
     next.end();
     await screen.findByText("Слухаю");
     expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
+  });
+});
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c, item of 06.11.2026:
+// while a reply streams the input stays enabled and text typed meanwhile is
+// the 17.7b draft; only sending is blocked (button disabled, Enter does not
+// send) until the turn finishes. Focus is covered in AssistantWidget.test.
+describe("AssistantChat while a reply streams (17.7c)", () => {
+  const DOTS = "assistant-typing-dots";
+  const DRAFT_KEY = "salonhub:assistant-draft";
+  const RETRY = "Спробувати ще раз";
+  const LATER = "А в неділю?";
+
+  // The draft lives in real sessionStorage; keep it from leaking between tests.
+  beforeEach(() => sessionStorage.clear());
+  afterEach(() => sessionStorage.clear());
+
+  function input() {
+    return screen.getByRole("textbox", { name: INPUT });
+  }
+
+  function sendButton() {
+    return screen.getByRole("button", { name: SEND });
+  }
+
+  it("test_input_is_enabled_while_streaming_and_typing_is_stored_as_the_draft", async () => {
+    replyWith();
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await screen.findByTestId(DOTS);
+
+    expect(input()).toBeEnabled();
+    await user.type(input(), LATER);
+
+    expect(input()).toHaveValue(LATER);
+    expect(sessionStorage.getItem(DRAFT_KEY)).toBe(LATER);
+  });
+
+  it("test_sending_is_blocked_while_streaming_by_the_button_and_by_enter", async () => {
+    replyWith();
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await screen.findByTestId(DOTS);
+
+    await user.type(input(), LATER);
+    expect(sendButton()).toBeDisabled();
+    await user.click(sendButton());
+    await user.type(input(), "{Enter}");
+
+    expect(mockedSend).toHaveBeenCalledTimes(1);
+    expect(input()).toHaveValue(LATER);
+    expect(
+      within(screen.getByRole("list", { name: "Розмова" })).queryByText(LATER),
+    ).not.toBeInTheDocument();
+  });
+
+  it("test_after_the_turn_enter_sends_the_text_typed_while_streaming", async () => {
+    const first = replyWith("server-id");
+    replyWith("server-id");
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await user.type(input(), LATER);
+
+    first.push({ type: "text", text: "Вітаю" }, { type: "done" });
+    first.end();
+    await waitFor(() => expect(sendButton()).toBeEnabled());
+    await user.type(input(), "{Enter}");
+
+    expect(mockedSend).toHaveBeenCalledTimes(2);
+    expect(mockedSend).toHaveBeenLastCalledWith(
+      "bella-demo",
+      LATER,
+      "server-id",
+      expect.any(AbortSignal),
+    );
+    expect(input()).toHaveValue("");
+  });
+
+  it("test_the_same_rules_hold_while_a_retry_streams", async () => {
+    mockedSend.mockRejectedValueOnce(new ApiError(503, "assistant_busy", "Busy"));
+    const retried = replyWith("server-id");
+    replyWith("server-id");
+    const { user } = renderChat();
+    await send(user, "Привіт");
+    await user.click(await screen.findByRole("button", { name: RETRY }));
+    await screen.findByTestId(DOTS);
+
+    expect(input()).toBeEnabled();
+    await user.type(input(), LATER);
+    expect(sessionStorage.getItem(DRAFT_KEY)).toBe(LATER);
+    expect(sendButton()).toBeDisabled();
+    await user.type(input(), "{Enter}");
+    expect(mockedSend).toHaveBeenCalledTimes(2);
+    expect(input()).toHaveValue(LATER);
+
+    retried.push({ type: "text", text: "Вітаю" }, { type: "done" });
+    retried.end();
+    await waitFor(() => expect(sendButton()).toBeEnabled());
+    await user.type(input(), "{Enter}");
+
+    expect(mockedSend).toHaveBeenCalledTimes(3);
+    expect(mockedSend).toHaveBeenLastCalledWith(
+      "bella-demo",
+      LATER,
+      "server-id",
+      expect.any(AbortSignal),
+    );
   });
 });
 

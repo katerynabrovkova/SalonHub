@@ -37,6 +37,10 @@
  *   (lib/assistant/draft.ts): written on every change, cleared on send
  *   whatever the outcome, kept when the conversation expires. Retry resends
  *   the earlier text and leaves the draft alone.
+ * - 17.7c (decided 06.11.2026): while a reply streams the input stays
+ *   enabled, so text typed meanwhile is the draft; only sending is blocked
+ *   (the send button is disabled, Enter does not send). After a send the
+ *   view calls `onSend`, where the widget moves focus by device.
  */
 
 import {
@@ -454,12 +458,15 @@ interface AssistantChatProps {
   inputRef?: Ref<HTMLTextAreaElement>;
   /** Runs on every card link click (the widget minimises on a phone). */
   onCardNavigate?: () => void;
+  /** Runs after the customer sends (17.7c: the widget moves focus). */
+  onSend?: () => void;
 }
 
 export default function AssistantChat({
   conversation,
   inputRef,
   onCardNavigate,
+  onSend,
 }: AssistantChatProps) {
   const {
     messages,
@@ -487,10 +494,12 @@ export default function AssistantChat({
 
   function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    // 17.7c: blocked while a reply streams, though the input is enabled.
     if (streaming || draft.trim() === "") {
       return;
     }
     send(draft);
+    onSend?.();
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -598,10 +607,9 @@ export default function AssistantChat({
           maxLength={MAX_MESSAGE_LENGTH}
           rows={2}
           value={draft}
-          disabled={streaming}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
-          className="min-h-11 flex-1 resize-none rounded border border-zinc-300 bg-transparent px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-600"
+          className="min-h-11 flex-1 resize-none rounded border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-600"
         />
         <button
           type="submit"
