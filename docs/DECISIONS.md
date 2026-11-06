@@ -7762,8 +7762,9 @@ the widget can deliver:
   recon, not guessed. The widget shows the text and link from the 17.5b
   table ("Stage 17 sub-step order"), and no retry button. Nothing in the
   text blames the customer, because one IP can be shared by many people.
-- **Starter questions:** tapping one sends it at once; the chips
-  disappear after the first message.
+- **Starter questions:** tapping one sends it at once; the chips show
+  only while the conversation has no messages besides the greeting (see
+  17.7c).
 - **Mockups:** design canvas, row "Stage 17: віджет асистента", boards
   starting with "D:".
 
@@ -8236,6 +8237,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - A visually hidden "Асистент пише…" inside the status container
       while the dots show, so screen readers announce that a reply is
       coming.
+      - Decided 06.11.2026: present only while the dots show; when a
+        status line replaces the dots, the status line is what is
+        announced.
     - Decided 06.11.2026: a failure shows as one full-width block inside
       the message list, not aligned like an assistant bubble, with its
       text and its action (retry button or link) inside the same block,
@@ -8252,6 +8256,27 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
         `VerificationBanner`, since the widget had no warm colour yet;
         revisit in the design pass. The booking link is now styled as a
         full-width button.
+    - **AI notice** (decided 06.11.2026): one line between the messages
+      and the input, always visible, including while a failure block
+      shows. The link "Як ми обробляємо дані" points to `/privacy` (404
+      until the Stage 22 page exists) and opens in a new tab, with a
+      visually hidden "(відкривається в новій вкладці)"; nothing happens
+      to the chat.
+    - **Starter questions** (decided 06.11.2026): chips show only while
+      the conversation has no messages besides the greeting: none after
+      restored history; shown again in an empty chat after an expiry
+      notice; none when old messages and a divider are visible; none
+      after a failed first send. Placed under the greeting with the label
+      "Часті питання", chips stacked, as in the mockup "Телефон: чат
+      відкрито". No starters configured: nothing shown, no label. A tap
+      sends the starter at once and leaves any draft in the input
+      untouched; focus after a tap follows the 17.7c send rule. No
+      separate language rule: starters come in the widget's language
+      through the `lang` the loader already sends (today `uk`); one the
+      salon did not fill in for that language is omitted by the API.
+    - **Desktop button tooltips** (decided 06.11.2026): the native `title`
+      attribute counts as the hover tooltip; built in 17.3c, only a test
+      is missing. A styled tooltip may come in the design pass.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
