@@ -8246,6 +8246,12 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       17.5b table carries the button text. The link for the daily limit,
       blocked and 404 cases keeps "Записатись самостійно". 17.5 did not
       follow the AI 8 mockup; the widget is brought in line with it now.
+      - Implemented 06.11.2026. Frontend suite 892 passed; all five
+        mutations killed. The block is the last item of the message list.
+        Its colours reuse the amber notice classes from
+        `VerificationBanner`, since the widget had no warm colour yet;
+        revisit in the design pass. The booking link is now styled as a
+        full-width button.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
