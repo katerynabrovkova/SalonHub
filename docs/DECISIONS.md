@@ -3707,7 +3707,8 @@ Scope, in build order:
      `timeZone: "UTC"`. Precedent: `DateTimeSelectionGrid`'s
      `slot.slice(11, 16)`.
    - States: while `AuthContext` is loading, render nothing (precedent:
-     `client/layout.tsx`); no session, role `"admin"`, or
+     `client/layout.tsx`; exception for step 4 since 06.11.2026, see
+     17.7f); no session, role `"admin"`, or
      `email_verified` false -> `BookingSummary` + the existing guest
      form; role `"client"` + `email_verified` true + Customer linked ->
      summary + a line with the account email + confirm button, no
@@ -8208,8 +8209,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     assistant is anonymous and unsent text is not stored on the server.
     - Decided 05.11.2026: the draft is cleared when the customer sends,
       whether the turn succeeds or fails. A failed turn's text is then
-      not kept after a reload; accepted as a rare case, revisit only if
-      it proves annoying. Blank or whitespace-only text is not stored.
+      kept separately until the turn succeeds, so it comes back after a
+      reload too (decided 06.11.2026, see 17.7e). Blank or whitespace-only
+      text is not stored.
     - Implemented 05.11.2026. Frontend suite 864 passed; all seven
       mutations killed. The draft lives in `useAssistantConversation`
       and is written to storage on every change, since a real reload
@@ -8298,8 +8300,8 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       `sessionStorage` next to the session id, for the life of the tab,
       and restored after a full reload, on phone and desktop. On a phone a
       restored open chat is the full-screen chat.
-    - The server cannot read `sessionStorage`, so the server render stays
-      collapsed and the mode is restored right after mount: the chat opens
+    - The server cannot read `sessionStorage` and renders no widget at all
+      (17.7g); the mode is restored right after hydration: the chat opens
       a moment after the page loads. On desktop a restored side panel
       shifts the page after load; accepted, revisit if it proves annoying.
     - A restored chat does not take focus; focus moves only when the
@@ -8320,6 +8322,32 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       code was written. The customer's first change is pinned in state and
       takes over from the stored value; a phone card click pins the current
       mode before storing "collapsed".
+  - **17.7e Pending turn after a reload** (decided 06.11.2026).
+    - The customer's sent text is kept in `sessionStorage` from send until
+      the turn finishes successfully (`done`). A failure keeps it, so a
+      reload after a failure also shows the message with "Повторити".
+    - After a full reload, if such a text is stored, the chat shows it as
+      the customer's message followed by the "cut off" failure block
+      (17.5b) with "Повторити".
+    - If the restored history already ends with that customer message
+      (the server stored the turn before noticing the reload), nothing
+      extra is shown and the stored text is cleared.
+    - The backend stays as decided in Stage 16: nothing is stored on
+      disconnect.
+    - Reason: a reload during a reply lost the customer's message, which
+      proved annoying.
+  - **17.7f Booking step 4 on a full load** (decided 06.11.2026).
+    - Step 4 renders its booking summary at once, on the server, and shows
+      a skeleton in place of the contact form only while auth is loading.
+      An exception to the Stage 15 rule "while `AuthContext` is loading,
+      render nothing".
+    - Reason: links from assistant cards open step 4 directly, and a full
+      reload showed a white page with only the assistant stripe.
+  - **17.7g Stripe only after hydration** (decided 06.11.2026).
+    - The server renders nothing for the widget, so the stripe never shows
+      before it can respond to a tap.
+    - Reason: on a slow connection the stripe was visible but did nothing
+      for several seconds.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
