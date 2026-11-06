@@ -7925,8 +7925,8 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - **Focus** moves into the chat on open and back to the stripe on
       minimise. Escape minimises on phone and desktop.
     - **State.** The client widget keeps its state across client-side
-      navigation. After a full reload it starts collapsed; the
-      conversation itself comes back in 17.4.
+      navigation. After a full reload its mode is restored (decided
+      06.11.2026, see 17.7d); the conversation itself comes back in 17.4.
   - **Out of 17.3:** the live-conversation dot (17.4) and starter
     questions in the salon-info type (17.7).
 - **17.4 Conversation:** sending, streamed reply, session id stored after
@@ -8285,6 +8285,22 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - **Desktop button tooltips** (decided 06.11.2026): the native `title`
       attribute counts as the hover tooltip; built in 17.3c, only a test
       is missing. A styled tooltip may come in the design pass.
+  - **17.7d Open state after reload** (decided 06.11.2026).
+    - The widget's mode (collapsed, small window or side panel) is kept in
+      `sessionStorage` next to the session id, for the life of the tab,
+      and restored after a full reload, on phone and desktop. On a phone a
+      restored open chat is the full-screen chat.
+    - The server cannot read `sessionStorage`, so the server render stays
+      collapsed and the mode is restored right after mount: the chat opens
+      a moment after the page loads. On desktop a restored side panel
+      shifts the page after load; accepted, revisit if it proves annoying.
+    - A restored chat does not take focus; focus moves only when the
+      customer opens the chat.
+    - A phone card click stores "collapsed" at the click, so a reload
+      during that navigation does not reopen the chat over the booking
+      page.
+    - Reason: the conversation, cards and draft already survive a reload;
+      the open state was the only piece that did not.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
