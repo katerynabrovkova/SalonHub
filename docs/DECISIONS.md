@@ -8272,6 +8272,12 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       with a separate link wrapped badly in the small window; between the
       messages and the input it looked like a fixed band while a long
       chat scrolled.
+      - Implemented 06.11.2026. Frontend suite 903 passed; all mutations
+        killed (four for the final version). The focus ring reuses the one
+        from `SpecialistCard`. The bottom padding includes
+        `env(safe-area-inset-bottom)`, which is 0 until the page opts in
+        with `viewport-fit=cover`; check the notice against the iPhone
+        home indicator on a real phone after deployment.
     - **Starter questions** (decided 06.11.2026): chips show only while
       the conversation has no messages besides the greeting: none after
       restored history; shown again in an empty chat after an expiry
