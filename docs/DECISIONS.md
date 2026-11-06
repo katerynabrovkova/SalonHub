@@ -6347,8 +6347,8 @@ Additions for 4c (22.10.2026):
   key, like guest tokens, so a Redis snapshot or key listing does not
   reveal usable ids.
 - **Overlapping messages of one session:** both turns are kept (each pair
-  is written atomically); the widget disables input while a reply streams
-  (Stage 17). No server-side lock.
+  is written atomically); the widget blocks sending while a reply streams
+  (Stage 17, see 17.7c). No server-side lock.
 - **The atomicity of `append_turn` (one `MULTI`/`EXEC`) is verified by
   code review, not by a test.** Mutation M1 (no transaction) survives
   because tests run sequentially; a threading test was deliberately not
@@ -7627,7 +7627,7 @@ Already assigned to Stage 17:
   a "go to booking" button where relevant ("Limits"); for a throttled
   message ("Sub-step 8 details"); for `assistant_turn_limit` ("Sub-step 6
   details", 6c).
-- **Input disabled while a reply streams** ("Sub-step 5 details").
+- **Sending blocked while a reply streams** ("Sub-step 5 details").
 
 Widget behaviour decided in Stage 16 without a stage label, which only
 the widget can deliver:
@@ -7928,8 +7928,8 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   - **Out of 17.3:** the live-conversation dot (17.4) and starter
     questions in the salon-info type (17.7).
 - **17.4 Conversation:** sending, streamed reply, session id stored after
-  `done`, history after reload, expired-conversation notice, input
-  disabled while streaming; a real browser check that
+  `done`, history after reload, expired-conversation notice, sending
+  blocked while streaming; a real browser check that
   `X-Assistant-Session` is allowed and exposed by CORS. Details decided
   03.11.2026, after the 17.4 recon, in two sub-steps:
   - **17.4a Conversation engine (no UI).**
@@ -7970,8 +7970,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - **Text only in 17.4:** status, proposal and unknown events are
       ignored; history messages with a card show their text only, and
       messages with empty content are skipped until 17.6.
-    - **Input** is disabled while streaming; the client limit is 2000
-      characters; blank text is not sent.
+    - **Input:** sending is blocked while streaming, the input itself
+      stays enabled (see 17.7c); the client limit is 2000 characters;
+      blank text is not sent.
     - **Errors** (an `error` event, a refusal before the stream, a stream
       ending without `done`) end streaming and show one neutral line,
       "Не вдалося отримати відповідь. Спробуйте ще раз.", until 17.5 adds
@@ -8214,6 +8215,13 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       retry resends the earlier text and leaves the draft alone.
   - **17.7c Interface details:** AI notice, starter questions, desktop
     button tooltips.
+    - Decided 06.11.2026: while a reply streams, the input stays enabled
+      so the customer can keep typing; only sending is blocked (the send
+      button is disabled and Enter does not send) until the turn
+      finishes. Text typed meanwhile is the 17.7b draft. After sending,
+      focus stays in the input, so the phone keyboard does not close. The
+      old reason (no overlapping turns, no server-side lock) still holds,
+      because sending stays blocked.
     - A visually hidden "Асистент пише…" inside the status container
       while the dots show, so screen readers announce that a reply is
       coming.
