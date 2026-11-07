@@ -8175,9 +8175,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       conversation is `assistant`.
 - **17.7 Expired conversation, draft and interface details.** Split
   05.11.2026 into three sub-steps; 17.7d to 17.7g were added 06.11.2026
-  and 17.7h on 07.11.2026. Build order of the rest (decided 07.11.2026):
-  17.7e, 17.7f, 17.7g, 17.7h, then the starter questions (the rest of
-  17.7c).
+  and 17.7h and 17.7i on 07.11.2026. Build order of the rest (decided
+  07.11.2026): 17.7e, 17.7f, 17.7g, 17.7h, 17.7i, then the starter
+  questions (the rest of 17.7c).
   - **17.7a Expired conversation** (decided 05.11.2026, found in the
     05.11.2026 manual check; fixes gaps in 17.4b):
     - The "expired" state is kept in `sessionStorage` next to the session
@@ -8395,6 +8395,15 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       before it can respond to a tap.
     - Reason: on a slow connection the stripe was visible but did nothing
       for several seconds.
+    - Implemented and committed 07.11.2026. `AssistantWidget` returns null
+      until hydrated (`useSyncExternalStore`, server snapshot false);
+      `AssistantWidgetLoader` unchanged; new
+      `AssistantWidget.hydration.test.tsx` (21 tests); the old server-render
+      test now expects empty HTML (intended change); frontend suite 1002;
+      mutations 1-3 killed; mutation 4 (gate only on the stripe) survives
+      by design: during server render and hydration the mode store's server
+      snapshot is "collapsed", so the open-chat branch is unreachable and
+      the output is identical; manual browser check passed.
   - **17.7h History load retried after a failed load** (decided
     07.11.2026). Built after 17.7g and before the starter questions.
     - Problem, found in the 17.7e recon: if the history request fails on
@@ -8417,6 +8426,15 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       meantime (`AssistantChat.tsx` 232); what happens if she sends a
       message before the history loads (the send uses the stored session
       id, `AssistantChat.tsx` 360).
+  - **17.7i Restored chat opens at the end of the conversation** (recorded
+    07.11.2026, found in the 17.7g manual check).
+    - Problem: after a reload with the chat restored as the small desktop
+      window and a conversation longer than the window, the list first
+      shows its top and then jumps to the bottom.
+    - Expected: the first painted frame already shows the end of the
+      conversation, without a visible scroll.
+    - Cause and fix to be confirmed in the 17.7h/17.7i recon; likely
+      scrolling to the bottom before paint, without smooth behaviour.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
