@@ -8167,7 +8167,10 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       is `direct`; a booking found in the catalogue in a tab with a
       conversation is `assistant`.
 - **17.7 Expired conversation, draft and interface details.** Split
-  05.11.2026 into three sub-steps:
+  05.11.2026 into three sub-steps; 17.7d to 17.7g were added 06.11.2026
+  and 17.7h on 07.11.2026. Build order of the rest (decided 07.11.2026):
+  17.7e, 17.7f, 17.7g, 17.7h, then the starter questions (the rest of
+  17.7c).
   - **17.7a Expired conversation** (decided 05.11.2026, found in the
     05.11.2026 manual check; fixes gaps in 17.4b):
     - The "expired" state is kept in `sessionStorage` next to the session
@@ -8329,9 +8332,24 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - After a full reload, if such a text is stored, the chat shows it as
       the customer's message followed by the "cut off" failure block
       (17.5b) with "Повторити".
-    - If the restored history already ends with that customer message
-      (the server stored the turn before noticing the reload), nothing
-      extra is shown and the stored text is cleared.
+    - Matching (decided 07.11.2026): the server saves the customer message
+      and the reply together as one turn, just before `done`, so history
+      never ends with a bare customer message. After a reload the stored
+      text is dropped if the customer message of the last turn in the
+      loaded history equals it; then nothing extra is shown. Only the last
+      turn is compared. Accepted edge: if she sent the same text twice in
+      a row and the second failed before it was saved, the stored text is
+      wrongly dropped; rare, accepted.
+    - History request fails on reload (decided 07.11.2026): the stored text
+      is neither shown nor removed. Its fate is decided on the next
+      successful history load, by the matching rule above (see 17.7h for
+      when that load happens). If she sends a new message meanwhile, the
+      new text replaces the stored one.
+    - Conversation expired, history comes back empty (decided 07.11.2026):
+      the stored text is moved into the input only if the input is empty;
+      if the input already has text, the stored text is dropped and her
+      typed text is not touched. Either way the stored text is removed
+      from storage, and no failure block or "Повторити" is shown.
     - The backend stays as decided in Stage 16: nothing is stored on
       disconnect.
     - Reason: a reload during a reply lost the customer's message, which
@@ -8348,6 +8366,28 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       before it can respond to a tap.
     - Reason: on a slow connection the stripe was visible but did nothing
       for several seconds.
+  - **17.7h History load retried after a failed load** (decided
+    07.11.2026). Built after 17.7g and before the starter questions.
+    - Problem, found in the 17.7e recon: if the history request fails on
+      reload, the widget shows only the greeting
+      (`frontend/src/app/AssistantChat.tsx` 236-238, an empty error
+      handler) and never retries on that page load. The open and
+      tab-return re-checks (282-303) call `recheck`, which returns early
+      while `liveRef` is false (254); `liveRef` becomes true only after a
+      successful history load (233) or a finished turn (379). The server
+      and the model still have the conversation, so the assistant may refer
+      to messages she cannot see.
+    - Decision: while the history has never loaded successfully on this
+      page load, opening the chat and returning to the tab load the
+      history again (the same triggers as the 17.7a re-check). On success
+      the old messages and any 17.7e stored text are handled as on a
+      normal reload.
+    - Open for the 17.7h recon, not decided: the history request has no
+      timeout (`frontend/src/lib/assistant/assistantApi.ts` 116-119); a
+      late successful response is added above messages she sent in the
+      meantime (`AssistantChat.tsx` 232); what happens if she sends a
+      message before the history loads (the send uses the stored session
+      id, `AssistantChat.tsx` 360).
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
