@@ -8466,15 +8466,37 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       mount load twice, so the Network tab shows a cancelled history
       request followed by a successful one; never two at the same time.
       The failure block sits after the greeting, outside the message list.
-  - **17.7i Restored chat opens at the end of the conversation** (recorded
-    07.11.2026, found in the 17.7g manual check).
-    - Problem: after a reload with the chat restored as the small desktop
-      window and a conversation longer than the window, the list first
-      shows its top and then jumps to the bottom.
-    - Expected: the first painted frame already shows the end of the
-      conversation, without a visible scroll.
-    - Cause and fix to be confirmed in the 17.7h/17.7i recon; likely
-      scrolling to the bottom before paint, without smooth behaviour.
+  - **17.7i Message list scrolling** (part 1 recorded 07.11.2026, found in
+    the 17.7g manual check; part 2 found in the 17.7h/17.7i recon; both
+    decided 07.11.2026).
+    - Part 1, restored chat opens at the end.
+      - Problem: after a reload with the chat restored as the small desktop
+        window and a conversation longer than the window, the list first
+        shows its top and then jumps to the bottom.
+      - Expected: after a reload the first painted frame already shows the
+        end of the conversation, without a visible scroll.
+      - Cause, from the recon: the only scroll is a passive `useEffect`
+        with an instant `scrollIntoView` (`AssistantChat.tsx` 708-711 as
+        of 17.7h), which runs after the browser has painted the list at its
+        top for every async update.
+      - Fix: scroll in a layout effect, before paint, with no smooth
+        behaviour.
+    - Part 2, the list follows new content only while she is at the bottom.
+      - Problem: while a reply streams, the list scrolls to the bottom on
+        every update, so if she scrolls up to reread she is pulled back
+        down.
+      - "At the bottom" means within about 80 px of the end. While she is
+        at the bottom, new content (streamed text, statuses, history,
+        failure blocks) keeps the end in view, instantly.
+      - If she scrolls up, the list stops following, so she can reread
+        without being pulled down.
+      - A round "↓" button, centred just above the input, appears only
+        while she is not at the bottom. Tapping it scrolls smoothly to the
+        end and resumes following. Accessible name "Прокрутити донизу".
+        Final look in the design pass.
+      - Sending a message always scrolls to the end and resumes following.
+      - Only the "↓" tap scrolls smoothly; every automatic scroll is
+        instant.
   - **17.7j "Записатись самостійно" collapses the phone chat** (recorded
     07.11.2026, found in the 17.7h manual check).
     - On the phone, tapping "Записатись самостійно" in either amber failure
@@ -8484,10 +8506,6 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       desktop the chat stays as it is.
     - Reason: on `/services` the link leads to the page she is already on,
       and the full-screen chat hid it, so the tap looked broken.
-  - **Noted, not decided** (07.11.2026, found in the 17.7h/17.7i recon; to
-    revisit later): while a reply streams, the list scrolls to the bottom
-    on every update (`AssistantChat.tsx` 576-579), so if she scrolls up to
-    reread she is pulled back down.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
