@@ -53,6 +53,12 @@
  *   enabled, so text typed meanwhile is the draft; only sending is blocked
  *   (the send button is disabled, Enter does not send). After a send the
  *   view calls `onSend`, where the widget moves focus by device.
+ * - 17.7i: the list scrolls to the end in a layout effect, before paint and
+ *   instantly, but only while it follows: she leaves the bottom by an upward
+ *   scroll ending more than 80 px from the end, and any scroll back within
+ *   80 px resumes following. Meanwhile a round "↓" button above the input
+ *   scrolls smoothly to the end (the only smooth scroll); it, sending and
+ *   both "Повторити" resume following.
  * - 17.7c: the AI notice is one line below the input, always visible; the
  *   whole text is the link, opening `/privacy` in a new tab, with a
  *   visually hidden destination in its name. While the dots show, a visually
@@ -62,6 +68,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -110,6 +117,10 @@ const TYPING_TEXT = "Асистент пише…";
 const HISTORY_LOADING_TEXT = "Завантажую розмову…";
 const HISTORY_SPINNER_DELAY_MS = 300;
 const HISTORY_TIMEOUT_MS = 10_000;
+
+// 17.7i: within this distance of the end she counts as at the bottom.
+const AT_BOTTOM_PX = 80;
+const TO_BOTTOM_LABEL = "Прокрутити донизу";
 
 // Same limit as the backend serializer (ai_assistant/serializers.py).
 const MAX_MESSAGE_LENGTH = 2000;
@@ -639,6 +650,8 @@ interface AssistantChatProps {
   onCardNavigate?: () => void;
   /** Runs after the customer sends (17.7c: the widget moves focus). */
   onSend?: () => void;
+  /** Desktop layout: button tooltips (`title`) show only there (17.3c). */
+  isDesktop?: boolean;
 }
 
 // 17.7c (mockup "AI 8"): one full-width block per failure, the 17.5b text
@@ -679,6 +692,7 @@ export default function AssistantChat({
   inputRef,
   onCardNavigate,
   onSend,
+  isDesktop = false,
 }: AssistantChatProps) {
   const {
     messages,
@@ -695,7 +709,18 @@ export default function AssistantChat({
     send,
     retry,
   } = conversation;
-  const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // 17.7i: whether the list follows new content. Set from scroll events
+  // (her position before the content grew), never measured at update time.
+  // The ref is read by the layout effect; the state shows the "↓" button.
+  const [following, setFollowing] = useState(true);
+  const followingRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+
+  function follow(next: boolean) {
+    followingRef.current = next;
+    setFollowing(next);
+  }
 
   // 17.5a: a known status shows its text under the last bubble; before any
   // text or known status the dots pulse. An unknown step keeps the dots.
@@ -705,10 +730,56 @@ export default function AssistantChat({
   // 17.7c while a reply streams.
   const historyBlocked = historyStatus === "loading" || historyStatus === "failed";
 
-  useEffect(() => {
-    // jsdom has no scrollIntoView, hence the optional call.
-    endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages, failure, statusLine, showDots]);
+  // 17.7i part 1: before paint, so the first painted frame already shows the
+  // end; instant (a scrollTop write is never smooth). Part 2: only while
+  // following.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (list === null || !followingRef.current) {
+      return;
+    }
+    list.scrollTop = list.scrollHeight;
+    lastScrollTopRef.current = list.scrollTop;
+  }, [messages, failure, statusLine, showDots, historyStatus]);
+
+  // 17.7i part 2 (decided 07.11.2026): reaching within about 80 px of the
+  // end, by any scroll, resumes following; she leaves the bottom only by an
+  // upward scroll that ends further away. A downward scroll (the smooth "↓"
+  // animation) never stops following.
+  function handleScroll() {
+    const list = listRef.current;
+    if (list === null) {
+      return;
+    }
+    const top = list.scrollTop;
+    const movedUp = top < lastScrollTopRef.current;
+    lastScrollTopRef.current = top;
+    if (list.scrollHeight - list.clientHeight - top <= AT_BOTTOM_PX) {
+      follow(true);
+    } else if (movedUp) {
+      follow(false);
+    }
+  }
+
+  // 17.7i (decided 07.11.2026): "Повторити", in the turn and the history
+  // failure block, resumes following like sending.
+  function retryAndFollow() {
+    follow(true);
+    retry();
+  }
+
+  function reloadHistoryAndFollow() {
+    follow(true);
+    reloadHistory();
+  }
+
+  // The only smooth scroll (17.7i). jsdom has no Element.scrollTo, hence
+  // the optional call.
+  function scrollToEnd() {
+    const list = listRef.current;
+    follow(true);
+    list?.scrollTo?.({ top: list.scrollHeight, behavior: "smooth" });
+  }
 
   function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -717,6 +788,8 @@ export default function AssistantChat({
     if (streaming || historyBlocked || draft.trim() === "") {
       return;
     }
+    // 17.7i: sending always scrolls to the end and resumes following.
+    follow(true);
     send(draft);
     onSend?.();
   }
@@ -730,11 +803,15 @@ export default function AssistantChat({
   }
 
   const failureBlock =
-    failure === null ? null : <FailureBlock failure={failure} onRetry={retry} />;
+    failure === null ? null : <FailureBlock failure={failure} onRetry={retryAndFollow} />;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 text-sm">
+      <div
+        ref={listRef}
+        onScroll={handleScroll}
+        className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 text-sm"
+      >
         {expired ? (
           <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">{EXPIRED_NOTICE}</p>
         ) : null}
@@ -778,7 +855,7 @@ export default function AssistantChat({
           </ul>
         ) : null}
         {historyStatus === "failed" ? (
-          <FailureBlock failure={HISTORY_LOAD_FAILURE} onRetry={reloadHistory} />
+          <FailureBlock failure={HISTORY_LOAD_FAILURE} onRetry={reloadHistoryAndFollow} />
         ) : null}
         {/* 17.7h: where the history will appear, a little above the centre. */}
         {historySpinner ? (
@@ -811,8 +888,24 @@ export default function AssistantChat({
           ) : null}
           {statusLine !== null ? <span className="text-xs">{statusLine}</span> : null}
         </div>
-        <div ref={endRef} />
       </div>
+
+      {/* 17.7i: round, centred just above the input, only while she is not
+          at the bottom. Neutral styling; the look is finished in the
+          design pass. */}
+      {following ? null : (
+        <div className="relative h-0">
+          <button
+            type="button"
+            aria-label={TO_BOTTOM_LABEL}
+            title={isDesktop ? TO_BOTTOM_LABEL : undefined}
+            onClick={scrollToEnd}
+            className="absolute bottom-2 left-1/2 flex h-11 w-11 -translate-x-1/2 items-center justify-center rounded-full border border-zinc-300 bg-white text-zinc-700 shadow dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200"
+          >
+            <span aria-hidden="true">↓</span>
+          </button>
+        </div>
+      )}
 
       <form onSubmit={submit} className="flex items-end gap-2 px-3 pt-3 pb-1">
         <textarea

@@ -453,6 +453,7 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
         inputRef={inputRef}
         onCardNavigate={handleCardNavigate}
         onSend={handleSend}
+        isDesktop={isDesktop}
       />
     </div>
   );
