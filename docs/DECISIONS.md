@@ -8295,6 +8295,11 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       separate language rule: starters come in the widget's language
       through the `lang` the loader already sends (today `uk`); one the
       salon did not fill in for that language is omitted by the API.
+      - Added 07.11.2026, built with the starter questions: the chat
+        textarea has no `name` or `id`, so Chrome reports "A form field
+        element should have an id or name attribute". Add `name="message"`
+        and `autoComplete="off"`; the field already has its `aria-label`,
+        and autofill is not wanted in a chat.
     - **Desktop button tooltips** (decided 06.11.2026): the native `title`
       attribute counts as the hover tooltip; built in 17.3c, only a test
       is missing. A styled tooltip may come in the design pass.
@@ -8354,6 +8359,15 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       disconnect.
     - Reason: a reload during a reply lost the customer's message, which
       proved annoying.
+    - Implemented and committed 07.11.2026. New module
+      `frontend/src/lib/assistant/pendingTurn.ts`, storage key
+      `salonhub:assistant-pending`; 40 tests in
+      `AssistantWidget.pending.test.tsx`; frontend suite 974 passed; all 10
+      mutations killed; manual browser check passed. Chosen during GREEN
+      and recorded afterwards: whitespace-only input counts as empty for
+      the expired-conversation rule; with no stored session id the text is
+      shown at once with "Повторити"; after a reload the block is always the
+      "cut off" text, whatever the original failure was.
   - **17.7f Booking step 4 on a full load** (decided 06.11.2026).
     - Step 4 renders its booking summary at once, on the server, and shows
       a skeleton in place of the contact form only while auth is loading.
