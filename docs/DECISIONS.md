@@ -8175,9 +8175,9 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       conversation is `assistant`.
 - **17.7 Expired conversation, draft and interface details.** Split
   05.11.2026 into three sub-steps; 17.7d to 17.7g were added 06.11.2026
-  and 17.7h and 17.7i on 07.11.2026. Build order of the rest (decided
-  07.11.2026): 17.7e, 17.7f, 17.7g, 17.7h, 17.7i, then the starter
-  questions (the rest of 17.7c).
+  and 17.7h, 17.7i and 17.7j on 07.11.2026. Build order of the rest
+  (decided 07.11.2026): 17.7e, 17.7f, 17.7g, 17.7h, 17.7i, 17.7j, then the
+  starter questions (the rest of 17.7c).
   - **17.7a Expired conversation** (decided 05.11.2026, found in the
     05.11.2026 manual check; fixes gaps in 17.4b):
     - The "expired" state is kept in `sessionStorage` next to the session
@@ -8452,6 +8452,20 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       - A successful load (mount or retry, empty or not) runs the same
         code as the normal mount success branch, including the 17.7e
         pending-text rules, and stops further retries.
+    - Implemented and committed 07.11.2026. One shared `loadHistory` for
+      mount, "Повторити" and `recheck`; `historyLoadedRef` plus an
+      in-flight guard; an `AbortController` per load with a 10 s timeout,
+      aborted on unmount; new `AssistantWidget.history.test.tsx` (35
+      tests); conflicting old tests updated as intended changes and the
+      17.7e "send after a failed history" test deleted; frontend suite
+      1036; 15 mutations, 14 killed at first; mutation 13 (empty history
+      not setting `historyLoadedRef`) exposed a real gap (send silently
+      ignored after an expired history while the button looked enabled),
+      closed by `test_after_an_expired_history_sending_starts_a_new_conversation`;
+      manual browser check passed. Note: in dev, React StrictMode runs the
+      mount load twice, so the Network tab shows a cancelled history
+      request followed by a successful one; never two at the same time.
+      The failure block sits after the greeting, outside the message list.
   - **17.7i Restored chat opens at the end of the conversation** (recorded
     07.11.2026, found in the 17.7g manual check).
     - Problem: after a reload with the chat restored as the small desktop
@@ -8461,6 +8475,15 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       conversation, without a visible scroll.
     - Cause and fix to be confirmed in the 17.7h/17.7i recon; likely
       scrolling to the bottom before paint, without smooth behaviour.
+  - **17.7j "Записатись самостійно" collapses the phone chat** (recorded
+    07.11.2026, found in the 17.7h manual check).
+    - On the phone, tapping "Записатись самостійно" in either amber failure
+      block (the history load failure from 17.7h and the turn failure from
+      17.5b) collapses the chat and stores the collapsed mode, the same way
+      a card time tap does, so she sees the page she is taken to. On
+      desktop the chat stays as it is.
+    - Reason: on `/services` the link leads to the page she is already on,
+      and the full-screen chat hid it, so the tap looked broken.
   - **Noted, not decided** (07.11.2026, found in the 17.7h/17.7i recon; to
     revisit later): while a reply streams, the list scrolls to the bottom
     on every update (`AssistantChat.tsx` 576-579), so if she scrolls up to
