@@ -138,6 +138,13 @@ on booking step 3 (see its known-issue entry).
   and the account email (item 8), reset links go to their mailbox; the
   item 8 notice tells the owner to contact the salon, but salon staff have
   no tool to restore the account (20.10.2026).
+- Recorded 07.11.2026, for the design pass (Stages 18-21): booking step 4
+  should show the price and the deposit in the summary, before
+  "Підтвердити запис". The deposit amount must come from the backend,
+  computed by the same code as at booking creation, never calculated in
+  the frontend, so step 4 and the payment page can never show different
+  numbers. `ServiceDetail` (`frontend/src/lib/catalog/getServiceDetailPage.ts`)
+  does not carry the price today. Found in the 17.7f recon.
 
 ## Open questions
 
@@ -8375,6 +8382,14 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       render nothing".
     - Reason: links from assistant cards open step 4 directly, and a full
       reload showed a white page with only the assistant stripe.
+    - Implemented and committed 07.11.2026. `BookingStep4.tsx` renders
+      `BookingSummary` before the auth branch and, while auth loads, a
+      `ContactFormSkeleton` (aria-hidden, no inputs or button, pulse off
+      under reduced motion) plus a `role="status"` `.sr-only`
+      "Завантаження…"; the Stage 15 "render nothing" rule still holds for
+      anything auth-dependent. 8 new tests in `BookingStep4.test.tsx`;
+      frontend suite 981 passed; all 7 mutations killed; manual browser
+      check passed (no layout jump noticed).
   - **17.7g Stripe only after hydration** (decided 06.11.2026).
     - The server renders nothing for the widget, so the stripe never shows
       before it can respond to a tap.
