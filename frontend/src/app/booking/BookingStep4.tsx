@@ -15,6 +15,12 @@
  * An unverified `"client"` also sees a line above it asking to verify the
  * email (docs/DECISIONS.md § "Item 13 decisions (verification reminder)",
  * point 7); an admin does not.
+ *
+ * `BookingSummary` does not depend on the session, so it is rendered at
+ * once, including in the server HTML (17.7f, docs/DECISIONS.md § "Stage 17
+ * sub-step order"; an exception to the Stage 15 "render nothing while
+ * loading" rule). Only the form area waits for auth: while `loading` it is a
+ * skeleton shaped like the guest form, with no inputs, button or email.
  */
 import { useAuth } from "@/app/AuthContext";
 import { hasLinkedCustomer } from "@/lib/auth/hasLinkedCustomer";
@@ -33,6 +39,37 @@ interface BookingStep4Props {
   startDatetime: string;
 }
 
+function SkeletonField() {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="h-5 w-20 rounded bg-zinc-200 dark:bg-zinc-700" />
+      <div className="h-7 w-full rounded bg-zinc-200 dark:bg-zinc-700" />
+    </div>
+  );
+}
+
+/** Placeholder for the contact form while auth is loading; shaped like the
+ * guest form (three fields and the button) to limit the layout shift. */
+function ContactFormSkeleton() {
+  return (
+    <div className="flex w-full max-w-sm flex-col gap-4">
+      <div
+        data-testid="contact-form-skeleton"
+        aria-hidden="true"
+        className="flex animate-pulse flex-col gap-4 motion-reduce:animate-none"
+      >
+        <SkeletonField />
+        <SkeletonField />
+        <SkeletonField />
+        <div className="h-7 w-36 rounded bg-zinc-200 dark:bg-zinc-700" />
+      </div>
+      <div role="status">
+        <span className="sr-only">Завантаження…</span>
+      </div>
+    </div>
+  );
+}
+
 export default function BookingStep4({
   serviceName,
   specialistName,
@@ -44,17 +81,16 @@ export default function BookingStep4({
 }: BookingStep4Props) {
   const { me, loading } = useAuth();
 
-  // Mirrors ClientLayout's own reasoning: `loading` briefly reads before the
-  // mount fetch to `auth/me/` resolves, so rendering either form here would
-  // risk a flash-then-swap once `me` settles.
-  if (loading) {
-    return null;
-  }
-
   return (
     <>
       <BookingSummary serviceName={serviceName} specialistName={specialistName} slot={startDatetime} />
-      {me !== null && me.role === "client" && me.email_verified ? (
+      {/* `loading` is true until the mount fetch to `auth/me/` resolves (and
+          always on the server), so rendering either form here would risk a
+          flash-then-swap, or a guest booking by a logged-in client, once `me`
+          settles. The skeleton holds the form's place instead. */}
+      {loading ? (
+        <ContactFormSkeleton />
+      ) : me !== null && me.role === "client" && me.email_verified ? (
         <AccountBookingForm
           slug={slug}
           entry={entry}

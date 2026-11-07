@@ -148,9 +148,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   // Re-fetches `auth/me/` and replaces `me`, without touching `loading` --
-  // ClientLayout and the booking wrapper render nothing while `loading` is
-  // true, so flipping it here would unmount whatever called this (e.g. right
-  // after a successful account booking, on its way to /client).
+  // ClientLayout renders nothing and the booking wrapper replaces its form
+  // with a skeleton while `loading` is true, so flipping it here would
+  // unmount whatever called this (e.g. right after a successful account
+  // booking, on its way to /client).
   const refresh = useCallback(async (): Promise<void> => {
     try {
       const result = await apiRequest<Me>(slug, "/auth/me/");

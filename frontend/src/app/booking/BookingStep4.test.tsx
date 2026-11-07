@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockedUseAuth = vi.fn();
@@ -27,7 +29,7 @@ const BASE_PROPS = {
   startDatetime: "2026-09-24T14:30:00+03:00",
 };
 
-function renderStep4(props = BASE_PROPS) {
+function renderStep4(props: ComponentProps<typeof BookingStep4> = BASE_PROPS) {
   return render(
     <BookingContactInfoProvider>
       <BookingStep4 {...props} />
@@ -40,14 +42,6 @@ beforeEach(() => {
 });
 
 describe("BookingStep4", () => {
-  it("test_renders_nothing_while_auth_is_loading", () => {
-    mockedUseAuth.mockReturnValue({ me: null, loading: true, login: vi.fn(), logout: vi.fn() });
-
-    const { container } = renderStep4();
-
-    expect(container).toBeEmptyDOMElement();
-  });
-
   it("test_no_session_renders_summary_and_the_guest_form", () => {
     mockedUseAuth.mockReturnValue({ me: null, loading: false, login: vi.fn(), logout: vi.fn() });
 
@@ -236,5 +230,125 @@ describe("BookingStep4 verification line (item 13, point 7)", () => {
 
     expect(screen.getByLabelText("Ім'я")).toBeInTheDocument();
     expect(screen.queryByText(VERIFY_LINE)).not.toBeInTheDocument();
+  });
+});
+
+// 17.7f (docs/DECISIONS.md § "Stage 17 sub-step order"): while auth is
+// loading, step 4 shows the summary at once and a skeleton in place of the
+// form. The negative checks below first confirm the loading state rendered
+// (the summary is there), so they cannot pass against an empty page.
+describe("BookingStep4 while auth is loading (17.7f)", () => {
+  // "24 вересня, 14:30" from BASE_PROPS.startDatetime; \s+ because Intl may
+  // use a non-breaking space.
+  const SLOT_TEXT = /24\s+вересня,\s+14:30/;
+  const LOADING_TEXT = "Завантаження…";
+
+  function mockLoading(me: object | null = null) {
+    mockedUseAuth.mockReturnValue({
+      me,
+      loading: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+  }
+
+  function clientMe(emailVerified: boolean) {
+    return {
+      email: "alice@example.com",
+      role: "client",
+      name: "Alice",
+      phone: "+10000000000",
+      email_verified: emailVerified,
+    };
+  }
+
+  it("test_loading_renders_the_summary", () => {
+    mockLoading();
+
+    renderStep4();
+
+    expect(screen.getByText("Manicure")).toBeInTheDocument();
+    expect(screen.getByText("Olena")).toBeInTheDocument();
+    expect(screen.getByText(SLOT_TEXT)).toBeInTheDocument();
+  });
+
+  it("test_loading_renders_any_specialist_in_the_summary", () => {
+    mockLoading();
+
+    renderStep4({ ...BASE_PROPS, specialist: "any", specialistName: null });
+
+    expect(screen.getByText("Manicure")).toBeInTheDocument();
+    expect(screen.getByText("Будь-який спеціаліст")).toBeInTheDocument();
+    expect(screen.getByText(SLOT_TEXT)).toBeInTheDocument();
+  });
+
+  it("test_loading_renders_no_form_fields_and_no_confirm_button", () => {
+    mockLoading();
+
+    renderStep4();
+
+    expect(screen.getByText("Manicure")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Ім'я")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Телефон")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Підтвердити запис" })).not.toBeInTheDocument();
+  });
+
+  // The component must wait for `loading`, not only for `me`.
+  it("test_loading_with_a_known_client_shows_no_account_email", () => {
+    mockLoading(clientMe(true));
+
+    const { container } = renderStep4();
+
+    expect(screen.getByText("Manicure")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("alice@example.com");
+    expect(screen.queryByDisplayValue("alice@example.com")).not.toBeInTheDocument();
+  });
+
+  it("test_loading_with_an_unverified_client_shows_no_verify_line", () => {
+    mockLoading(clientMe(false));
+
+    renderStep4();
+
+    expect(screen.getByText("Manicure")).toBeInTheDocument();
+    expect(screen.queryByText("Підтвердіть пошту, щоб бронювати з акаунта.")).not.toBeInTheDocument();
+  });
+
+  it("test_loading_shows_a_visually_hidden_status_line", () => {
+    mockLoading();
+
+    renderStep4();
+
+    const text = screen.getByText(LOADING_TEXT);
+    expect(text).toHaveClass("sr-only");
+    expect(text.closest('[role="status"]')).not.toBeNull();
+    // getByRole skips aria-hidden subtrees, so this also proves the status
+    // line is not inside the hidden skeleton.
+    expect(screen.getByRole("status")).toHaveTextContent(LOADING_TEXT);
+  });
+
+  it("test_loading_skeleton_blocks_are_aria_hidden", () => {
+    mockLoading();
+
+    renderStep4();
+
+    expect(screen.getByTestId("contact-form-skeleton")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  // The original bug: the server HTML for step 4 was empty.
+  it("test_server_render_while_loading_contains_the_summary", () => {
+    mockLoading();
+
+    const html = renderToString(
+      <BookingContactInfoProvider>
+        <BookingStep4 {...BASE_PROPS} />
+      </BookingContactInfoProvider>,
+    );
+
+    expect(html).toContain("Manicure");
+    expect(html).toContain("Olena");
+    expect(html).toMatch(SLOT_TEXT);
   });
 });
