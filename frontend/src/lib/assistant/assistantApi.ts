@@ -103,11 +103,13 @@ export async function sendAssistantMessage(
 /**
  * The stored conversation for a session id, oldest first. No id means no
  * conversation, so nothing is requested. An unknown or expired id comes
- * back as []. A non-OK response rejects with ApiError.
+ * back as []. A non-OK response rejects with ApiError. `signal` aborts the
+ * request (17.7h: the widget's 10 s timeout and unmount).
  */
 export async function getAssistantHistory(
   slug: string,
   sessionId: string | null,
+  signal?: AbortSignal,
 ): Promise<AssistantHistoryMessage[]> {
   if (sessionId === null) {
     return [];
@@ -116,6 +118,7 @@ export async function getAssistantHistory(
   const response = await fetch(salonUrl(slug, "/assistant/history/"), {
     headers: { [SESSION_HEADER]: sessionId },
     credentials: "omit",
+    signal,
   });
   const body = await readBody(response);
 

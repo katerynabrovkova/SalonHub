@@ -8,11 +8,16 @@
  * it, so the conversation and a streaming reply survive minimise and pages
  * where the widget renders nothing. `AssistantChat` only renders it.
  *
- * - History loads once per mount, only when a session id is stored. Empty
+ * - History loads on mount, only when a session id is stored. Empty
  *   history means the conversation expired: the id is dropped at once and
  *   the expiry waits in storage (17.7a) until the chat is open on an
- *   allowed page, where the notice shows once. A failed request keeps the
- *   id and shows the plain greeting.
+ *   allowed page, where the notice shows once.
+ * - 17.7h: until the history has loaded on this page load, sending is
+ *   blocked (the input stays enabled). A load slower than 0.3 s shows a
+ *   spinner; it is aborted after 10 s and on unmount. A failed load keeps
+ *   the id and shows the failure block, whose "Повторити" loads it again, as
+ *   do opening the chat and returning to the tab; never two loads at once.
+ *   Mount and every retry run the same `loadHistory`.
  * - 17.7a, a page that stays loaded: opening a chat that holds a
  *   conversation, or the tab becoming visible with the chat open, re-checks
  *   history; a send answered with a different session id counts too. An
@@ -69,7 +74,12 @@ import Link from "next/link";
 import { ApiError } from "@/lib/api/errors";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
 import { clearDraft, readDraft, storeDraft } from "@/lib/assistant/draft";
-import { failureFor, type Failure, type FailureCause } from "@/lib/assistant/failure";
+import {
+  failureFor,
+  HISTORY_LOAD_FAILURE,
+  type Failure,
+  type FailureCause,
+} from "@/lib/assistant/failure";
 import { clearPendingText, readPendingText, storePendingText } from "@/lib/assistant/pendingTurn";
 import { parseProposalCard, type ProposalCard } from "@/lib/assistant/proposalCard";
 import {
@@ -95,6 +105,11 @@ const AI_NOTICE_DESTINATION = "Як ми обробляємо дані, відк
 const PRIVACY_HREF = "/privacy";
 // 17.7c: visually hidden, announced while the dots show.
 const TYPING_TEXT = "Асистент пише…";
+
+// 17.7h: visually hidden, announced while the history spinner shows.
+const HISTORY_LOADING_TEXT = "Завантажую розмову…";
+const HISTORY_SPINNER_DELAY_MS = 300;
+const HISTORY_TIMEOUT_MS = 10_000;
 
 // Same limit as the backend serializer (ai_assistant/serializers.py).
 const MAX_MESSAGE_LENGTH = 2000;
@@ -140,8 +155,25 @@ export interface ChatDivider {
 
 export type ChatEntry = ChatMessage | ChatDivider;
 
+/**
+ * 17.7h: "none" when no session id was stored at mount (nothing to load);
+ * sending is blocked while "loading" or "failed".
+ */
+export type HistoryStatus = "none" | "loading" | "failed" | "loaded";
+
+/** The status a mount starts with: loading whenever a session id is stored. */
+function initialHistoryStatus(): HistoryStatus {
+  return readSessionId() === null ? "none" : "loading";
+}
+
 export interface AssistantConversation {
   messages: ChatEntry[];
+  /** 17.7h: where the history load of this page load stands. */
+  historyStatus: HistoryStatus;
+  /** 17.7h: the load has taken longer than 0.3 s; shows the spinner. */
+  historySpinner: boolean;
+  /** 17.7h: loads the history again after a failure ("Повторити"). */
+  reloadHistory: () => void;
   streaming: boolean;
   /** How the last reply failed (17.5b table row), or null. */
   failure: Failure | null;
@@ -217,6 +249,15 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
   // opening it or returning to the tab re-checks history (17.7a).
   const liveRef = useRef(false);
   const mountedRef = useRef(true);
+  // 17.7h: the history has loaded on this page load, or there was nothing
+  // to load (no stored id at mount). Until then sending is blocked and the
+  // re-check triggers load it instead.
+  const historyLoadedRef = useRef(false);
+  const [historyStatus, setHistoryStatus] = useState(initialHistoryStatus);
+  const [historySpinner, setHistorySpinner] = useState(false);
+  // Cancels the history load in flight; null when none runs (the guard
+  // against two loads at once).
+  const cancelHistoryLoadRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -231,18 +272,41 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
     }
   }, [expired]);
 
-  useEffect(() => {
-    const stored = readSessionId();
-    sessionIdRef.current = stored;
-    if (stored === null) {
+  /**
+   * 17.7h: the one history load, run on mount, by "Повторити" and by the
+   * re-check triggers while the history has not loaded. Does nothing without
+   * an id, once loaded, or while a load runs. The request is aborted after
+   * 10 s, which counts as a failure, and on unmount (see the mount effect).
+   */
+  const loadHistory = useCallback(() => {
+    const stored = sessionIdRef.current;
+    if (stored === null || historyLoadedRef.current || cancelHistoryLoadRef.current !== null) {
       return;
     }
-    let active = true;
-    getAssistantHistory(slug, stored).then(
+    const controller = new AbortController();
+    let current = true;
+    const timeout = setTimeout(() => controller.abort(), HISTORY_TIMEOUT_MS);
+    const spinner = setTimeout(() => setHistorySpinner(true), HISTORY_SPINNER_DELAY_MS);
+    function settle() {
+      clearTimeout(timeout);
+      clearTimeout(spinner);
+      cancelHistoryLoadRef.current = null;
+    }
+    cancelHistoryLoadRef.current = () => {
+      current = false;
+      settle();
+      controller.abort();
+    };
+    setHistoryStatus("loading");
+    getAssistantHistory(slug, stored, controller.signal).then(
       (history) => {
-        if (!active) {
+        if (!current) {
           return;
         }
+        settle();
+        setHistorySpinner(false);
+        historyLoadedRef.current = true;
+        setHistoryStatus("loaded");
         if (history.length === 0) {
           // Cleared at once so the booking source stays honest; the notice
           // waits in storage until the chat is opened on an allowed page.
@@ -303,13 +367,32 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
         setHasConversation(true);
       },
       () => {
-        // Failed request: keep the id, show the plain greeting.
+        if (!current) {
+          return;
+        }
+        // Failed request (or the timeout): keep the id and any 17.7e stored
+        // text; the failure block offers "Повторити".
+        settle();
+        setHistorySpinner(false);
+        setHistoryStatus("failed");
       },
     );
-    return () => {
-      active = false;
-    };
   }, [slug]);
+
+  useEffect(() => {
+    const stored = readSessionId();
+    sessionIdRef.current = stored;
+    if (stored === null) {
+      historyLoadedRef.current = true;
+      return;
+    }
+    loadHistory();
+    // Aborts whichever load runs at unmount, the mount one or a retry.
+    const cancelHistoryLoad = cancelHistoryLoadRef;
+    return () => {
+      cancelHistoryLoad.current?.();
+    };
+  }, [loadHistory]);
 
   /**
    * 17.7a, a page that stays loaded: asks whether the held conversation is
@@ -317,8 +400,14 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
    * divider goes at the bottom, the id is dropped. A live conversation or a
    * failed request changes nothing. Skipped while a reply streams, and the
    * answer is ignored if a turn has started or the id changed meanwhile.
+   * 17.7h: while the history has not loaded on this page load, it loads the
+   * history instead.
    */
   const recheck = useCallback(() => {
+    if (!historyLoadedRef.current) {
+      loadHistory();
+      return;
+    }
     const id = sessionIdRef.current;
     if (id === null || !liveRef.current || streamingRef.current) {
       return;
@@ -344,7 +433,7 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
         // Failed request: nothing changes.
       },
     );
-  }, [slug]);
+  }, [slug, loadHistory]);
 
   // Re-check on every open of a chat that holds a conversation (not on a
   // chat that is open from the first render: the mount request covers it).
@@ -494,7 +583,8 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
   const send = useCallback(
     (raw: string) => {
       const text = raw.trim();
-      if (text === "" || streamingRef.current) {
+      // 17.7h: nothing is sent before the history has loaded.
+      if (text === "" || streamingRef.current || !historyLoadedRef.current) {
         return;
       }
       lastTextRef.current = text;
@@ -526,6 +616,9 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
 
   return {
     messages,
+    historyStatus,
+    historySpinner,
+    reloadHistory: loadHistory,
     streaming,
     failure,
     expired,
@@ -548,6 +641,39 @@ interface AssistantChatProps {
   onSend?: () => void;
 }
 
+// 17.7c (mockup "AI 8"): one full-width block per failure, the 17.5b text
+// on top and its action below, full width. Colours are the amber notice
+// of client/VerificationBanner.tsx; the action keeps the widget's button
+// style. Still one `role="status"` container, as in 17.5b. 17.7h uses the
+// same block for a failed history load.
+function FailureBlock({ failure, onRetry }: { failure: Failure; onRetry: () => void }) {
+  return (
+    <div
+      role="status"
+      className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+    >
+      <p>{failure.text}</p>
+      {failure.retry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="min-h-11 w-full rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
+        >
+          Повторити
+        </button>
+      ) : null}
+      {failure.link !== null ? (
+        <Link
+          href={failure.link.href}
+          className="flex min-h-11 w-full items-center justify-center rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
+        >
+          {failure.link.label}
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
 export default function AssistantChat({
   conversation,
   inputRef,
@@ -556,6 +682,9 @@ export default function AssistantChat({
 }: AssistantChatProps) {
   const {
     messages,
+    historyStatus,
+    historySpinner,
+    reloadHistory,
     streaming,
     failure,
     expired,
@@ -572,6 +701,9 @@ export default function AssistantChat({
   // text or known status the dots pulse. An unknown step keeps the dots.
   const statusLine = status === null ? null : statusText(status);
   const showDots = streaming && !replyStarted && statusLine === null;
+  // 17.7h: sending waits for the history; the input stays enabled, as in
+  // 17.7c while a reply streams.
+  const historyBlocked = historyStatus === "loading" || historyStatus === "failed";
 
   useEffect(() => {
     // jsdom has no scrollIntoView, hence the optional call.
@@ -580,8 +712,9 @@ export default function AssistantChat({
 
   function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    // 17.7c: blocked while a reply streams, though the input is enabled.
-    if (streaming || draft.trim() === "") {
+    // 17.7c: blocked while a reply streams, though the input is enabled;
+    // 17.7h: also until the history has loaded.
+    if (streaming || historyBlocked || draft.trim() === "") {
       return;
     }
     send(draft);
@@ -596,36 +729,8 @@ export default function AssistantChat({
     }
   }
 
-  // 17.7c (mockup "AI 8"): one full-width block per failure, the 17.5b text
-  // on top and its action below, full width. Colours are the amber notice
-  // of client/VerificationBanner.tsx; the action keeps the widget's button
-  // style. Still one `role="status"` container, as in 17.5b.
   const failureBlock =
-    failure === null ? null : (
-      <div
-        role="status"
-        className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
-      >
-        <p>{failure.text}</p>
-        {failure.retry ? (
-          <button
-            type="button"
-            onClick={retry}
-            className="min-h-11 w-full rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
-          >
-            Повторити
-          </button>
-        ) : null}
-        {failure.link !== null ? (
-          <Link
-            href={failure.link.href}
-            className="flex min-h-11 w-full items-center justify-center rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
-          >
-            {failure.link.label}
-          </Link>
-        ) : null}
-      </div>
-    );
+    failure === null ? null : <FailureBlock failure={failure} onRetry={retry} />;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -672,7 +777,21 @@ export default function AssistantChat({
             {failureBlock !== null ? <li>{failureBlock}</li> : null}
           </ul>
         ) : null}
+        {historyStatus === "failed" ? (
+          <FailureBlock failure={HISTORY_LOAD_FAILURE} onRetry={reloadHistory} />
+        ) : null}
+        {/* 17.7h: where the history will appear, a little above the centre. */}
+        {historySpinner ? (
+          <div aria-hidden="true" className="flex flex-1 items-center justify-center pb-16">
+            <span
+              data-testid="assistant-history-spinner"
+              className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 motion-reduce:animate-none dark:border-zinc-600 dark:border-t-zinc-300"
+            />
+          </div>
+        ) : null}
         <div role="status" className="self-start text-zinc-500 dark:text-zinc-400">
+          {/* 17.7h: the spinner is aria-hidden, so this is what is announced. */}
+          {historySpinner ? <span className="sr-only">{HISTORY_LOADING_TEXT}</span> : null}
           {/* 17.7c: the dots are aria-hidden, so this is what is announced. */}
           {showDots ? <span className="sr-only">{TYPING_TEXT}</span> : null}
           {showDots ? (
@@ -709,7 +828,7 @@ export default function AssistantChat({
         />
         <button
           type="submit"
-          disabled={streaming || draft.trim() === ""}
+          disabled={streaming || historyBlocked || draft.trim() === ""}
           className="min-h-11 rounded bg-zinc-900 px-4 text-sm text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
         >
           Надіслати

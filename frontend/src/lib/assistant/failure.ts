@@ -32,6 +32,16 @@ export interface Failure {
 
 const BOOK_YOURSELF: FailureLink = { label: "Записатись самостійно", href: "/services" };
 
+/**
+ * 17.7h: the history request failed (network error, non-OK response or the
+ * 10 s timeout). "Повторити" loads the history again; it is not a turn.
+ */
+export const HISTORY_LOAD_FAILURE: Failure = {
+  text: "Не вдалося завантажити розмову.",
+  retry: true,
+  link: BOOK_YOURSELF,
+};
+
 const BUSY = "Зараз у мене багато співрозмовниць. Спробуйте, будь ласка, за хвилинку 🤗";
 const THROTTLED = "Ви пишете швидше, ніж я встигаю думати 😅 Зачекайте, будь ласка, хвилинку.";
 const DAILY_LIMIT =

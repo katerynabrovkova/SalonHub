@@ -293,7 +293,7 @@ describe("AssistantChat history", () => {
     rerender(<Chat />);
 
     expect(mockedHistory).toHaveBeenCalledTimes(1);
-    expect(mockedHistory).toHaveBeenCalledWith("bella-demo", "stored-id");
+    expect(mockedHistory).toHaveBeenCalledWith("bella-demo", "stored-id", expect.any(AbortSignal));
   });
 
   // 17.4b (empty messages skipped) and 17.6a (a malformed stored card is
@@ -328,7 +328,7 @@ describe("AssistantChat history", () => {
     expect(mockedClear).toHaveBeenCalledTimes(1);
   });
 
-  it("test_failed_history_shows_the_plain_greeting_and_keeps_the_id", async () => {
+  it("test_failed_history_keeps_the_greeting_and_the_id", async () => {
     mockedRead.mockReturnValue("stored-id");
     mockedHistory.mockRejectedValueOnce(new ApiError(500, "internal_error", "Boom"));
     renderChat();

@@ -537,13 +537,13 @@ async function historyAnswered(calls: number) {
 
 // 17.7e (decided 07.11.2026): a failed history request on reload neither
 // shows nor removes the stored text; the next successful history load
-// decides by the matching rule. A new send replaces it.
+// decides by the matching rule.
 describe("AssistantWidget pending turn when the history request fails (17.7e)", () => {
   it.each([
     { name: "lost_connection", error: new TypeError("Failed to fetch") },
     { name: "server_error", error: new ApiError(500, "internal_error", "Server error.") },
   ])(
-    "test_failed_history_on_reload_shows_no_stored_text_and_no_failure_block_($name)",
+    "test_failed_history_on_reload_shows_no_stored_text_($name)",
     async ({ error }) => {
       const first = await sendInConversationAndLeaveRunning();
       // Precondition: the running turn's text is in storage.
@@ -555,7 +555,9 @@ describe("AssistantWidget pending turn when the history request fails (17.7e)", 
 
       expect(screen.queryByText(TEXT)).not.toBeInTheDocument();
       expect(screen.queryByText(CUT_OFF)).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
+      // 17.7h: the history failure block has its own "Повторити"; the stored
+      // text is still not shown as her message.
+      expect(screen.queryByRole("list", { name: "Розмова" })).not.toBeInTheDocument();
     },
   );
 
@@ -601,20 +603,6 @@ describe("AssistantWidget pending turn when the history request fails (17.7e)", 
     expect(items()).toEqual(["Привіт", "Вітаю!", TEXT, "У суботу є 10:00."]);
     expect(screen.queryByRole("button", { name: RETRY })).not.toBeInTheDocument();
     await waitFor(() => expect(storedValues()).not.toContain(TEXT));
-  });
-
-  it("test_new_send_after_a_failed_history_replaces_the_stored_text", async () => {
-    const first = await sendInConversationAndLeaveRunning();
-    mockedHistory.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    const { user } = await reload(first);
-    await historyAnswered(3);
-    replyHanging([]);
-
-    await sendText(user, "А в неділю?");
-
-    await waitFor(() => expect(mockedSend).toHaveBeenCalledTimes(2));
-    expect(storedValues()).toContain("А в неділю?");
-    expect(storedValues()).not.toContain(TEXT);
   });
 });
 
