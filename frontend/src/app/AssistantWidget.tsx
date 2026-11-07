@@ -80,14 +80,26 @@ function readDesktopOnServer(): boolean {
 }
 
 // 17.7d: the stored mode changes only through the widget itself, which
-// pins it in state, so there is nothing to subscribe to.
+// pins it in state, so there is nothing to subscribe to. 17.7g: the
+// hydration flag never changes after hydration either.
 function subscribeNever(): () => void {
   return () => {};
 }
 
-// The server cannot read sessionStorage: its markup is always the stripe.
+// The server cannot read sessionStorage. It renders no widget at all
+// (17.7g), and the hydrating render reads this too, so it matches.
 function readModeOnServer(): WidgetMode {
   return "collapsed";
+}
+
+// 17.7g: false on the server and in the hydrating render, true right after
+// hydration, so the stripe never shows before it can respond to a tap.
+function readHydratedOnClient(): boolean {
+  return true;
+}
+
+function readHydratedOnServer(): boolean {
+  return false;
 }
 
 const iconProps = {
@@ -139,9 +151,12 @@ const HEADER_BUTTON =
 
 export default function AssistantWidget({ salonName, slug }: AssistantWidgetProps) {
   const pathname = usePathname();
+  // 17.7g: the server markup and the hydrating render are empty; the widget
+  // appears right after hydration, read like the PaymentStatus hash.
+  const hydrated = useSyncExternalStore(subscribeNever, readHydratedOnClient, readHydratedOnServer);
   // 17.7d: the stored mode, read like the PaymentStatus hash. The server
-  // snapshot is "collapsed", so the server markup and the hydrating render
-  // are the stripe and the stored mode applies right after hydration. The
+  // snapshot is "collapsed", so the hydrating render has the chat closed and
+  // the stored mode applies right after hydration. The
   // subscription never fires; the customer's first change of mode (or a
   // phone card click) pins it in `chosenMode`, which takes over from then on.
   const storedMode = useSyncExternalStore(subscribeNever, readWidgetMode, readModeOnServer);
@@ -355,7 +370,7 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
     }
   }
 
-  if (!shown) {
+  if (!hydrated || !shown) {
     return null;
   }
 

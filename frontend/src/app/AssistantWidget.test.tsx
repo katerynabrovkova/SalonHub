@@ -427,17 +427,17 @@ describe("AssistantWidget open state after reload (17.7d)", () => {
     },
   );
 
-  // The server cannot read sessionStorage, so its markup (and the first
-  // client render, which must match it) is the stripe. jsdom has a
+  // The server cannot read sessionStorage, and since 17.7g it renders no
+  // widget at all (the first client render must match it). jsdom has a
   // sessionStorage, so reading it during render would show up here.
   it.each(["window", "panel"])(
-    "test_server_render_is_collapsed_whatever_is_stored_(%s)",
+    "test_server_render_is_empty_whatever_is_stored_(%s)",
     (mode) => {
       sessionStorage.setItem(MODE_KEY, mode);
 
       const html = renderToString(<AssistantWidget salonName="Bella" slug="bella-demo" />);
 
-      expect(html).toContain(`aria-label="${STRIPE}"`);
+      expect(html).toBe("");
       expect(html).not.toContain('role="dialog"');
     },
   );

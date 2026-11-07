@@ -5,7 +5,9 @@
  * Kept next to the session id under its own key, for the life of the tab,
  * so a full reload brings the chat back as it was: collapsed, the small
  * window or the side panel. The server cannot read it, so the widget reads
- * it in an effect after mount, never during render.
+ * it through `useSyncExternalStore` with a "collapsed" server snapshot
+ * (17.7d): the hydrating render matches the server, and the stored mode
+ * applies right after hydration.
  *
  * sessionStorage can throw (disabled storage, quota, privacy modes). A
  * failure means "collapsed", never a broken widget.
