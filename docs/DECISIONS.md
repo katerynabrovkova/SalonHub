@@ -8355,8 +8355,10 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     - History request fails on reload (decided 07.11.2026): the stored text
       is neither shown nor removed. Its fate is decided on the next
       successful history load, by the matching rule above (see 17.7h for
-      when that load happens). If she sends a new message meanwhile, the
-      new text replaces the stored one.
+      when that load happens). Since 17.7h "Надіслати" stays disabled
+      until the history loads, so she cannot send a new message while the
+      history request has failed, and the stored text stays as it is until
+      a load succeeds.
     - Conversation expired, history comes back empty (decided 07.11.2026):
       the stored text is moved into the input only if the input is empty;
       if the input already has text, the stored text is dropped and her
@@ -8406,26 +8408,50 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       the output is identical; manual browser check passed.
   - **17.7h History load retried after a failed load** (decided
     07.11.2026). Built after 17.7g and before the starter questions.
-    - Problem, found in the 17.7e recon: if the history request fails on
-      reload, the widget shows only the greeting
-      (`frontend/src/app/AssistantChat.tsx` 236-238, an empty error
-      handler) and never retries on that page load. The open and
-      tab-return re-checks (282-303) call `recheck`, which returns early
-      while `liveRef` is false (254); `liveRef` becomes true only after a
-      successful history load (233) or a finished turn (379). The server
-      and the model still have the conversation, so the assistant may refer
-      to messages she cannot see.
-    - Decision: while the history has never loaded successfully on this
-      page load, opening the chat and returning to the tab load the
-      history again (the same triggers as the 17.7a re-check). On success
-      the old messages and any 17.7e stored text are handled as on a
-      normal reload.
-    - Open for the 17.7h recon, not decided: the history request has no
-      timeout (`frontend/src/lib/assistant/assistantApi.ts` 116-119); a
-      late successful response is added above messages she sent in the
-      meantime (`AssistantChat.tsx` 232); what happens if she sends a
-      message before the history loads (the send uses the stored session
-      id, `AssistantChat.tsx` 360).
+    - Problem, found in the 17.7e recon (line numbers as of the 17.7h
+      recon, 07.11.2026): if the history request fails on reload, the
+      widget shows only the greeting (`frontend/src/app/AssistantChat.tsx`
+      305-307, an empty error handler) and never retries on that page load.
+      The open and tab-return re-checks (349-372) call `recheck`, which
+      returns early while `liveRef` is false (323); `liveRef` becomes true
+      only after a successful history load (302) or a finished turn (450).
+      The server and the model still have the conversation, so the
+      assistant may refer to messages she cannot see. The history request
+      has no timeout (`frontend/src/lib/assistant/assistantApi.ts`
+      116-119), a send before the history loads uses the stored session id
+      (`AssistantChat.tsx` 429), and a late answer is prepended (301), so
+      an answer arriving after her turn's `done` would show that turn
+      twice.
+    - Decisions (agreed 07.11.2026):
+      - Sending waits for the history. When a session id is stored,
+        "Надіслати" stays disabled until the history has loaded
+        successfully on this page load. The input stays enabled and the
+        17.7b draft works as usual (the same pattern as 17.7c during a
+        streaming reply). With no stored session id nothing is loaded and
+        sending works at once. Because nothing can be sent before the
+        history arrives, a late history answer can never duplicate her new
+        turn; this resolves the former questions about late answers and
+        sending before the history loads.
+      - While loading: a spinner, centred or slightly above centre of the
+        message area where the history will appear, shown only if the load
+        takes longer than about 0.3 s, with a visually hidden "Завантажую
+        розмову…" for screen readers. No visible text.
+      - Timeout: the history request is aborted after 10 s, and also on
+        unmount. A timeout counts as a failure.
+      - On failure (network error, non-OK response or timeout): the amber
+        failure block as in 17.7c with the text "Не вдалося завантажити
+        розмову.", the button "Повторити" (loads the history again) and
+        the link "Записатись самостійно". "Надіслати" stays disabled.
+      - Automatic retry: while the history has not loaded successfully on
+        this page load, opening the chat and returning to the tab load it
+        again (the 17.7a triggers). Never two parallel history requests
+        (in-flight guard). A restored open chat right after hydration must
+        not start a second request while the mount request runs: the
+        hydrating render has the chat collapsed (17.7d, 17.7g), so `open`
+        turns true just after mount and fires the open trigger.
+      - A successful load (mount or retry, empty or not) runs the same
+        code as the normal mount success branch, including the 17.7e
+        pending-text rules, and stops further retries.
   - **17.7i Restored chat opens at the end of the conversation** (recorded
     07.11.2026, found in the 17.7g manual check).
     - Problem: after a reload with the chat restored as the small desktop
@@ -8435,6 +8461,10 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       conversation, without a visible scroll.
     - Cause and fix to be confirmed in the 17.7h/17.7i recon; likely
       scrolling to the bottom before paint, without smooth behaviour.
+  - **Noted, not decided** (07.11.2026, found in the 17.7h/17.7i recon; to
+    revisit later): while a reply streams, the list scrolls to the bottom
+    on every update (`AssistantChat.tsx` 576-579), so if she scrolls up to
+    reread she is pulled back down.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
