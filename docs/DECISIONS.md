@@ -8497,6 +8497,21 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       - Sending a message always scrolls to the end and resumes following.
       - Only the "↓" tap scrolls smoothly; every automatic scroll is
         instant.
+    - Status 07.11.2026: Part 2 implemented and committed (scroll tracked
+      from scroll events, leaving the bottom only on an upward scroll
+      ending more than 80 px from the end, "↓" button with smooth scroll
+      and a desktop-only tooltip, sending and both "Повторити" buttons
+      resume following; new `AssistantChat.scroll.test.tsx`; frontend
+      suite 1068; all 11 mutations killed; manual browser check passed).
+      Part 1 NOT resolved: the scroll now runs in a layout effect and the
+      tests pass, but in the real browser a restored small window after F5
+      still shows the top of the conversation first and then the end. The
+      tests stub the list size, so they cannot see the real cause. Next
+      step: a diagnostic run with temporary console logging of the list's
+      `scrollHeight`, `clientHeight` and `scrollTop` and the window size at
+      each step, then a fix.
+    - For the phone check after deployment: the keyboard changes the list
+      height without a scroll event, so the 80 px check is not re-run then.
   - **17.7j "Записатись самостійно" collapses the phone chat** (recorded
     07.11.2026, found in the 17.7h manual check).
     - On the phone, tapping "Записатись самостійно" in either amber failure
