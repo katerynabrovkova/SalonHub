@@ -33,6 +33,12 @@
  *   offered (lib/assistant/failure.ts), in one full-width block at the end
  *   of the message list (17.7c). Retry resends the last customer text
  *   without a second bubble and replaces the partial reply.
+ * - 17.7e: the sent text is kept in sessionStorage (lib/assistant/pendingTurn.ts)
+ *   from send until `done`. After a reload it shows as her message with the
+ *   "cut off" block: at once without a session id, otherwise after history,
+ *   unless the last stored turn's customer message equals it (then it is
+ *   dropped). Empty history (expired) moves it into an empty input or drops
+ *   it; a failed history request leaves it stored.
  * - The request is aborted on unmount.
  * - The draft (17.7b) lives in the hook and in sessionStorage
  *   (lib/assistant/draft.ts): written on every change, cleared on send
@@ -64,6 +70,7 @@ import { ApiError } from "@/lib/api/errors";
 import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assistantApi";
 import { clearDraft, readDraft, storeDraft } from "@/lib/assistant/draft";
 import { failureFor, type Failure, type FailureCause } from "@/lib/assistant/failure";
+import { clearPendingText, readPendingText, storePendingText } from "@/lib/assistant/pendingTurn";
 import { parseProposalCard, type ProposalCard } from "@/lib/assistant/proposalCard";
 import {
   clearConversationExpired,
@@ -91,6 +98,31 @@ const TYPING_TEXT = "Асистент пише…";
 
 // Same limit as the backend serializer (ai_assistant/serializers.py).
 const MAX_MESSAGE_LENGTH = 2000;
+
+// 17.7e: after a reload a pending turn always shows the "cut off" row
+// (17.5b), whatever ended it.
+const PENDING_FAILURE = failureFor({ kind: "no_done", textReceived: true });
+// The id of a pending customer bubble shown from the first render.
+const PENDING_ID = 0;
+
+/**
+ * 17.7e: a pending text shown from the first render. Only without a stored
+ * session id; with one, the history answer decides. The server render has no
+ * storage, so it reads null there.
+ */
+function readPendingWithoutSession(): string | null {
+  return readSessionId() === null ? readPendingText() : null;
+}
+
+/** The customer message of the last stored turn (17.7e matching rule). */
+function lastCustomerText(history: { role: string; content: string }[]): string | null {
+  for (let index = history.length - 1; index >= 0; index--) {
+    if (history[index].role === "user") {
+      return history[index].content;
+    }
+  }
+  return null;
+}
 
 export interface ChatMessage {
   id: number;
@@ -140,9 +172,15 @@ export interface AssistantConversation {
  * on it, so no caller may get them by default (17.7a).
  */
 export function useAssistantConversation(slug: string, open: boolean): AssistantConversation {
-  const [messages, setMessages] = useState<ChatEntry[]>([]);
+  // 17.7e: read once per mount, like the draft below.
+  const [pendingAtMount] = useState(readPendingWithoutSession);
+  const [messages, setMessages] = useState<ChatEntry[]>(() =>
+    pendingAtMount === null ? [] : [{ id: PENDING_ID, role: "user", content: pendingAtMount }],
+  );
   const [streaming, setStreaming] = useState(false);
-  const [failure, setFailure] = useState<Failure | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(() =>
+    pendingAtMount === null ? null : PENDING_FAILURE,
+  );
   // 17.7a: an expiry the customer has not seen yet, from storage (an earlier
   // page load) or found by this mount; shown as the notice once the chat is
   // open, then cleared from storage. The server render has no storage, so
@@ -167,13 +205,14 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
   const sessionIdRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
-  const nextIdRef = useRef(0);
+  const nextIdRef = useRef(PENDING_ID + 1);
   // The last customer text and the reply bubble of the last turn, for retry.
-  const lastTextRef = useRef<string | null>(null);
+  // A pending text shown after a reload (17.7e) is the last customer text.
+  const lastTextRef = useRef<string | null>(pendingAtMount);
   const replyIdRef = useRef<number | null>(null);
   // The customer bubble of the last turn: a divider found on send goes
   // above it (17.7a).
-  const userIdRef = useRef<number | null>(null);
+  const userIdRef = useRef<number | null>(pendingAtMount === null ? null : PENDING_ID);
   // The chat holds a conversation (restored history or a finished turn), so
   // opening it or returning to the tab re-checks history (17.7a).
   const liveRef = useRef(false);
@@ -211,6 +250,19 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
           sessionIdRef.current = null;
           markConversationExpired();
           setNoticeOwed(true);
+          // 17.7e: an expired conversation's pending text goes into an
+          // empty input, else it is dropped; no failure block either way.
+          // Skipped once she has sent on this page: the stored text is then
+          // her new turn's. The draft is stored on every change, so storage
+          // tells whether the input is empty.
+          const pending = lastTextRef.current === null ? readPendingText() : null;
+          if (pending !== null) {
+            clearPendingText();
+            if (readDraft() === "") {
+              setDraftState(pending);
+              storeDraft(pending);
+            }
+          }
           return;
         }
         // A message is kept when it has text or a well-formed card; a
@@ -227,6 +279,23 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
             content: message.content,
             ...(card === null ? {} : { card }),
           });
+        }
+        // 17.7e: a pending text is dropped when the last stored turn's
+        // customer message equals it (the server saved the turn); otherwise
+        // it shows after the history with the "cut off" block. A failed
+        // request leaves it stored for the next successful load. Skipped
+        // once she has sent on this page, as above.
+        const pending = lastTextRef.current === null ? readPendingText() : null;
+        if (pending !== null) {
+          if (lastCustomerText(history) === pending) {
+            clearPendingText();
+          } else {
+            const pendingId = nextIdRef.current++;
+            restored.push({ id: pendingId, role: "user", content: pending });
+            lastTextRef.current = pending;
+            userIdRef.current = pendingId;
+            setFailure(PENDING_FAILURE);
+          }
         }
         // Prepended: a message sent before history arrived stays last.
         setMessages((current) => [...restored, ...current]);
@@ -376,6 +445,8 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
                 storeSessionId(reply.sessionId);
                 sessionIdRef.current = reply.sessionId;
               }
+              // 17.7e: the turn finished, so nothing is pending.
+              clearPendingText();
               liveRef.current = true;
               setHasConversation(true);
               break;
@@ -427,6 +498,8 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
         return;
       }
       lastTextRef.current = text;
+      // 17.7e: kept until `done`; replaces an earlier pending text.
+      storePendingText(text);
       // Decided 05.11.2026 (17.7b): cleared on send, whether the turn
       // succeeds or fails.
       setDraftState("");
