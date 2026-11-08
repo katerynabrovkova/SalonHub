@@ -146,6 +146,25 @@ on booking step 3 (see its known-issue entry).
   numbers. `ServiceDetail` (`frontend/src/lib/catalog/getServiceDetailPage.ts`)
   does not carry the price today. Found in the 17.7f recon.
 
+**Later features** (built after the product is complete, not in any
+numbered stage):
+
+- **Voice input in the assistant widget** (removed from Stage 17 on
+  08.11.2026, where it was sub-step 17.9). Reason: not needed for the
+  first customers, since phones already offer keyboard dictation, and not
+  worth the time now. Decisions kept from Stage 16 ("Deferred") and
+  "Stage 17 block D":
+  - the customer presses a microphone, sees the recognised text and can
+    edit it before sending;
+  - transcription through our backend (OpenAI), with the same
+    assistant-enabled check and per-customer `safety_identifier` as the
+    chat;
+  - a recon before it settles the model, maximum length and size, limits
+    per session, IP and salon, and cost;
+  - audio is never stored: it is sent for transcription and discarded;
+    only text comes back;
+  - the privacy policy must then say that OpenAI processes voice input.
+
 ## Open questions
 
 Not yet decided — recorded so they surface before the stages that depend
@@ -6011,10 +6030,9 @@ Agreed after the first planning commit. Mockups: Design canvas boards
 - Messenger channels: still deferred per the Stage 10 decision.
 - `Specialist.languages` field: for now salons mention languages in the
   specialist bio.
-- Voice input in the widget (Stage 17): the customer presses a
-  microphone, sees the recognised text and can edit it before sending;
-  browser-side versus server-side recognition to be researched in
-  Stage 17. The backend stays text-only.
+- Voice input in the widget: the customer presses a microphone, sees the
+  recognised text and can edit it before sending. Moved to "Later
+  features" under "Agreed stage order" on 08.11.2026.
 
 **Rejected**
 
@@ -7424,8 +7442,8 @@ cookie. Controls:
   real customers. It must also mention the `safety_identifier` sent to
   OpenAI (see "Sub-step 10 details"; added 26.10.2026). The widget link
   must open the privacy page (see "Stage 17 block D"; added 29.10.2026).
-  The page must say that OpenAI processes voice input (see "Stage 17
-  block D").
+  The line saying that OpenAI processes voice input is not needed until
+  voice input returns (moved to "Later features" on 08.11.2026).
 - Check whether the public slots endpoint and appointment creation verify
   that the specialist performs the service (the availability engine does
   not). Found 21.10.2026. Checked 22.10.2026: they do not; the fix is
@@ -7633,7 +7651,8 @@ Already assigned to Stage 17:
   ("Product decisions", refined in "Sub-step 6 details").
 - **Booking `source`** sent by both booking forms; see "Stage 17 block C".
 - **Blocked `safety_identifier`:** Backend done in 17.2c; the widget shows the neutral message without retry in 17.5 (see "Stage 17 block D").
-- **Voice input:** see "Stage 17 block D".
+- **Voice input:** removed from Stage 17 on 08.11.2026; see "Later
+  features" under "Agreed stage order".
 - **AI processing notice** in the widget ("Safety and privacy").
 - **Widget texts** for `assistant_daily_limit` and `assistant_busy`, with
   a "go to booking" button where relevant ("Limits"); for a throttled
@@ -7756,13 +7775,10 @@ the widget can deliver:
   disappears when the first text arrives. No expandable details. This
   resolves the Stage 16 open item "generic indicator or backend status
   event" ("Show that the assistant is working" in the Stage 16 closure).
-- **Voice input:** transcription through our backend (OpenAI), built as
-  the last sub-step of Stage 17. A recon before it settles the model,
-  maximum length and size, limits per session, IP and salon, and cost.
-  Audio is never stored: it is sent for transcription and discarded; only
-  text comes back. Same assistant-enabled check and per-customer
-  `safety_identifier` as the chat. The privacy policy must mention that
-  OpenAI processes voice.
+- **Voice input:** removed from Stage 17 on 08.11.2026. Its decisions
+  (transcription through our backend via OpenAI, the recon on limits and
+  cost, no audio stored, the privacy policy line) are kept in "Later
+  features" under "Agreed stage order".
 - **AI notice:** one line below the input, always visible: the text "ШІ
   може помилятися. Перевіряйте важливу інформацію.", which is itself the
   link to the privacy policy route (see 17.7c). The header shows only
@@ -8601,8 +8617,12 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   - Make the assistant's grammatical gender match the widget texts.
   - Stop the model apologising for turns from a conversation it no
     longer has (after an expiry).
-- **17.9 Voice input:** recon, backend endpoint, widget button.
-- **17.10 Stage 17 closure.**
+- **17.9 Voice input:** removed from Stage 17 on 08.11.2026 (decided by
+  Katya): not needed for the first customers, since phones already offer
+  keyboard dictation, and not worth the time now. Moved to "Later
+  features" under "Agreed stage order". The number is not reused.
+- **17.10 Stage 17 closure:** comes right after 17.8. It keeps its number
+  so existing references stay valid.
 
 ### Open item: roadmap gap
 
