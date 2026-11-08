@@ -38,7 +38,7 @@ const SESSION_KEY = "salonhub:assistant-session";
 const PENDING_KEY = "salonhub:assistant-pending";
 const DRAFT_KEY = "salonhub:assistant-draft";
 
-const STRIPE = "Відкрити асистента";
+const STRIPE = "Відкрити асистентку";
 const INPUT = "Повідомлення";
 const SEND = "Надіслати";
 const RETRY = "Повторити";

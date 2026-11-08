@@ -387,7 +387,7 @@ export default function AssistantWidget({
       <button
         ref={stripeRef}
         type="button"
-        aria-label="Відкрити асистента"
+        aria-label="Відкрити асистентку"
         onClick={() => setMode("window")}
         className="fixed right-0 top-[60%] z-50 flex h-16 w-11 -translate-y-1/2 items-center justify-end"
       >
@@ -405,7 +405,7 @@ export default function AssistantWidget({
     );
   }
 
-  const title = salonName === "" ? "Асистент" : `Асистент ${salonName}`;
+  const title = salonName === "" ? "Асистентка" : `Асистентка ${salonName}`;
   const resizeLabel = mode === "panel" ? "Зменшити" : "Розгорнути";
 
   let frame: string;

@@ -32,7 +32,7 @@ import AssistantWidget from "./AssistantWidget";
 
 const SESSION_KEY = "salonhub:assistant-session";
 const DRAFT_KEY = "salonhub:assistant-draft";
-const STRIPE = "Відкрити асистента";
+const STRIPE = "Відкрити асистентку";
 const INPUT = "Повідомлення";
 const SEND = "Надіслати";
 const RETRY = "Повторити";

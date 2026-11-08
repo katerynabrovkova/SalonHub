@@ -31,7 +31,7 @@ import AssistantWidget from "./AssistantWidget";
 import NavigationProgress from "./NavigationProgress";
 
 const DRAFT_KEY = "salonhub:assistant-draft";
-const STRIPE = "Відкрити асистента";
+const STRIPE = "Відкрити асистентку";
 const MINIMISE = "Згорнути";
 const INPUT = "Повідомлення";
 const SEND = "Надіслати";

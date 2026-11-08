@@ -62,7 +62,7 @@
  * - 17.7c: the AI notice is one line below the input, always visible; the
  *   whole text is the link, opening `/privacy` in a new tab, with a
  *   visually hidden destination in its name. While the dots show, a visually
- *   hidden "Асистент пише…" in the status container is what is announced.
+ *   hidden "Асистентка пише…" in the status container is what is announced.
  */
 
 import {
@@ -112,7 +112,7 @@ const AI_NOTICE = "ШІ може помилятися. Перевіряйте в
 const AI_NOTICE_DESTINATION = "Як ми обробляємо дані, відкривається в новій вкладці";
 const PRIVACY_HREF = "/privacy";
 // 17.7c: visually hidden, announced while the dots show.
-const TYPING_TEXT = "Асистент пише…";
+const TYPING_TEXT = "Асистентка пише…";
 // 17.7c: the label above the starter chips.
 const STARTERS_LABEL = "Часті питання";
 

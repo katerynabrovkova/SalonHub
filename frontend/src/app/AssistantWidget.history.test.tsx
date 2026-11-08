@@ -44,7 +44,7 @@ const PENDING_KEY = "salonhub:assistant-pending";
 const DRAFT_KEY = "salonhub:assistant-draft";
 const MODE_KEY = "salonhub:assistant-mode";
 
-const STRIPE = "Відкрити асистента";
+const STRIPE = "Відкрити асистентку";
 const MINIMISE = "Згорнути";
 const INPUT = "Повідомлення";
 const SEND = "Надіслати";

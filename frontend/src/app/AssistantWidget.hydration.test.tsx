@@ -53,7 +53,7 @@ import { headers } from "next/headers";
 import AssistantWidget from "./AssistantWidget";
 import AssistantWidgetLoader from "./AssistantWidgetLoader";
 
-const STRIPE = "Відкрити асистента";
+const STRIPE = "Відкрити асистентку";
 const INPUT = "Повідомлення";
 const TO_PANEL = "Розгорнути";
 const TO_WINDOW = "Зменшити";

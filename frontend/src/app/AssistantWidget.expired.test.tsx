@@ -30,7 +30,7 @@ import AssistantWidget from "./AssistantWidget";
 const SESSION_KEY = "salonhub:assistant-session";
 const EXPIRED_KEY = "salonhub:assistant-expired";
 const EXPIRED = "Попередня розмова завершилась";
-const STRIPE = "Відкрити асистента";
+const STRIPE = "Відкрити асистентку";
 const MINIMISE = "Згорнути";
 const INPUT = "Повідомлення";
 const SEND = "Надіслати";

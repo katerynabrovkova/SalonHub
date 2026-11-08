@@ -55,7 +55,7 @@ beforeEach(() => {
 // docs/DECISIONS.md § "Stage 17 sub-step order", 17.3c, and § "Stage 17
 // block A" / "block B". Accessible names of the header buttons come from
 // block B ("Розгорнути", "Зменшити", "Згорнути").
-const STRIPE = "Відкрити асистента";
+const STRIPE = "Відкрити асистентку";
 const MINIMISE = "Згорнути";
 const TO_PANEL = "Розгорнути";
 const TO_WINDOW = "Зменшити";
@@ -151,7 +151,7 @@ describe("AssistantWidget chat window", () => {
 
     const dialog = await openChat(user);
 
-    expect(dialog).toContainElement(screen.getByRole("heading", { name: "Асистент Bella" }));
+    expect(dialog).toContainElement(screen.getByRole("heading", { name: "Асистентка Bella" }));
   });
 
   it("test_empty_salon_name_shows_plain_assistant_header", async () => {
@@ -159,7 +159,7 @@ describe("AssistantWidget chat window", () => {
 
     await openChat(user);
 
-    expect(screen.getByRole("heading", { name: "Асистент" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Асистентка" })).toBeInTheDocument();
   });
 
   it.each(VIEWPORTS)(
@@ -345,7 +345,7 @@ describe("AssistantWidget across navigation", () => {
     nav.pathname = "/specialists/12";
     rerender(<AssistantWidget salonName="Bella" slug="bella-demo" />);
     expect(screen.getByRole("dialog")).toContainElement(
-      screen.getByRole("heading", { name: "Асистент Bella" }),
+      screen.getByRole("heading", { name: "Асистентка Bella" }),
     );
   });
 });
