@@ -737,6 +737,7 @@ describe("BookingPage step 2, entry=specialist: fetches and renders services_det
       name: "Bella",
       currency: "UAH",
       assistant_enabled: false,
+      assistant_starters: [],
     });
 
     mockedHeaders.mockResolvedValue({
@@ -809,6 +810,7 @@ describe("BookingPage step 2, entry=specialist: fetches and renders services_det
       name: "Bella",
       currency: "USD",
       assistant_enabled: false,
+      assistant_starters: [],
     });
     mockedGetSpecialistDetailPage.mockResolvedValueOnce(specialistFixture());
 

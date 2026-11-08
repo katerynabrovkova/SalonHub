@@ -13,6 +13,9 @@ export interface SalonInfo {
   name: string;
   currency: string;
   assistant_enabled: boolean;
+  // Resolved by the backend for `?lang=`, same fallback as `name`; empty
+  // items are omitted (docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c).
+  assistant_starters: string[];
 }
 
 /**

@@ -68,6 +68,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -112,6 +113,8 @@ const AI_NOTICE_DESTINATION = "Як ми обробляємо дані, відк
 const PRIVACY_HREF = "/privacy";
 // 17.7c: visually hidden, announced while the dots show.
 const TYPING_TEXT = "Асистент пише…";
+// 17.7c: the label above the starter chips.
+const STARTERS_LABEL = "Часті питання";
 
 // 17.7h: visually hidden, announced while the history spinner shows.
 const HISTORY_LOADING_TEXT = "Завантажую розмову…";
@@ -205,6 +208,8 @@ export interface AssistantConversation {
   setDraft: (text: string) => void;
   /** Sends the text and clears the draft, whatever the turn's outcome. */
   send: (text: string) => void;
+  /** 17.7c: sends a starter question like `send`, but keeps the draft. */
+  sendStarter: (text: string) => void;
   /** Resends the last customer text after a failure that offers retry. */
   retry: () => void;
 }
@@ -591,8 +596,9 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
     [slug],
   );
 
-  const send = useCallback(
-    (raw: string) => {
+  // Shared by `send` and `sendStarter`; only `send` clears the draft.
+  const sendText = useCallback(
+    (raw: string, keepDraft: boolean) => {
       const text = raw.trim();
       // 17.7h: nothing is sent before the history has loaded.
       if (text === "" || streamingRef.current || !historyLoadedRef.current) {
@@ -602,9 +608,11 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
       // 17.7e: kept until `done`; replaces an earlier pending text.
       storePendingText(text);
       // Decided 05.11.2026 (17.7b): cleared on send, whether the turn
-      // succeeds or fails.
-      setDraftState("");
-      clearDraft();
+      // succeeds or fails. 17.7c: a starter tap keeps it.
+      if (!keepDraft) {
+        setDraftState("");
+        clearDraft();
+      }
       const userId = nextIdRef.current++;
       userIdRef.current = userId;
       setMessages((current) => [...current, { id: userId, role: "user", content: text }]);
@@ -612,6 +620,9 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
     },
     [runTurn],
   );
+
+  const send = useCallback((raw: string) => sendText(raw, false), [sendText]);
+  const sendStarter = useCallback((text: string) => sendText(text, true), [sendText]);
 
   // 17.5b: resend the last customer text, without a second customer bubble;
   // the partial reply of the failed turn (never stored) is replaced.
@@ -639,6 +650,7 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
     draft,
     setDraft,
     send,
+    sendStarter,
     retry,
   };
 }
@@ -655,7 +667,11 @@ interface AssistantChatProps {
   onSend?: () => void;
   /** Desktop layout: button tooltips (`title`) show only there (17.3c). */
   isDesktop?: boolean;
+  /** 17.7c: the salon's starter questions; none by default. */
+  starters?: string[];
 }
+
+const NO_STARTERS: string[] = [];
 
 // 17.7c (mockup "AI 8"): one full-width block per failure, the 17.5b text
 // on top and its action below, full width. Colours are the amber notice
@@ -706,6 +722,7 @@ export default function AssistantChat({
   onCardNavigate,
   onSend,
   isDesktop = false,
+  starters = NO_STARTERS,
 }: AssistantChatProps) {
   const {
     messages,
@@ -720,8 +737,10 @@ export default function AssistantChat({
     draft,
     setDraft,
     send,
+    sendStarter,
     retry,
   } = conversation;
+  const startersLabelId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   // 17.7i: whether the list follows new content. Set from scroll events
   // (her position before the content grew), never measured at update time.
@@ -742,6 +761,13 @@ export default function AssistantChat({
   // 17.7h: sending waits for the history; the input stays enabled, as in
   // 17.7c while a reply streams.
   const historyBlocked = historyStatus === "loading" || historyStatus === "failed";
+  // 17.7c (decided 08.11.2026): only with starters, no messages besides the
+  // greeting, and a history that is neither loading nor failed ("none", or
+  // "loaded", which includes an expired conversation).
+  const showStarters =
+    starters.length > 0 &&
+    messages.length === 0 &&
+    (historyStatus === "none" || historyStatus === "loaded");
 
   // 17.7i part 1: before paint, so the first painted frame already shows the
   // end; instant (a scrollTop write is never smooth). Part 2: only while
@@ -807,6 +833,14 @@ export default function AssistantChat({
     onSend?.();
   }
 
+  // 17.7c: a starter tap is a send (follows and moves focus like `submit`),
+  // but the draft stays in the input.
+  function sendStarterQuestion(text: string) {
+    follow(true);
+    sendStarter(text);
+    onSend?.();
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     // Enter sends, Shift+Enter starts a new line.
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -836,6 +870,25 @@ export default function AssistantChat({
         {historyStatus === "loading" ? null : (
           <p className="self-start rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800">{GREETING}</p>
         )}
+        {/* 17.7c: under the greeting, stacked, as in the mockup "Телефон: чат
+            відкрито". Neutral styling; the look is finished in the design pass. */}
+        {showStarters ? (
+          <div role="group" aria-labelledby={startersLabelId} className="flex flex-col gap-2">
+            <p id={startersLabelId} className="text-xs text-zinc-500 dark:text-zinc-400">
+              {STARTERS_LABEL}
+            </p>
+            {starters.map((text) => (
+              <button
+                key={text}
+                type="button"
+                onClick={() => sendStarterQuestion(text)}
+                className="min-h-11 self-start rounded-lg border border-zinc-300 px-3 py-2 text-left text-sm dark:border-zinc-600"
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        ) : null}
         {messages.length > 0 || failure !== null ? (
           <ul aria-label="Розмова" className="flex flex-col gap-3">
             {messages.map((message) =>
@@ -934,6 +987,9 @@ export default function AssistantChat({
       <form onSubmit={submit} className="flex items-end gap-2 px-3 pt-3 pb-1">
         <textarea
           ref={inputRef}
+          // 17.7c: a name for Chrome's form-field check; no autofill in a chat.
+          name="message"
+          autoComplete="off"
           aria-label="Повідомлення"
           placeholder="Напишіть питання…"
           maxLength={MAX_MESSAGE_LENGTH}

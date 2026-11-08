@@ -13,8 +13,20 @@ vi.mock("@/lib/tenants/getSalonInfoPage", () => ({
 }));
 
 vi.mock("./AssistantWidget", () => ({
-  default: ({ salonName, slug }: { salonName: string; slug: string }) => (
-    <div data-testid="assistant-widget" data-slug={slug}>
+  default: ({
+    salonName,
+    slug,
+    starters,
+  }: {
+    salonName: string;
+    slug: string;
+    starters?: string[];
+  }) => (
+    <div
+      data-testid="assistant-widget"
+      data-slug={slug}
+      data-starters={starters === undefined ? undefined : JSON.stringify(starters)}
+    >
       {salonName}
     </div>
   ),
@@ -37,11 +49,14 @@ function withSlug(slug: string | null) {
   } as any);
 }
 
-function salonInfo(overrides: { name?: string; assistant_enabled?: boolean } = {}) {
+function salonInfo(
+  overrides: { name?: string; assistant_enabled?: boolean; assistant_starters?: string[] } = {},
+) {
   return {
     name: "Bella",
     currency: "UAH",
     assistant_enabled: true,
+    assistant_starters: [] as string[],
     ...overrides,
   };
 }
@@ -95,6 +110,29 @@ describe("AssistantWidgetLoader", () => {
     const widget = screen.getByTestId("assistant-widget");
     expect(widget).toHaveTextContent("Bella");
     expect(widget).toHaveAttribute("data-slug", "bella-demo");
+  });
+
+  // docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c: the starters from
+  // GET salon reach the widget unchanged.
+  it("test_enabled_passes_the_assistant_starters_to_the_widget", async () => {
+    mockedGetSalonInfoPage.mockResolvedValueOnce(
+      salonInfo({ assistant_starters: ["Які у вас ціни?", "Записатися на манікюр"] }),
+    );
+
+    await renderLoader();
+
+    expect(screen.getByTestId("assistant-widget")).toHaveAttribute(
+      "data-starters",
+      JSON.stringify(["Які у вас ціни?", "Записатися на манікюр"]),
+    );
+  });
+
+  it("test_enabled_passes_an_empty_starters_list_to_the_widget", async () => {
+    mockedGetSalonInfoPage.mockResolvedValueOnce(salonInfo({ assistant_starters: [] }));
+
+    await renderLoader();
+
+    expect(screen.getByTestId("assistant-widget")).toHaveAttribute("data-starters", "[]");
   });
 
   it("test_fetches_salon_info_for_the_slug_in_ukrainian", async () => {

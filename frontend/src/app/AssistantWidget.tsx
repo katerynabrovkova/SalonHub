@@ -52,7 +52,11 @@ import AssistantChat, { useAssistantConversation } from "./AssistantChat";
 export interface AssistantWidgetProps {
   salonName: string;
   slug: string;
+  /** 17.7c: the salon's starter questions, from GET salon; none by default. */
+  starters?: string[];
 }
+
+const NO_STARTERS: string[] = [];
 
 type Mode = WidgetMode;
 
@@ -149,7 +153,11 @@ function MinimiseIcon() {
 const HEADER_BUTTON =
   "flex h-11 w-11 items-center justify-center rounded text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
-export default function AssistantWidget({ salonName, slug }: AssistantWidgetProps) {
+export default function AssistantWidget({
+  salonName,
+  slug,
+  starters = NO_STARTERS,
+}: AssistantWidgetProps) {
   const pathname = usePathname();
   // 17.7g: the server markup and the hydrating render are empty; the widget
   // appears right after hydration, read like the PaymentStatus hash.
@@ -454,6 +462,7 @@ export default function AssistantWidget({ salonName, slug }: AssistantWidgetProp
         onCardNavigate={handleCardNavigate}
         onSend={handleSend}
         isDesktop={isDesktop}
+        starters={starters}
       />
     </div>
   );

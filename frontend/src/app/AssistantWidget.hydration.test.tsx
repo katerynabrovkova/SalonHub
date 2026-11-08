@@ -284,7 +284,12 @@ describe("AssistantWidgetLoader with the real widget (17.7g with 17.3b)", () => 
   }
 
   function salonInfo(assistantEnabled: boolean) {
-    return { name: "Bella", currency: "UAH", assistant_enabled: assistantEnabled };
+    return {
+      name: "Bella",
+      currency: "UAH",
+      assistant_enabled: assistantEnabled,
+      assistant_starters: [],
+    };
   }
 
   beforeEach(() => {

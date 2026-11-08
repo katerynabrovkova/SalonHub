@@ -67,6 +67,7 @@ beforeEach(() => {
     name: "Bella",
     currency: "UAH",
     assistant_enabled: false,
+    assistant_starters: [],
   });
 
   mockedHeaders.mockResolvedValue({
@@ -165,6 +166,7 @@ describe("ServicesPage: category-list / service-grid split", () => {
       name: "Bella",
       currency: "USD",
       assistant_enabled: false,
+      assistant_starters: [],
     });
     mockedGetServicesPage.mockResolvedValueOnce({
       services: [
