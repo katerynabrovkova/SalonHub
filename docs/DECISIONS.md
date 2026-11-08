@@ -5903,10 +5903,10 @@ and that the closure was open until it was closed on 27.10.2026.
 ### Language
 
 - **Reply in the language of the customer's message.** Service names
-  exactly as returned by tools in the site language (the request's
-  `lang`); a name is translated only when the customer asks, keeping the
-  original in parentheses. `Service.description` is conveyed faithfully
-  in the chat language, adding nothing.
+  exactly as returned by tools, which since 17.8 give them in the
+  customer's language when the model passes it, falling back to the site
+  language. `Service.description` is conveyed faithfully in the chat
+  language, adding nothing.
 
 ### Safety and privacy
 
@@ -6268,7 +6268,8 @@ code a second caller.
 definitions and a registry from tool name to function.
 
 - **Context.** The salon comes only from the bound tenant context. The
-  site language is passed in by the orchestrator, never by the model.
+  site language is passed in by the orchestrator, never by the model;
+  since 17.8 the model may add the customer's language for names only.
   Names are resolved with `core.i18n.resolve_translation`.
 - **Output** is JSON-serializable dicts. Money is a string like in the
   API (`"40.00"`), together with the salon currency.
@@ -7570,7 +7571,10 @@ items already assigned to Stage 17 elsewhere in this section.
       API's fallback to another language never appears in practice;
     - idea, not decided [Stage 17, 17.8; recorded 08.11.2026]: let each
       salon choose the assistant's grammatical gender. Today she is
-      feminine everywhere, in the instructions and in the widget texts.
+      feminine everywhere, in the instructions and in the widget texts;
+    - lost update on salon settings [Stage 17, 17.8; recorded
+      08.11.2026]: saving salon settings must detect that the record
+      changed since the form was opened and warn instead of overwriting.
   - Stage 21:
     - guest `Customer.email` case normalization [Deferred list]: a data
       migration that checks for case collisions first; any constraint
@@ -7695,7 +7699,7 @@ the widget can deliver:
 - **Desktop.** Collapsed the same way as on the phone. Opened: a small
   window in the bottom-right corner (about 360 x 500 px), expandable into
   a side panel (about 440 px) that shifts the page instead of covering it.
-- **Header:** "Асистент <salon name>". The salon name is added to
+- **Header:** "Асистентка <salon name>". The salon name is added to
   `GET /api/v1/salons/<slug>/` in the Stage 17 opening backend sub-step;
   the rest of the salon profile API stays in Stage 18 (see the Stage 17
   triage list).
@@ -7783,7 +7787,7 @@ the widget can deliver:
 - **AI notice:** one line below the input, always visible: the text "ШІ
   може помилятися. Перевіряйте важливу інформацію.", which is itself the
   link to the privacy policy route (see 17.7c). The header shows only
-  "Асистент <salon name>", no AI subtitle. Until the privacy page exists
+  "Асистентка <salon name>", no AI subtitle. Until the privacy page exists
   the link returns 404; "the
   widget link opens the privacy page" is part of the privacy-policy gate
   ("Open items").
@@ -7942,7 +7946,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       17.3c.
   - **17.3c Widget on screen.**
     - Stripe, small window, side panel and minimise. An empty salon name
-      in the header falls back to plain "Асистент".
+      in the header falls back to plain "Асистентка".
     - **Desktop** starts at `lg` (1024 px). The small window is fixed in
       the bottom-right corner. The side panel shifts the page through an
       attribute on `<html>` and a CSS rule that adds right padding at `lg`
@@ -8045,13 +8049,13 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     |---|---|---|---|
     | 503 `assistant_busy` | "Зараз у мене багато співрозмовниць. Спробуйте, будь ласка, за хвилинку 🤗" | yes | none |
     | 429 `throttled` | "Ви пишете швидше, ніж я встигаю думати 😅 Зачекайте, будь ласка, хвилинку." | yes | none |
-    | 429 `assistant_daily_limit` | "Я сьогодні наговорився досхочу і пішов на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:" | no | "Записатись самостійно" → `/services` |
+    | 429 `assistant_daily_limit` | "Я сьогодні наговорилась досхочу і пішла на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:" | no | "Записатись самостійно" → `/services` |
     | `assistant_identifier_blocked` | "На жаль, зараз я не можу відповісти. Записатися можна через форму на сайті." | no | "Записатись самостійно" → `/services` |
     | Network failure (fetch or stream read fails because the connection is lost), at any point | "Схоже, зник зв'язок. Перевірте інтернет і спробуйте ще раз." | yes | none |
     | Reply stopped after text began (`assistant_turn_limit`, `assistant_provider_error`, `internal_error`, or the stream ends without `done`) | "Відповідь обірвалась. Спробуйте ще раз." | yes | none |
-    | Nothing arrived before the failure (`assistant_turn_limit`, `assistant_provider_error`, `internal_error`, or the stream ends without `done`, with no text yet) | "Ой, щось пішло не так, і я не встиг відповісти. Спробуйте, будь ласка, ще раз." | yes | none |
-    | 404 `not_found` (assistant switched off while the page is open) | "Асистент зараз недоступний. Записатися можна через форму на сайті." | no | "Записатись самостійно" → `/services` |
-    | 400 `invalid` (the widget never sends it) | "Ой, щось пішло не так, і я не встиг відповісти. Спробуйте, будь ласка, ще раз." | no | none |
+    | Nothing arrived before the failure (`assistant_turn_limit`, `assistant_provider_error`, `internal_error`, or the stream ends without `done`, with no text yet) | "Ой, щось пішло не так, і я не встигла відповісти. Спробуйте, будь ласка, ще раз." | yes | none |
+    | 404 `not_found` (assistant switched off while the page is open) | "Асистентка зараз недоступна. Записатися можна через форму на сайті." | no | "Записатись самостійно" → `/services` |
+    | 400 `invalid` (the widget never sends it) | "Ой, щось пішло не так, і я не встигла відповісти. Спробуйте, будь ласка, ще раз." | no | none |
 
     - **Retry** resends the last customer text with the stored id (or
       none if nothing is stored), without a second customer bubble. A
@@ -8080,7 +8084,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   - **17.6a Card in the chat.**
     - **Specialist line:** "<name> · ★ <rating> (<count> <reviews>) ·
       <minutes> хв"; with no reviews "<name> · Немає відгуків · <minutes>
-      хв"; for "any" "Будь-який майстер · <minutes> хв". The word follows
+      хв"; for "any" "Будь-який спеціаліст · <minutes> хв". The word follows
       Ukrainian plural rules via `Intl.PluralRules("uk")`: "відгук" (1, 21,
       31…), "відгуки" (2-4, 22-24…), "відгуків" (0, 5-20, 25-30…, and
       11-14).
@@ -8268,7 +8272,7 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
         opening the chat mid-reply still focuses the dialog. The phone
         keyboard was checked only in DevTools device mode; recheck on a
         real phone after deployment.
-    - A visually hidden "Асистент пише…" inside the status container
+    - A visually hidden "Асистентка пише…" inside the status container
       while the dots show, so screen readers announce that a reply is
       coming.
       - Decided 06.11.2026: present only while the dots show; when a
@@ -8618,8 +8622,8 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     word is covered by 17.5 status texts; recheck the wait after 17.5.
   - **C. Reply language** (confirmed unchanged 08.11.2026): the
     assistant replies in the language of the customer's latest message;
-    service names stay in the site language unless the customer asks for
-    a translation (Stage 16 "Language").
+    service, category and specialist names follow that language when the
+    tools have it, else the site language (Stage 16 "Language").
   - **D. Feminine assistant** (decided 08.11.2026): the assistant speaks
     about herself in the feminine ("я перевірила", "я знайшла", "я рада
     допомогти") in languages where verbs or adjectives change with
@@ -8627,12 +8631,41 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
     feminine as well, for example the header "Асистентка <salon name>",
     the daily limit text ("наговорилась досхочу і пішла на заслужений
     манікюр"), the screen-reader typing text "Асистентка пише…" and
-    accessible names such as "Відкрити асистентку". The full list of
-    changed strings is produced by the implementation step, which also
-    updates the texts recorded in this file (block A header, the 17.5b
-    table, the 17.7c typing text) in place. Choosing the gender per salon
-    is a later idea for the salon settings stage (see the Stage 17
-    triage list).
+    accessible names such as "Відкрити асистентку". Choosing the gender
+    per salon is a later idea for the salon settings stage (see the Stage
+    17 triage list).
+    - Implemented 08.11.2026, with A and E in the instructions. Every
+      changed widget string (old → new):
+      - edge stripe `aria-label` (`AssistantWidget.tsx`): "Відкрити
+        асистента" → "Відкрити асистентку";
+      - header (`AssistantWidget.tsx`): "Асистент <salon name>" →
+        "Асистентка <salon name>", and the fallback without a salon name
+        "Асистент" → "Асистентка";
+      - screen-reader typing text (`AssistantChat.tsx`): "Асистент пише…"
+        → "Асистентка пише…";
+      - daily limit (`lib/assistant/failure.ts`): "Я сьогодні наговорився
+        досхочу і пішов на заслужений манікюр 💅 …" → "Я сьогодні
+        наговорилась досхочу і пішла на заслужений манікюр 💅 …", the
+        rest unchanged;
+      - nothing arrived before the failure, and `invalid`
+        (`failure.ts`): "… і я не встиг відповісти. …" → "… і я не
+        встигла відповісти. …";
+      - `not_found` (`failure.ts`): "Асистент зараз недоступний. …" →
+        "Асистентка зараз недоступна. …".
+    - Unchanged because they are not gendered: the status texts
+      ("Дивлюся послуги…" and the rest are present tense), the throttle
+      text ("…ніж я встигаю думати…"), the blocked text ("…я не можу
+      відповісти…") and the widget greeting ("Я допоможу…"). The busy
+      text's "співрозмовниць" refers to customers and stays. The design
+      canvas row name "Stage 17: віджет асистента" is a canvas name, not
+      a widget text, and stays.
+    - The texts recorded in this file were updated in place: the block A
+      and block D header, the 17.3c header fallback, the 17.5b table and
+      the 17.7c typing text. Tests: only the assertions of the old texts
+      changed (the stripe label constant in seven widget test files, the
+      three header assertions in `AssistantWidget.test.tsx`, and the
+      failure texts in `AssistantChat.test.tsx` and `failure.test.ts`);
+      frontend suite 1102, backend suite 1578.
   - **E. Missing context** (decided 08.11.2026): when the customer
     refers to something the assistant cannot see in the conversation
     (for example after an expired conversation), the assistant does not
