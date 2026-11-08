@@ -8503,13 +8503,23 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       and a desktop-only tooltip, sending and both "Повторити" buttons
       resume following; new `AssistantChat.scroll.test.tsx`; frontend
       suite 1068; all 11 mutations killed; manual browser check passed).
-      Part 1 NOT resolved: the scroll now runs in a layout effect and the
-      tests pass, but in the real browser a restored small window after F5
-      still shows the top of the conversation first and then the end. The
-      tests stub the list size, so they cannot see the real cause. Next
-      step: a diagnostic run with temporary console logging of the list's
-      `scrollHeight`, `clientHeight` and `scrollTop` and the window size at
-      each step, then a fix.
+      Part 1, diagnostic result 08.11.2026: temporary console logging in
+      the real browser showed that the layout-effect scroll works. When the
+      history arrives (10 messages, `scrollHeight` 892), the list is
+      scrolled to the end (`scrollTop` 549, distance 0) before paint, and
+      the next frame stays at the end. What looked like "the top first" is
+      the greeting shown alone (with the spinner) while the history loads.
+      The greeting is always at the top of a conversation, so this reads as
+      the start of the conversation followed by a jump to the end. The
+      logging was removed.
+      Part 1, decided 08.11.2026: when a session id is stored and the
+      history is loading, the greeting is not shown; the message area stays
+      empty, with the 17.7h spinner after about 0.3 s. When the history
+      arrives, the whole conversation (greeting at the top) appears already
+      at the end. After a failed load, the greeting and the 17.7h failure
+      block show as today. After an expired conversation, the greeting and
+      the "Попередня розмова завершилась" notice show as today. With no
+      stored session id, the greeting shows at once as today.
     - For the phone check after deployment: the keyboard changes the list
       height without a scroll event, so the 80 px check is not re-run then.
   - **17.7j "Записатись самостійно" collapses the phone chat** (recorded
