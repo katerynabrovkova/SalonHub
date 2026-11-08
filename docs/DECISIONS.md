@@ -8617,6 +8617,36 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   - Make the assistant's grammatical gender match the widget texts.
   - Stop the model apologising for turns from a conversation it no
     longer has (after an expiry).
+  - **Demo salon commands** (decided 08.11.2026), so that BellaBeauty
+    (slug `bella-demo`) looks like a real salon for the live checks and
+    for demos. Both commands act only on `bella-demo` (the slug is fixed
+    in the code), run inside its tenant context with an explicit salon
+    filter on every query, in one transaction, and refuse to run when
+    `DEBUG` is off. Code: `tenants/demo/bella_demo.py`.
+    - `docker compose exec backend python manage.py seed_bella_demo`
+      creates or updates the categories, services, specialists, working
+      hours, FAQ, the salon phone and address, and the demo reviews. It
+      never deletes. The tables in `tenants/demo/bella_demo.py` are the
+      source of truth for the demo content: every run overwrites the
+      seeded fields, so changes made to them in admin do not last. Working
+      hours are created only for a specialist who has none.
+    - `docker compose exec backend python manage.py reset_bella_demo --yes`
+      deletes the salon's appointments, payments, guest tokens,
+      notifications, reviews, customers and client accounts. It keeps the
+      salon and its catalogue, admin accounts, platform `User` rows, the
+      daily assistant counters, and the test account
+      `item8-new@example.com` with its Customer (only that customer's
+      appointments, payments and reviews go). Without `--yes` it only
+      prints what it would delete. Run the reset before the seed.
+    - Demo reviews: each one is tied to a completed past visit of its own
+      customer, named "Демо-клієнтка NN" with the reserved address
+      `demo-review-NN@example.com`, so they can be found in admin.
+      Софія has no reviews, so the "no reviews yet" rule can be checked.
+      On the public pages the reviews look like real ones, so bella-demo
+      must only ever be shown as a demo salon, never as a real business.
+    - The FAQ has no items about the deposit or cancelling a booking:
+      those rules reach the assistant from the instructions and
+      `get_salon_info`, and a second copy in the FAQ would go stale.
 - **17.9 Voice input:** removed from Stage 17 on 08.11.2026 (decided by
   Katya): not needed for the first customers, since phones already offer
   keyboard dictation, and not worth the time now. Moved to "Later
