@@ -8539,6 +8539,19 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       desktop the chat stays as it is.
     - Reason: on `/services` the link leads to the page she is already on,
       and the full-screen chat hid it, so the tap looked broken.
+    - Status 08.11.2026: implemented and committed. The history load
+      failure block and the turn failure kinds that have the link (an
+      `assistant_identifier_blocked` error event, and the
+      `assistant_daily_limit` and `not_found` refusals before the stream; a
+      lost connection shows only "Повторити") pass the existing card handler
+      (`handleCardNavigate`) to "Записатись самостійно". On the phone the
+      collapsed mode is stored on the tap; the chat collapses at once when
+      no navigation is pending (same page, e.g. `/services`) and otherwise
+      when the route changes. Desktop unchanged. 6 tests in
+      `AssistantWidget.test.tsx`; frontend suite 1081; all 5 mutations
+      killed; manual browser check passed for the history failure block
+      (home and `/services`) and desktop; the turn failure link is covered
+      by tests only, since its failure kinds are hard to trigger by hand.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
   - Remove the model's greeting from the instructions (the widget greets,
