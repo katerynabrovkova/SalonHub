@@ -6908,8 +6908,9 @@ sounds like a database, not a salon administrator. Katya decided these
 rules on 26.10.2026. They apply in every reply language: the Ukrainian
 wording is the reference, and other languages use the equivalent.
 
-- **Greet only in the first reply** of a conversation ("Вітаю!" in
-  Ukrainian), never again later.
+- **Never greet.** The widget shows its own greeting before the first
+  message (see 17.4b), so the assistant never greets, in any reply, even
+  when the customer greets first or writes only a greeting.
 - **Speak as the salon** ("у нашому салоні", "ми"). Never talk about
   "data", the "menu", something "not specified", a "rating not formed"
   or any other internals. If something is unknown, suggest checking with
@@ -6928,9 +6929,9 @@ wording is the reference, and other languages use the equivalent.
 - **Natural, warm, varied phrasing;** no repeated template sentences.
   The formal "Ви" stays.
 - **Reference examples (Ukrainian):**
-  - "Вітаю! На жаль, у нашому салоні немає послуги нарощування вій, але
-    я можу допомогти підібрати послугу з наявних."
-  - "Вітаю! На жаль, на суботу 31.10 вільних віконець на манікюр немає.
+  - "На жаль, у нашому салоні немає послуги нарощування вій, але я можу
+    допомогти підібрати послугу з наявних."
+  - "На жаль, на суботу 31.10 вільних віконець на манікюр немає.
     Найближчий вільний час у понеділок 2.11 о 9:00 або 11:00. Підібрати
     щось із цього?"
 - **Tone is model behaviour.** It is verified by the manual check, not
@@ -6939,11 +6940,8 @@ wording is the reference, and other languages use the equivalent.
 Details decided 27.10.2026 (Katya's answers to the open questions on the
 proposed instruction text):
 
-- **The greeting rule is instruction text only.** The model tells the
-  first reply from the conversation history; no code change and no new
-  tests. The alternative was a backend flag: the orchestrator adds a
-  header line when the history is empty. If the manual check shows
-  greetings mid-conversation, switch to the flag.
+- **The no-greeting rule is instruction text only:** no code change and
+  no new tests.
 - **Alternatives keep every customer wish first.** The search range
   starts at the requested date and is at most 14 days long. If nothing
   matches, only wishes the customer marked as soft ("бажано", "краще")
@@ -6957,8 +6955,8 @@ proposed instruction text):
     replaces "relax only wishes marked as soft" for day and time. The
     specialist rule stays as it is.
 - **The first reference example is replaced** by one that names no
-  service: "Вітаю! На жаль, такої послуги в нашому салоні немає, але я
-  можу допомогти підібрати щось із наявних." The lash example could
+  service: "На жаль, такої послуги в нашому салоні немає, але я можу
+  допомогти підібрати щось із наявних." The lash example could
   lead the model to claim that a salon with a lashes category does not
   offer lash extensions. The date example stays. The instructions say
   that the facts in the examples are not real.
@@ -7569,7 +7567,10 @@ items already assigned to Stage 17 elsewhere in this section.
     - assistant starters filled in for every language [Stage 17, 17.7c;
       decided 08.11.2026]: saving the assistant starters is refused until
       each starter is filled in for every language of the site, so the
-      API's fallback to another language never appears in practice.
+      API's fallback to another language never appears in practice;
+    - idea, not decided [Stage 17, 17.8; recorded 08.11.2026]: let each
+      salon choose the assistant's grammatical gender. Today she is
+      feminine everywhere, in the instructions and in the widget texts.
   - Stage 21:
     - guest `Customer.email` case normalization [Deferred list]: a data
       migration that checks for case collisions first; any constraint
@@ -8605,18 +8606,39 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       by tests only, since its failure kinds are hard to trigger by hand.
 - **17.8 Assistant polish:** manual check through the real widget; tone
   and every "Carried to Stage 17" item.
-  - Remove the model's greeting from the instructions (the widget greets,
-    see 17.4b) and rewrite the Stage 16 rule "Greet only in the first
-    reply" (~6890) in place.
+  - **A. No greeting** (decided 08.11.2026): the assistant never greets,
+    in any reply, even when the customer greets first or writes only a
+    greeting; the widget greeting already did it (17.4b). The Stage 16
+    rule in "Tone and manner" is rewritten in place to "Never greet",
+    "Вітаю!" is removed from its reference examples, and the backend-flag
+    fallback for the greeting is dropped.
   - Fill Ukrainian names for every BellaBeauty service in admin (a
     missing `uk` name falls back to English in assistant replies, for
     example "coating and reinforcement"). The blank wait before the first
     word is covered by 17.5 status texts; recheck the wait after 17.5.
-  - Decide the reply-language rule: the customer's language or the
-    site's.
-  - Make the assistant's grammatical gender match the widget texts.
-  - Stop the model apologising for turns from a conversation it no
-    longer has (after an expiry).
+  - **C. Reply language** (confirmed unchanged 08.11.2026): the
+    assistant replies in the language of the customer's latest message;
+    service names stay in the site language unless the customer asks for
+    a translation (Stage 16 "Language").
+  - **D. Feminine assistant** (decided 08.11.2026): the assistant speaks
+    about herself in the feminine ("я перевірила", "я знайшла", "я рада
+    допомогти") in languages where verbs or adjectives change with
+    gender. Every gendered fixed text of the widget switches to the
+    feminine as well, for example the header "Асистентка <salon name>",
+    the daily limit text ("наговорилась досхочу і пішла на заслужений
+    манікюр"), the screen-reader typing text "Асистентка пише…" and
+    accessible names such as "Відкрити асистентку". The full list of
+    changed strings is produced by the implementation step, which also
+    updates the texts recorded in this file (block A header, the 17.5b
+    table, the 17.7c typing text) in place. Choosing the gender per salon
+    is a later idea for the salon settings stage (see the Stage 17
+    triage list).
+  - **E. Missing context** (decided 08.11.2026): when the customer
+    refers to something the assistant cannot see in the conversation
+    (for example after an expired conversation), the assistant does not
+    apologise and does not talk about memory or lost conversations. She
+    briefly asks for the missing details (for example which service and
+    day) and carries on helping.
   - **Demo salon commands** (decided 08.11.2026), so that BellaBeauty
     (slug `bella-demo`) looks like a real salon for the live checks and
     for demos. Both commands act only on `bella-demo` (the slug is fixed
