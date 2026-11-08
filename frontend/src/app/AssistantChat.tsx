@@ -646,7 +646,10 @@ export function useAssistantConversation(slug: string, open: boolean): Assistant
 interface AssistantChatProps {
   conversation: AssistantConversation;
   inputRef?: Ref<HTMLTextAreaElement>;
-  /** Runs on every card link click (the widget minimises on a phone). */
+  /**
+   * Runs on every card link click and, since 17.7j, on the failure blocks'
+   * "book it yourself" link (the widget minimises on a phone).
+   */
   onCardNavigate?: () => void;
   /** Runs after the customer sends (17.7c: the widget moves focus). */
   onSend?: () => void;
@@ -659,7 +662,16 @@ interface AssistantChatProps {
 // of client/VerificationBanner.tsx; the action keeps the widget's button
 // style. Still one `role="status"` container, as in 17.5b. 17.7h uses the
 // same block for a failed history load.
-function FailureBlock({ failure, onRetry }: { failure: Failure; onRetry: () => void }) {
+// 17.7j: the "book it yourself" link runs `onNavigate`, like a card link.
+function FailureBlock({
+  failure,
+  onRetry,
+  onNavigate,
+}: {
+  failure: Failure;
+  onRetry: () => void;
+  onNavigate?: () => void;
+}) {
   return (
     <div
       role="status"
@@ -678,6 +690,7 @@ function FailureBlock({ failure, onRetry }: { failure: Failure; onRetry: () => v
       {failure.link !== null ? (
         <Link
           href={failure.link.href}
+          onClick={onNavigate}
           className="flex min-h-11 w-full items-center justify-center rounded border border-zinc-300 px-3 text-sm text-zinc-900 dark:border-zinc-600 dark:text-zinc-100"
         >
           {failure.link.label}
@@ -803,7 +816,9 @@ export default function AssistantChat({
   }
 
   const failureBlock =
-    failure === null ? null : <FailureBlock failure={failure} onRetry={retryAndFollow} />;
+    failure === null ? null : (
+      <FailureBlock failure={failure} onRetry={retryAndFollow} onNavigate={onCardNavigate} />
+    );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -860,7 +875,11 @@ export default function AssistantChat({
           </ul>
         ) : null}
         {historyStatus === "failed" ? (
-          <FailureBlock failure={HISTORY_LOAD_FAILURE} onRetry={reloadHistoryAndFollow} />
+          <FailureBlock
+            failure={HISTORY_LOAD_FAILURE}
+            onRetry={reloadHistoryAndFollow}
+            onNavigate={onCardNavigate}
+          />
         ) : null}
         {/* 17.7h: where the history will appear, a little above the centre. */}
         {historySpinner ? (

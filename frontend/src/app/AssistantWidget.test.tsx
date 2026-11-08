@@ -1019,6 +1019,140 @@ describe("AssistantWidget conversation", () => {
   });
 });
 
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.7j (recorded
+// 07.11.2026): on the phone, tapping "Записатись самостійно" in either amber
+// failure block (17.7h history load, 17.5b turn) collapses the chat and
+// stores the collapsed mode, the same way a card time tap does (17.6e,
+// 17.7d); on desktop the chat stays as it is. NavigationProgress is mounted
+// next to the widget, as in the root layout.
+describe("AssistantWidget failure block link (17.7j)", () => {
+  const INPUT = "Повідомлення";
+  const BOOK_YOURSELF = "Записатись самостійно";
+  const LOAD_FAILED = "Не вдалося завантажити розмову.";
+
+  beforeEach(() => {
+    nav.search = "";
+  });
+
+  afterEach(() => {
+    act(() => {
+      end();
+    });
+  });
+
+  function ui() {
+    return (
+      <>
+        <NavigationProgress />
+        <AssistantWidget salonName="Bella" slug="bella-demo" />
+      </>
+    );
+  }
+
+  /** The chat restored open on `path`. */
+  function renderOpenOn(path: string) {
+    nav.pathname = path;
+    window.history.replaceState(null, "", path);
+    sessionStorage.setItem(MODE_KEY, "window");
+    const user = userEvent.setup();
+    const result = render(ui());
+    return { user, rerenderAll: () => result.rerender(ui()) };
+  }
+
+  function moveTo(path: string, rerenderAll: () => void) {
+    nav.pathname = path;
+    window.history.replaceState(null, "", path);
+    rerenderAll();
+  }
+
+  /** The 17.7h block: the history request fails. */
+  async function historyFailureLink() {
+    await screen.findByText(LOAD_FAILED);
+    return screen.getByRole("link", { name: BOOK_YOURSELF });
+  }
+
+  /** The 17.5b block: the turn ends with an error that offers the link. */
+  async function turnFailureLink(user: ReturnType<typeof userEvent.setup>) {
+    async function* events(): AsyncGenerator<AssistantEvent> {
+      yield { type: "error", code: "assistant_identifier_blocked" };
+    }
+    vi.mocked(sendAssistantMessage).mockResolvedValueOnce({
+      sessionId: "server-id",
+      events: events(),
+    });
+    await user.type(screen.getByRole("textbox", { name: INPUT }), "Запишіть мене");
+    await user.click(screen.getByRole("button", { name: "Надіслати" }));
+    return screen.findByRole("link", { name: BOOK_YOURSELF });
+  }
+
+  const BLOCKS = [
+    {
+      name: "history_failure",
+      setUp: () => {
+        vi.mocked(readSessionId).mockReturnValue("stored-id");
+        vi.mocked(getAssistantHistory).mockRejectedValue(new TypeError("Failed to fetch"));
+      },
+      link: () => historyFailureLink(),
+    },
+    {
+      name: "turn_failure",
+      setUp: () => {},
+      link: (user: ReturnType<typeof userEvent.setup>) => turnFailureLink(user),
+    },
+  ];
+
+  it.each(BLOCKS)(
+    "test_phone_link_collapses_the_chat_and_stores_collapsed_($name)",
+    async ({ setUp, link: findLink }) => {
+      viewportWidth = PHONE_WIDTH;
+      setUp();
+      const { user, rerenderAll } = renderOpenOn("/");
+      const link = await findLink(user);
+      expect(link).toHaveAttribute("href", "/services");
+
+      fireEvent.click(link);
+      expect(sessionStorage.getItem(MODE_KEY)).toBe("collapsed");
+      moveTo("/services", rerenderAll);
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: STRIPE })).toBeInTheDocument();
+      expect(sessionStorage.getItem(MODE_KEY)).toBe("collapsed");
+    },
+  );
+
+  it.each(BLOCKS)(
+    "test_phone_link_on_services_collapses_at_once_without_a_route_change_($name)",
+    async ({ setUp, link: findLink }) => {
+      viewportWidth = PHONE_WIDTH;
+      setUp();
+      const { user } = renderOpenOn("/services");
+      const link = await findLink(user);
+
+      fireEvent.click(link);
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: STRIPE })).toBeInTheDocument();
+      expect(sessionStorage.getItem(MODE_KEY)).toBe("collapsed");
+    },
+  );
+
+  it.each(BLOCKS)(
+    "test_desktop_link_leaves_the_chat_open_and_the_mode_unchanged_($name)",
+    async ({ setUp, link: findLink }) => {
+      viewportWidth = DESKTOP_WIDTH;
+      setUp();
+      const { user, rerenderAll } = renderOpenOn("/");
+      const link = await findLink(user);
+
+      fireEvent.click(link);
+      moveTo("/services", rerenderAll);
+
+      expect(screen.queryByRole("dialog")).toBeInTheDocument();
+      expect(sessionStorage.getItem(MODE_KEY)).toBe("window");
+    },
+  );
+});
+
 // docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c, AI notice item of
 // 06.11.2026, and § "Stage 17 block D" (AI notice).
 describe("AssistantWidget AI notice (17.7c)", () => {
