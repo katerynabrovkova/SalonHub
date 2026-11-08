@@ -8520,6 +8520,14 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       block show as today. After an expired conversation, the greeting and
       the "Попередня розмова завершилась" notice show as today. With no
       stored session id, the greeting shows at once as today.
+      Part 1, status 08.11.2026: implemented and committed. The greeting
+      does not render while `historyStatus` is "loading", including a
+      "Повторити" retry of a failed load (intended); the message list has
+      `data-testid="assistant-message-list"` and the scroll tests find it by
+      that id; 7 tests in the 17.7i greeting block of
+      `AssistantWidget.history.test.tsx`; frontend suite 1075; all 4
+      mutations killed; manual browser check passed. With this, 17.7i is
+      complete.
     - For the phone check after deployment: the keyboard changes the list
       height without a scroll event, so the 80 px check is not re-run then.
   - **17.7j "Записатись самостійно" collapses the phone chat** (recorded
