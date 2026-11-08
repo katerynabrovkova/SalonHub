@@ -33,8 +33,6 @@ import { getAssistantHistory, sendAssistantMessage } from "@/lib/assistant/assis
 import AssistantChat, { useAssistantConversation } from "./AssistantChat";
 
 const SESSION_KEY = "salonhub:assistant-session";
-const GREETING =
-  "Вітаю! Я допоможу дізнатися ціни, обрати послугу і знайти вільний час у нашому салоні. Що Вас цікавить?";
 const INPUT = "Повідомлення";
 const SEND = "Надіслати";
 const TO_BOTTOM = "Прокрутити донизу";
@@ -88,13 +86,9 @@ function behaviorOf(arg: unknown): string {
   return "auto";
 }
 
-/** The scroll container: the nearest scrollable ancestor of the greeting. */
+/** The scroll container, found by its test id (the greeting hides while history loads). */
 function findList(): HTMLElement {
-  const found = screen.getByText(GREETING).closest<HTMLElement>(".overflow-y-auto");
-  if (found === null) {
-    throw new Error("No scroll container around the greeting");
-  }
-  return found;
+  return screen.getByTestId("assistant-message-list");
 }
 
 /** Stubs the list's layout; the list starts at the bottom unless `scrollTop` is given. */

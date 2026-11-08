@@ -809,13 +809,18 @@ export default function AssistantChat({
     <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={listRef}
+        data-testid="assistant-message-list"
         onScroll={handleScroll}
         className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 text-sm"
       >
         {expired ? (
           <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">{EXPIRED_NOTICE}</p>
         ) : null}
-        <p className="self-start rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800">{GREETING}</p>
+        {/* 17.7i part 1 (decided 08.11.2026): hidden while a stored
+            conversation's history loads, so it appears whole, at the end. */}
+        {historyStatus === "loading" ? null : (
+          <p className="self-start rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800">{GREETING}</p>
+        )}
         {messages.length > 0 || failure !== null ? (
           <ul aria-label="Розмова" className="flex flex-col gap-3">
             {messages.map((message) =>

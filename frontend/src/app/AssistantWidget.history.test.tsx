@@ -739,6 +739,120 @@ describe("AssistantWidget successful history retry and the pending text (17.7e v
   });
 });
 
+// --- 17.7i part 1: the greeting waits for the history ---------------------------
+
+// docs/DECISIONS.md § "Stage 17 sub-step order", 17.7i part 1 (decided
+// 08.11.2026): with a stored session id, the greeting is not shown while the
+// history loads, so the conversation appears whole and already at the end.
+// After a failed load, an expired conversation, or with no stored id, the
+// greeting shows as before.
+describe("AssistantWidget greeting while the history loads (17.7i)", () => {
+  const GREETING =
+    "Вітаю! Я допоможу дізнатися ціни, обрати послугу і знайти вільний час у нашому салоні. Що Вас цікавить?";
+  const EXPIRED_NOTICE = "Попередня розмова завершилась";
+
+  async function advance(ms: number) {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
+  }
+
+  /** Restored open chat with a stored id, history pending, under fake timers. */
+  function mountLoadingOpenChat() {
+    vi.useFakeTimers();
+    storeConversation({ open: true });
+    const load = pendingHistory();
+    render(widget());
+    return load;
+  }
+
+  it("test_no_greeting_before_the_spinner_delay", async () => {
+    mountLoadingOpenChat();
+
+    await advance(200);
+
+    // Precondition: the chat is open and the history is still loading.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByTestId(SPINNER)).not.toBeInTheDocument();
+    expect(screen.queryByText(GREETING)).not.toBeInTheDocument();
+  });
+
+  it("test_no_greeting_after_the_spinner_delay_while_the_spinner_shows", async () => {
+    mountLoadingOpenChat();
+
+    await advance(400);
+
+    expect(screen.queryByTestId(SPINNER)).toBeInTheDocument();
+    expect(screen.queryByText(GREETING)).not.toBeInTheDocument();
+  });
+
+  it("test_greeting_and_messages_show_together_when_the_history_arrives", async () => {
+    const load = mountLoadingOpenChat();
+    await advance(400);
+
+    await act(async () => load.resolve(OLD));
+
+    expect(screen.queryByText(GREETING)).toBeInTheDocument();
+    expect(screen.queryByText("Привіт")).toBeInTheDocument();
+    expect(screen.queryByText("Вітаю!")).toBeInTheDocument();
+    expect(screen.queryByTestId(SPINNER)).not.toBeInTheDocument();
+  });
+
+  it("test_greeting_shows_with_the_failure_block_after_a_failed_load", async () => {
+    const { user } = await mountWithFailedHistory();
+    mockedHistory.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await openChat(user);
+    await failureBlockShown();
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByText(LOAD_FAILED)).toBeInTheDocument();
+    expect(within(dialog).queryByText(GREETING)).toBeInTheDocument();
+  });
+
+  // Decided 08.11.2026: a "Повторити" retry is a history load too.
+  it("test_greeting_hides_while_a_retry_loads_and_shows_with_the_messages", async () => {
+    const { user } = await mountWithFailedHistory();
+    // The open trigger's retry fails too, so the block stays.
+    mockedHistory.mockRejectedValue(new TypeError("Failed to fetch"));
+    await openChat(user);
+    await failureBlockShown();
+    // Precondition: the greeting shows with the failure block.
+    expect(screen.queryByText(GREETING)).toBeInTheDocument();
+    const retry = pendingHistory();
+
+    await user.click(screen.getByRole("button", { name: RETRY }));
+
+    expect(screen.queryByText(LOAD_FAILED)).not.toBeInTheDocument();
+    expect(screen.queryByText(GREETING)).not.toBeInTheDocument();
+
+    await act(async () => retry.resolve(OLD));
+
+    expect(screen.queryByText(GREETING)).toBeInTheDocument();
+    expect(screen.queryByText("Привіт")).toBeInTheDocument();
+    expect(screen.queryByText("Вітаю!")).toBeInTheDocument();
+  });
+
+  it("test_greeting_shows_with_the_expired_notice_after_an_empty_history", async () => {
+    storeConversation({ open: true });
+    mockedHistory.mockResolvedValueOnce([]);
+    renderWidget();
+
+    await shown(EXPIRED_NOTICE);
+
+    expect(screen.queryByText(GREETING)).toBeInTheDocument();
+  });
+
+  it("test_greeting_shows_at_once_without_a_stored_id", () => {
+    sessionStorage.setItem(MODE_KEY, "window");
+
+    renderWidget();
+
+    expect(screen.queryByText(GREETING)).toBeInTheDocument();
+    expect(mockedHistory).not.toHaveBeenCalled();
+  });
+});
+
 // --- API: the signal reaches fetch -------------------------------------------
 
 describe("getAssistantHistory forwards the abort signal (17.7h)", () => {
