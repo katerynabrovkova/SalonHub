@@ -8330,6 +8330,18 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
         element should have an id or name attribute". Add `name="message"`
         and `autoComplete="off"`; the field already has its `aria-label`,
         and autofill is not wanted in a chat.
+      - Implemented and committed 08.11.2026 (the starter questions and
+        the textarea item). `SalonInfo` carries `assistant_starters`,
+        passed by the loader through the widget to `AssistantChat`; chips
+        show when starters exist, `messages` is empty and `historyStatus`
+        is "none" or "loaded"; a shared `sendText`, with `sendStarter`
+        keeping the draft; a tap resumes following and calls `onSend`;
+        the textarea has `name="message"` and `autoComplete="off"`. 19
+        tests in `AssistantWidget.starters.test.tsx` and 2 in
+        `AssistantWidgetLoader.test.tsx`; five fixtures got
+        `assistant_starters: []` (type-only); frontend suite 1102; all 8
+        mutations caught; manual browser check passed. With this, 17.7 is
+        complete.
     - **Desktop button tooltips** (decided 06.11.2026): the native `title`
       attribute counts as the hover tooltip; built in 17.3c, only a test
       is missing. A styled tooltip may come in the design pass.
