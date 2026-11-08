@@ -7547,7 +7547,11 @@ items already assigned to Stage 17 elsewhere in this section.
       before it is written. The 0% deposit flow decision is split off to
       the payment gate below;
     - `Salon.timezone` write-time validation ["Open questions" with no
-      stage].
+      stage];
+    - assistant starters filled in for every language [Stage 17, 17.7c;
+      decided 08.11.2026]: saving the assistant starters is refused until
+      each starter is filled in for every language of the site, so the
+      API's fallback to another language never appears in practice.
   - Stage 21:
     - guest `Customer.email` case normalization [Deferred list]: a data
       migration that checks for case collisions first; any constraint
@@ -8300,8 +8304,27 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
       sends the starter at once and leaves any draft in the input
       untouched; focus after a tap follows the 17.7c send rule. No
       separate language rule: starters come in the widget's language
-      through the `lang` the loader already sends (today `uk`); one the
-      salon did not fill in for that language is omitted by the API.
+      through the `lang` the loader already sends (today `uk`). A starter
+      the salon did not fill in for that language is not omitted: the API
+      uses the same fallback as other reads (English, then any filled-in
+      language), as decided in Stage 16 ("Sub-step 1 details") and pinned
+      by `backend/tests/test_tenants_api.py`; only a starter that resolves
+      to an empty string is omitted. Refusing to save starters
+      that are not filled in for every language is deferred to the stage
+      that lets a salon edit its own settings (see the backlog triage in
+      "Stage 16 closure").
+      - Decided 08.11.2026, when the chips show: only when the salon has
+        starters, the conversation has no messages besides the greeting,
+        and the history is not loading and has not failed (`historyStatus`
+        "none" or "loaded", which includes an expired conversation). They
+        are hidden while the history loads or a "Повторити" retry runs
+        (like the greeting, 17.7i) and after a failed history load
+        (17.7h), where sending is disabled.
+      - Decided 08.11.2026: a chip tap is a send. It resumes scroll
+        following (17.7i) and triggers the same focus behaviour as
+        sending (desktop focuses the input, phone blurs it). Unlike a
+        normal send it keeps the draft, so it needs its own send path
+        that skips clearing the draft.
       - Added 07.11.2026, built with the starter questions: the chat
         textarea has no `name` or `id`, so Chrome reports "A form field
         element should have an id or name attribute". Add `name="message"`
