@@ -479,7 +479,7 @@ describe("AssistantChat errors and retry", () => {
   const NETWORK = "Схоже, зник зв'язок. Перевірте інтернет і спробуйте ще раз.";
   const CUT_OFF = "Відповідь обірвалась. Спробуйте ще раз.";
   const NOTHING_ARRIVED =
-    "Ой, щось пішло не так, і я не встиг відповісти. Спробуйте, будь ласка, ще раз.";
+    "Ой, щось пішло не так, і я не встигла відповісти. Спробуйте, будь ласка, ще раз.";
 
   /** Like eventChannel, plus fail(): the stream read rejects mid-stream. */
   function failingChannel() {
@@ -552,7 +552,7 @@ describe("AssistantChat errors and retry", () => {
       name: "daily_limit",
       arrange: () =>
         mockedSend.mockRejectedValueOnce(new ApiError(429, "assistant_daily_limit", "Limit")),
-      text: "Я сьогодні наговорився досхочу і пішов на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:",
+      text: "Я сьогодні наговорилась досхочу і пішла на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:",
       retry: false,
       link: true,
     },
@@ -591,7 +591,7 @@ describe("AssistantChat errors and retry", () => {
     {
       name: "not_found",
       arrange: () => mockedSend.mockRejectedValueOnce(new ApiError(404, "not_found", "Gone")),
-      text: "Асистент зараз недоступний. Записатися можна через форму на сайті.",
+      text: "Асистентка зараз недоступна. Записатися можна через форму на сайті.",
       retry: false,
       link: true,
     },
@@ -784,7 +784,7 @@ describe("AssistantChat errors and retry", () => {
         name: "daily_limit",
         arrange: () =>
           mockedSend.mockRejectedValueOnce(new ApiError(429, "assistant_daily_limit", "Limit")),
-        text: "Я сьогодні наговорився досхочу і пішов на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:",
+        text: "Я сьогодні наговорилась досхочу і пішла на заслужений манікюр 💅 Повертайтесь завтра! А записатися можна й без мене:",
         action: "link",
       },
       {
@@ -829,7 +829,7 @@ describe("AssistantChat errors and retry", () => {
       {
         name: "not_found",
         arrange: () => mockedSend.mockRejectedValueOnce(new ApiError(404, "not_found", "Gone")),
-        text: "Асистент зараз недоступний. Записатися можна через форму на сайті.",
+        text: "Асистентка зараз недоступна. Записатися можна через форму на сайті.",
         action: "link",
       },
       {
@@ -1108,7 +1108,7 @@ describe("AssistantChat proposal card", () => {
   it("test_specialist_line_for_any_specialist", async () => {
     await renderCard(proposalCard({ specialist: "any" }));
 
-    expect(await screen.findByText("Будь-який майстер · 60 хв")).toBeInTheDocument();
+    expect(await screen.findByText("Будь-який спеціаліст · 60 хв")).toBeInTheDocument();
   });
 
   it("test_money_lines_with_the_deposit_bold", async () => {
@@ -1266,12 +1266,12 @@ describe("AssistantChat AI notice (17.7c)", () => {
 });
 
 // docs/DECISIONS.md § "Stage 17 sub-step order", 17.7c: a visually hidden
-// "Асистент пише…" in the status container while the dots show (decided
+// "Асистентка пише…" in the status container while the dots show (decided
 // 06.11.2026: only then; a status line replacing the dots is announced
 // itself).
 describe("AssistantChat hidden typing text (17.7c)", () => {
   const DOTS = "assistant-typing-dots";
-  const TYPING = "Асистент пише…";
+  const TYPING = "Асистентка пише…";
   const CHECKING = "Перевіряю вільний час…";
 
   /** The status container that holds the dots. */

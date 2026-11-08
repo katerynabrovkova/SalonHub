@@ -51,6 +51,7 @@ from ai_assistant.session_store import append_turn, load_history
 from catalog.models import Service, ServiceCategory
 from core.exceptions import AssistantProviderError
 from core.tenancy import TenantContextMissingError, tenant_context
+from specialists.models import Specialist, SpecialistService
 from tests.conftest import make_working_hours
 
 pytestmark = pytest.mark.django_db
@@ -1025,6 +1026,12 @@ def test_card_stays_on_its_own_message_across_two_turns(tbilisi_salon, service, 
 
 def test_two_sessions_in_one_salon_keep_their_own_cards(tbilisi_salon, service, specialist):
     _monday_hours(tbilisi_salon, specialist)
+    # A second free specialist keeps the "any" card "any" (Stage 17.8: with
+    # one free specialist it would become hers).
+    with tenant_context(tbilisi_salon.id):
+        mary = Specialist.objects.create(salon=tbilisi_salon, name={"en": "Mary"})
+        SpecialistService.objects.create(salon=tbilisi_salon, specialist=mary, service=service)
+    _monday_hours(tbilisi_salon, mary)
     any_call = ToolCall(
         id="call-1",
         name="propose_booking",

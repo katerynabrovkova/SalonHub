@@ -9,6 +9,10 @@ the model sees (what was shown, which slots were dropped, or an error code)
 and the card data for the client's `proposal` event, computed by the
 backend. The salon comes only from tenant context; `lang` and `now` come
 from the orchestrator, never from the model.
+
+Stage 17.8: an "any" proposal where one specialist is free at every shown
+time (or, without times, the service has only one specialist) becomes a
+normal proposal for her; the model's result then carries specialist_id.
 """
 
 import datetime as dt
@@ -25,6 +29,7 @@ from payments.services import compute_deposit_breakdown
 from scheduling.services import is_start_offered
 from specialists.models import Specialist
 from specialists.services import annotate_rating, specialist_offers_service
+from tenants.models import Salon
 
 MAX_PROPOSAL_SLOTS = 3
 
@@ -151,6 +156,15 @@ def handle_propose_booking(
             continue
         offered.setdefault(start.astimezone(dt.UTC), start)
 
+    resolved_from_any = False
+    if specialist is None:
+        sole = _sole_free_specialist(
+            salon=salon, service=service, starts=list(offered.values()), now=now
+        )
+        if sole is not None:
+            specialist = annotate_rating(Specialist.objects.filter(pk=sole.pk)).first()
+            resolved_from_any = specialist is not None
+
     salon_tz = ZoneInfo(salon.timezone)
     shown = [start.astimezone(salon_tz).isoformat() for start in sorted(offered)]
     breakdown = compute_deposit_breakdown(price=service.price, percentage=salon.deposit_percentage)
@@ -176,4 +190,29 @@ def handle_propose_booking(
         "currency": salon.currency,
         "slots": shown,
     }
-    return {"shown": True, "slots": shown, "dropped": dropped}, card
+    model_result: dict[str, Any] = {"shown": True, "slots": shown, "dropped": dropped}
+    if resolved_from_any and specialist is not None:
+        model_result["specialist_id"] = specialist.id
+    return model_result, card
+
+
+def _sole_free_specialist(
+    *, salon: Salon, service: Service, starts: list[dt.datetime], now: dt.datetime
+) -> Specialist | None:
+    """
+    For an "any" proposal (Stage 17.8): the one active specialist linked to
+    `service` who is free at every shown start; with no starts, the only
+    such specialist. None when there are none or several.
+    """
+    linked = Specialist.objects.filter(services=service, is_active=True).order_by("id")
+    free = [
+        candidate
+        for candidate in linked
+        if all(
+            is_start_offered(
+                salon=salon, service=service, specialist=candidate, start=start, now=now
+            )
+            for start in starts
+        )
+    ]
+    return free[0] if len(free) == 1 else None

@@ -17,6 +17,11 @@ at most 3 slots per day, as far apart as possible, for the first 3 days
 with any; an empty result adds the reason and alternatives found by
 relaxing the customer's soft wishes.
 
+Stage 17.8: list_services, get_specialist_info and check_availability take
+`name_lang`, the customer's language the model may send as `lang`; service,
+category and specialist names use it, falling back to the site language.
+For specialist "any", check_availability also returns free_specialists.
+
 TOOLS maps each tool name to its ToolSpec (what the model sees) and its
 function.
 """
@@ -32,7 +37,7 @@ from django.db.models import Prefetch
 from ai_assistant.providers.base import ToolSpec
 from booking import services as booking_services
 from catalog.models import Service
-from core.i18n import resolve_translation
+from core.i18n import SUPPORTED_LANGUAGES, resolve_translation
 from core.tenancy import TenantContextMissingError, get_current_salon_id
 from payments.services import compute_deposit_breakdown
 from scheduling.services import (
@@ -60,6 +65,17 @@ _DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _TIME_PATTERN = re.compile(r"[0-9]{2}:[0-9]{2}")
 
 _NO_PARAMETERS: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
+
+# Stage 17.8: the model may pass the customer's language for names; the
+# orchestrator hands it to the tool as `name_lang`.
+_LANG_PARAMETER: dict[str, Any] = {
+    "type": "string",
+    "enum": SUPPORTED_LANGUAGES,
+    "description": (
+        "Language of the customer's latest message, for service, category and "
+        "specialist names. Omit to use the site language."
+    ),
+}
 
 
 def _current_salon() -> Salon:
@@ -106,7 +122,21 @@ def _parse_time(value: object) -> dt.time | None:
         return None
 
 
-def list_services(*, lang: str) -> dict[str, Any]:
+def _name(value: dict[str, str], *, lang: str, name_lang: object) -> str:
+    """
+    A service, category or specialist name (Stage 17.8): in `name_lang`
+    (the customer's language, from the model) when it is a supported code
+    and the name is filled in it; otherwise resolve_translation's chain from
+    the site language `lang`. Bad model input falls back, never raises.
+    """
+    if isinstance(name_lang, str) and name_lang in SUPPORTED_LANGUAGES:
+        translated = value.get(name_lang)
+        if isinstance(translated, str) and translated != "":
+            return translated
+    return resolve_translation(value, lang)
+
+
+def list_services(*, lang: str, name_lang: object = None) -> dict[str, Any]:
     salon = _current_salon()
     services = Service.objects.filter(is_active=True).select_related("category")
     items = []
@@ -117,8 +147,8 @@ def list_services(*, lang: str) -> dict[str, Any]:
         items.append(
             {
                 "id": service.id,
-                "name": resolve_translation(service.name, lang),
-                "category": resolve_translation(service.category.name, lang),
+                "name": _name(service.name, lang=lang, name_lang=name_lang),
+                "category": _name(service.category.name, lang=lang, name_lang=name_lang),
                 "description": service.description or "",
                 "duration_minutes": service.duration_minutes,
                 "price": str(service.price),
@@ -144,7 +174,9 @@ def _weekly_hours(specialist: Specialist) -> dict[str, list[dict[str, str]]]:
     return hours
 
 
-def get_specialist_info(*, lang: str, specialist_id: int | str | None = None) -> dict[str, Any]:
+def get_specialist_info(
+    *, lang: str, name_lang: object = None, specialist_id: int | str | None = None
+) -> dict[str, Any]:
     _current_salon()
     specialists = annotate_rating(
         Specialist.objects.filter(is_active=True).prefetch_related(
@@ -163,10 +195,10 @@ def get_specialist_info(*, lang: str, specialist_id: int | str | None = None) ->
     items = [
         {
             "id": specialist.id,
-            "name": resolve_translation(specialist.name, lang),
+            "name": _name(specialist.name, lang=lang, name_lang=name_lang),
             "bio": resolve_translation(specialist.bio, lang),
             "services": [
-                {"id": service.id, "name": resolve_translation(service.name, lang)}
+                {"id": service.id, "name": _name(service.name, lang=lang, name_lang=name_lang)}
                 for service in specialist.services.all()
             ],
             "average_rating": specialist.average_rating,  # type: ignore[attr-defined]
@@ -219,6 +251,7 @@ def check_availability(
     time_from: str | None = None,
     time_to: str | None = None,
     hard: list[str] | None = None,
+    name_lang: object = None,
 ) -> dict[str, Any]:
     salon = _current_salon()
 
@@ -259,12 +292,13 @@ def check_availability(
     # One engine call covers the requested range and the alternatives search.
     search_end = start_date + dt.timedelta(days=MAX_RANGE_DAYS - 1)
     specialist: Specialist | None = None
+    # For "any" (Stage 17.8): who is free at each start, for free_specialists.
+    free_at: dict[dt.datetime, list[Specialist]] | None = None
     if specialist_id == ANY_SPECIALIST:
-        candidates = list(
-            compute_multi_specialist_availability(
-                service=service, salon=salon, date_from=start_date, date_to=search_end, now=now
-            ).keys()
+        free_at = compute_multi_specialist_availability(
+            service=service, salon=salon, date_from=start_date, date_to=search_end, now=now
         )
+        candidates = list(free_at.keys())
     else:
         parsed_specialist_id = _parse_id(specialist_id)
         specialist = (
@@ -288,6 +322,18 @@ def check_availability(
     salon_tz = ZoneInfo(salon.timezone)
     starts = sorted(candidate.astimezone(salon_tz) for candidate in candidates)
 
+    def with_free_specialists(result: dict[str, Any], listed: list[dt.datetime]) -> dict[str, Any]:
+        """For "any", adds who is free at each listed start, by id."""
+        if free_at is not None:
+            result["free_specialists"] = {
+                start.isoformat(): [
+                    {"id": free.id, "name": _name(free.name, lang=lang, name_lang=name_lang)}
+                    for free in sorted(free_at[start], key=lambda free: free.id)
+                ]
+                for start in listed
+            }
+        return result
+
     def matching(
         *, date_to: dt.date, weekdays: set[int] | None, use_time: bool
     ) -> list[dt.datetime]:
@@ -308,10 +354,13 @@ def check_availability(
     matches = matching(date_to=end_date, weekdays=weekday_numbers, use_time=True)
     if matches:
         shown = _spread(matches)
-        return {
-            "slots": [start.isoformat() for start in shown],
-            "has_more": len(matches) > len(shown),
-        }
+        return with_free_specialists(
+            {
+                "slots": [start.isoformat() for start in shown],
+                "has_more": len(matches) > len(shown),
+            },
+            shown,
+        )
 
     reason = no_free_start_reason(
         salon=salon,
@@ -342,11 +391,13 @@ def check_availability(
         steps.append((["day", "time"], search_end, None, False))
 
     alternatives: dict[str, Any] = {"slots": [], "relaxed": []}
+    alternative_starts: list[dt.datetime] = []
     for relaxed, step_date_to, step_weekdays, use_time in steps:
         found = matching(date_to=step_date_to, weekdays=step_weekdays, use_time=use_time)
         if found:
+            alternative_starts = _spread(found)
             alternatives = {
-                "slots": [start.isoformat() for start in _spread(found)],
+                "slots": [start.isoformat() for start in alternative_starts],
                 "relaxed": relaxed,
             }
             break
@@ -362,7 +413,7 @@ def check_availability(
             weekdays=weekday_numbers,
         )
     empty["alternatives"] = alternatives
-    return empty
+    return with_free_specialists(empty, alternative_starts)
 
 
 def _clock(value: dt.time) -> str:
@@ -444,7 +495,11 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
                 "price, the deposit paid online when booking, and the amount due at "
                 "the visit. All amounts are in the returned currency."
             ),
-            parameters=_NO_PARAMETERS,
+            parameters={
+                "type": "object",
+                "properties": {"lang": _LANG_PARAMETER},
+                "additionalProperties": False,
+            },
         ),
         list_services,
     ),
@@ -465,7 +520,8 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
                     "specialist_id": {
                         "type": "integer",
                         "description": "Id of one specialist, as returned by this tool.",
-                    }
+                    },
+                    "lang": _LANG_PARAMETER,
                 },
                 "additionalProperties": False,
             },
@@ -486,7 +542,12 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
     "get_faq": (
         ToolSpec(
             name="get_faq",
-            description="The salon's frequently asked questions and their answers.",
+            description=(
+                "The salon's frequently asked questions and their answers. Check it "
+                "first for questions about the salon's rules, preparation for a "
+                "procedure, health and similar topics (pregnancy, allergies, "
+                "contraindications, parking, payment, children)."
+            ),
             parameters=_NO_PARAMETERS,
         ),
         get_faq,
@@ -506,7 +567,10 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
                 "that day's working ranges and the last possible start for this "
                 "service) and alternatives: the nearest free times "
                 "within 14 days of date_from, with relaxed naming the wishes that "
-                "were dropped (day, time). Wishes listed in hard are never dropped."
+                "were dropped (day, time). Wishes listed in hard are never dropped. "
+                'With specialist "any" it also returns free_specialists: for each '
+                "returned time (slots, or the alternatives' slots), the specialists "
+                "free then, with id and name."
             ),
             parameters={
                 "type": "object",
@@ -564,6 +628,7 @@ TOOLS: dict[str, tuple[ToolSpec, Callable[..., dict[str, Any]]]] = {
                             "looking for alternatives. Omit for soft wishes."
                         ),
                     },
+                    "lang": _LANG_PARAMETER,
                 },
                 "required": ["service_id", "specialist_id", "date_from", "date_to"],
                 "additionalProperties": False,

@@ -64,7 +64,7 @@ function specialistLine(card: ProposalCard): string {
   const minutes = `${card.service.duration_minutes} хв`;
   const { specialist } = card;
   if (specialist === "any") {
-    return `Будь-який майстер · ${minutes}`;
+    return `Будь-який спеціаліст · ${minutes}`;
   }
   if (specialist.review_count === 0) {
     return `${specialist.name} · Немає відгуків · ${minutes}`;

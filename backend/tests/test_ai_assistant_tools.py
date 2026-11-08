@@ -328,6 +328,15 @@ def test_registry_has_exactly_the_five_tools_and_no_salon_parameter():
             assert "salon" not in parameter.lower()
 
 
+def test_get_faq_description_says_to_check_it_first_for_rules_preparation_and_health():
+    spec, _function = TOOLS["get_faq"]
+
+    description = spec.description.lower()
+    assert "first" in description
+    for topic in ("rules", "preparation", "health"):
+        assert topic in description
+
+
 def test_every_tool_output_is_json_serializable(salon, service, customer):
     specialist = _make_specialist(salon, name="Jane", services=[service])
     _make_review(
@@ -447,7 +456,18 @@ def test_check_availability_any_matches_the_multi_specialist_keys(tbilisi_salon,
 
     result = _check(tbilisi_salon, service_id=hour_service.id, specialist_id="any")
 
-    assert result == {"slots": expected, "has_more": False}
+    jane_entry = {"id": jane.id, "name": "Jane"}
+    mary_entry = {"id": mary.id, "name": "Mary"}
+    assert result == {
+        "slots": expected,
+        "has_more": False,
+        "free_specialists": {
+            _local(7, 9): [jane_entry],
+            _local(7, 10): [jane_entry, mary_entry],
+            _local(7, 11): [mary_entry],
+            _local(8, 9): [mary_entry],
+        },
+    }
 
 
 def test_check_availability_weekday_filter_uses_salon_local_days(tbilisi_salon, hour_service):

@@ -130,10 +130,16 @@ def test_any_specialist_slots_are_checked_against_every_linked_specialist(
         tbilisi_salon, service_id=service.id, specialist_id="any", slots=[SLOT_0900, SLOT_1300]
     )
 
+    # Stage 17.8: only Mary is free at the one shown time, so the card is hers.
     assert card is not None
-    assert card["specialist"] == "any"
+    assert card["specialist"]["id"] == mary.id
     assert card["slots"] == [SLOT_0900]
-    assert model_result == {"shown": True, "slots": [SLOT_0900], "dropped": [SLOT_1300]}
+    assert model_result == {
+        "shown": True,
+        "slots": [SLOT_0900],
+        "dropped": [SLOT_1300],
+        "specialist_id": mary.id,
+    }
 
 
 def test_taken_slot_is_dropped_and_the_others_kept(tbilisi_salon, service, specialist, customer):

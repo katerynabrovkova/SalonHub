@@ -578,6 +578,10 @@ def test_any_ignores_another_salons_specialists(tbilisi_salon, other_salon, hour
         "has_more": False,
         "reason": "day_off",
         "alternatives": {"slots": [_local(14, 9), _local(21, 9)], "relaxed": ["day"]},
+        "free_specialists": {
+            _local(14, 9): [{"id": jane.id, "name": "Jane"}],
+            _local(21, 9): [{"id": jane.id, "name": "Jane"}],
+        },
     }
 
 

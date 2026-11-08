@@ -125,7 +125,11 @@ def _run_tool(call: ToolCall, *, lang: str, now: dt.datetime) -> dict[str, Any]:
     spec, function = entry
     if not _matches_schema(spec, call.arguments):
         return INVALID_TOOL_CALL
+    # The model's optional `lang` is the customer's language for names
+    # (Stage 17.8); the site language always comes from the request.
     kwargs: dict[str, Any] = {**call.arguments, "lang": lang}
+    if "lang" in call.arguments:
+        kwargs["name_lang"] = call.arguments["lang"]
     if call.name in _TOOLS_TAKING_NOW:
         kwargs["now"] = now
     return function(**kwargs)
