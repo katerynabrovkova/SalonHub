@@ -43,11 +43,8 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { apiRequest } from "@/lib/api/client";
 import { ApiError, RenewalUnsureError } from "@/lib/api/errors";
-import {
-  getMyAppointments,
-  type DepositOutcomeValue,
-  type MyAppointment,
-} from "@/lib/booking/getMyAppointments";
+import { cancelConfirmText, DEPOSIT_OUTCOME_LABELS } from "@/lib/booking/cancelTexts";
+import { getMyAppointments, type MyAppointment } from "@/lib/booking/getMyAppointments";
 import { payForAppointment } from "@/lib/booking/payForAppointment";
 import { formatSalonDateTime } from "@/lib/datetime/formatSalonDateTime";
 import { formatPrice } from "@/lib/pricing/formatPrice";
@@ -96,12 +93,6 @@ interface MoneyLine {
   text: string;
   bold: boolean;
 }
-
-const DEPOSIT_OUTCOME_LABELS: Record<DepositOutcomeValue, string> = {
-  refund_processing: "Повернення обробляється",
-  refunded: "Повернено",
-  withheld: "Передоплату утримано",
-};
 
 /**
  * The card's money line (docs/DECISIONS.md § "Price and prepayment on
@@ -185,24 +176,14 @@ function payErrorMessage(err: unknown): string {
 }
 
 /**
- * The cancel confirmation text, chosen from the clock at the moment of the
- * click (`nowMs`), never cached at list-load time: `refund_deadline` comes
- * from the backend's own refund rule (booking.services.refund_deadline), and
- * `now <= refund_deadline` mirrors its `_is_refund_eligible` boundary. The
- * backend still makes the final refund decision at cancel time
- * (docs/DECISIONS.md § Stage 15 planning, item 14 design details).
- *
- * "Paid" means a SUCCEEDED Payment. A paid card without a deadline cannot
- * come from the backend today (it only nulls the deadline when nothing is
- * refundable); if it ever does, the dialog makes no refund claim either way.
+ * The cancel confirmation text, chosen at the moment of the click (`nowMs`)
+ * by the shared `cancelConfirmText` (lib/booking/cancelTexts.ts), the same
+ * wording the guest manage page uses. An unpaid card gets the plain text even
+ * if a deadline were ever present: "paid" means a SUCCEEDED Payment.
  */
-function cancelConfirmText(appointment: MyAppointment, nowMs: number): string {
-  if (appointment.payment_status !== "succeeded" || appointment.refund_deadline === null) {
-    return "Скасувати бронювання?";
-  }
-  return nowMs <= new Date(appointment.refund_deadline).getTime()
-    ? "Скасувати бронювання? Передоплату буде повернено."
-    : "Скасувати бронювання? До візиту менше 24 годин, тому передоплата не повертається.";
+function dashboardCancelConfirmText(appointment: MyAppointment, nowMs: number): string {
+  const deadline = appointment.payment_status === "succeeded" ? appointment.refund_deadline : null;
+  return cancelConfirmText(deadline, nowMs);
 }
 
 interface AppointmentCardProps {
@@ -374,7 +355,7 @@ export default function ClientDashboardPage() {
   async function handleCancel(appointment: MyAppointment) {
     // Declining changes nothing: no request, no state touched. Native
     // confirm(), same as the logout confirmation in ClientAvatarMenu.
-    if (!window.confirm(cancelConfirmText(appointment, Date.now()))) {
+    if (!window.confirm(dashboardCancelConfirmText(appointment, Date.now()))) {
       return;
     }
     const { id } = appointment;

@@ -33,6 +33,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { guestApiRequest } from "@/lib/api/guestClient";
+import { INVALID_GUEST_LINK_MESSAGE } from "@/lib/booking/guestLinkTexts";
 
 interface PaymentStatusProps {
   slug: string;
@@ -54,7 +55,7 @@ interface PayResponse {
   provider_data: string | null;
 }
 
-const INVALID_LINK_MESSAGE = "Посилання недійсне або застаріле.";
+const INVALID_LINK_MESSAGE = INVALID_GUEST_LINK_MESSAGE;
 
 function parseFragment(hash: string): { appointmentId: number; token: string } | null {
   const raw = hash.startsWith("#") ? hash.slice(1) : hash;
