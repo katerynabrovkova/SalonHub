@@ -230,6 +230,9 @@ docker compose exec frontend npm run typecheck
   `tsconfig.tsbuildinfo` into the root-owned `/app` mount.
 - **After `makemigrations`, run `ruff check --fix` and `ruff format` on the new migration
   files** (Django's own style fails `ruff format --check`).
+- **After changing code that Celery runs (notifications, sweeps, tasks), restart the worker
+  and beat** (`docker compose restart celery_worker celery_beat`): they do not reload code,
+  so a manual check would exercise the old code.
 - **Never run `npx <tool>` for a tool the project already has; use its npm script.** Outside
   `/app`, `npx tsc` downloaded an unrelated registry package instead of TypeScript.
 - **Git:** never run commands that change the working tree, index, stash or history, and never
