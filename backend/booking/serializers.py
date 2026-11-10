@@ -5,30 +5,15 @@ from zoneinfo import ZoneInfo
 
 from rest_framework import serializers
 
+from booking import amounts
 from booking.models import (
-    ACTIVE_APPOINTMENT_STATUSES,
     Appointment,
     AppointmentSource,
-    AppointmentStatus,
 )
-from booking.services import refund_deadline
 from catalog.models import Service
 from core.i18n import resolve_translation
-from payments.models import Payment, PaymentStatus
-from payments.services import compute_deposit_amount
 from scheduling.serializers import _OffsetRequiredDateTimeField
 from specialists.models import Specialist
-
-# amount_due_at_visit is only meaningful once a deposit has actually been
-# collected against a still-honored booking (docs/DECISIONS.md § Stage 15
-# planning, item 4). COMPLETED is included alongside CONFIRMED for
-# consistency (a completed visit's balance is exactly as well-defined as a
-# confirmed one's) even though the dashboard only renders it for CONFIRMED
-# today -- the frontend's display choice, not a reason to make the backend
-# value inconsistent between the two.
-_AMOUNT_DUE_ELIGIBLE_STATUSES = frozenset(
-    {AppointmentStatus.CONFIRMED, AppointmentStatus.COMPLETED}
-)
 
 
 class SalonLocalDateTimeField(serializers.Field):
@@ -111,34 +96,6 @@ class AppointmentServiceSerializer(serializers.ModelSerializer):
         return resolve_translation(obj.name, requested_lang)
 
 
-def _refund_deadline_or_none(appointment: Appointment) -> dt.datetime | None:
-    """
-    When a customer cancellation stops being refund-eligible
-    (docs/DECISIONS.md § Stage 15 planning, item 14 design details), for
-    _AppointmentCustomerViewBase's `refund_deadline`. A deadline, not a
-    boolean: the dashboard and the guest manage page compare it with the
-    clock at click time, so a
-    page left open across the boundary still words its confirm dialog
-    correctly. Derived from `booking.services.refund_deadline`, the same rule
-    `cancel_appointment` evaluates at cancel time, which remains the final
-    decision.
-
-    None whenever a customer cancellation could refund nothing: no SUCCEEDED
-    payment, or an appointment that can no longer be cancelled (anything
-    outside ACTIVE_APPOINTMENT_STATUSES, e.g. CANCELLED with the deposit
-    withheld). Rendered through SalonLocalDateTimeField, like
-    `start_datetime`, so it carries the salon's offset too.
-    """
-    payment: Payment | None = getattr(appointment, "payment", None)
-    if (
-        appointment.status not in ACTIVE_APPOINTMENT_STATUSES
-        or payment is None
-        or payment.status != PaymentStatus.SUCCEEDED
-    ):
-        return None
-    return refund_deadline(appointment.start_datetime)
-
-
 class _AppointmentCustomerViewBase(serializers.ModelSerializer):
     """
     The computed read-only fields a customer sees about their own
@@ -150,31 +107,10 @@ class _AppointmentCustomerViewBase(serializers.ModelSerializer):
     `Meta.fields` which of these it returns (DRF does not require a field
     declared on a parent class to be listed).
 
-    `deposit_amount` is `Payment.amount` when a Payment exists,
-    otherwise `payments.services.compute_deposit_amount` -- the same helper
-    `initiate_payment` charges with, made public for this so the rounding
-    rule exists once -- and `null` whenever the deposit is 0 (a 0%
-    percentage, a deposit that rounds to 0, or a 0.00 Payment). `currency`
-    is `Payment.currency` when a Payment exists, otherwise `Salon.currency`:
-    a historic payment keeps the currency it was actually paid in.
-
-    `deposit_outcome` states what happened to a paid deposit, so the
-    frontend never infers it from `payment_status` (same entry, point 1):
-    "refunded" for a REFUNDED Payment; "refund_processing" for
-    REFUND_PENDING, or SUCCEEDED with `Payment.refund_due`; "withheld" for
-    SUCCEEDED without `refund_due` on a CANCELLED appointment; `null`
-    otherwise. `refund_due` is the persisted refund decision, never
-    recomputed from the cancellation rules here (§ "Persisted refund
-    decision (`Payment.refund_due`)").
-
-    Every Payment read goes through the OneToOneField reverse accessor
-    `appointment.payment` (payments/models.py's `Payment.appointment`), which
-    raises `Payment.DoesNotExist` when no Payment row exists rather than
-    returning `None` -- `_payment()` below guards every read with
-    `getattr(appointment, "payment", None)`. Value fields serialize to
-    `null` (never a placeholder like `0`/`"none"`) when there is nothing to
-    show, matching this codebase's established null-means-absence convention
-    (`Payment.refund_initiated_at`, `Specialist.photo`).
+    Every value comes from `booking.amounts`, which the booking emails use
+    too; the rules (Payment first, salon fallback, null-means-nothing-to-
+    show, the refund deadline from `booking.services.refund_deadline`) are
+    documented there. This class only renders them.
 
     Money method fields return `str(...)` of their `Decimal`, not a bare
     `Decimal`: a `SerializerMethodField` has no `to_representation` coercion
@@ -183,15 +119,8 @@ class _AppointmentCustomerViewBase(serializers.ModelSerializer):
     `b'{"x":12.34}'`) -- inconsistent with `service_price_at_booking`, a real
     `DecimalField` whose own `to_representation` always produces a string
     (`"12.34"`). `str()` makes every money field serialize the same way.
-
-    `amount_due_at_visit` is computed here, in Python, rather than left for
-    the frontend: it's a plain subtraction of two values the backend
-    already rounded and stored (`service_price_at_booking`, `Payment.amount`),
-    so there's no rounding-drift risk either way, but computing it
-    server-side keeps the "what does this client still owe" rule in one
-    place -- the same reasoning that keeps `compute_deposit_amount`'s
-    rounding logic out of the frontend (payments/services.py), just for a
-    trivial case of it.
+    `refund_deadline` goes through SalonLocalDateTimeField, like
+    `start_datetime`, so it carries the salon's offset too.
 
     `specialist`/`service` are nested `AppointmentSpecialistSerializer`/
     `AppointmentServiceSerializer` (`{id, name}`, name resolved per
@@ -211,46 +140,21 @@ class _AppointmentCustomerViewBase(serializers.ModelSerializer):
     deposit_outcome = serializers.SerializerMethodField()
     start_datetime = SalonLocalDateTimeField()
     end_datetime = SalonLocalDateTimeField()
-    refund_deadline = SalonLocalDateTimeField(value_from=_refund_deadline_or_none)
-
-    def _payment(self, appointment: Appointment) -> Payment | None:
-        return getattr(appointment, "payment", None)
+    refund_deadline = SalonLocalDateTimeField(value_from=amounts.refund_deadline_or_none)
 
     def get_amount_due_at_visit(self, appointment: Appointment) -> str | None:
-        payment = self._payment(appointment)
-        if (
-            appointment.status not in _AMOUNT_DUE_ELIGIBLE_STATUSES
-            or payment is None
-            or payment.status != PaymentStatus.SUCCEEDED
-        ):
-            return None
-        return str(appointment.service_price_at_booking - payment.amount)
+        amount = amounts.amount_due_at_visit(appointment)
+        return str(amount) if amount is not None else None
 
     def get_deposit_amount(self, appointment: Appointment) -> str | None:
-        payment = self._payment(appointment)
-        amount = payment.amount if payment is not None else compute_deposit_amount(appointment)
-        return str(amount) if amount != 0 else None
+        amount = amounts.deposit_amount(appointment)
+        return str(amount) if amount is not None else None
 
     def get_currency(self, appointment: Appointment) -> str:
-        payment = self._payment(appointment)
-        return payment.currency if payment is not None else appointment.salon.currency
+        return amounts.currency(appointment)
 
     def get_deposit_outcome(self, appointment: Appointment) -> str | None:
-        payment = self._payment(appointment)
-        if payment is None:
-            return None
-        if payment.status == PaymentStatus.REFUNDED:
-            return "refunded"
-        if payment.status == PaymentStatus.REFUND_PENDING:
-            return "refund_processing"
-        if payment.status == PaymentStatus.SUCCEEDED and payment.refund_due:
-            return "refund_processing"
-        if (
-            payment.status == PaymentStatus.SUCCEEDED
-            and appointment.status == AppointmentStatus.CANCELLED
-        ):
-            return "withheld"
-        return None
+        return amounts.deposit_outcome(appointment)
 
 
 class AppointmentAccountSerializer(_AppointmentCustomerViewBase):
@@ -292,11 +196,11 @@ class AppointmentAccountSerializer(_AppointmentCustomerViewBase):
         read_only_fields = fields
 
     def get_payment_status(self, appointment: Appointment) -> str | None:
-        payment = self._payment(appointment)
+        payment = amounts.payment_of(appointment)
         return payment.status if payment is not None else None
 
     def get_payment_amount(self, appointment: Appointment) -> str | None:
-        payment = self._payment(appointment)
+        payment = amounts.payment_of(appointment)
         return str(payment.amount) if payment is not None else None
 
 

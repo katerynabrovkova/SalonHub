@@ -21,11 +21,20 @@ import datetime as dt
 import psycopg
 from django.db import IntegrityError, transaction
 
+from booking import amounts
 from booking.constants import SLOT_HOLD_DURATION
 from booking.guest_tokens import derive_guest_token
-from booking.models import Appointment, AppointmentStatus
-from core.formatting import format_datetime_for_salon
+from booking.models import Appointment, AppointmentStatus, GuestAccessToken
+from core.formatting import (
+    format_amount,
+    format_datetime_for_salon,
+    format_deadline_for_salon,
+    format_duration,
+    format_full_datetime_for_salon,
+    format_time_for_salon,
+)
 from core.i18n import resolve_language_code, resolve_translation
+from core.tenancy import tenant_context
 from core.urls import build_salon_frontend_url
 from notifications.channels.base import NotificationChannel
 from notifications.models import (
@@ -61,11 +70,11 @@ def _resolve_recipient(notification: Notification) -> str:
 # {trigger: {lang_code: (subject, body)}}. When another language is added
 # it gets a key here; the resolution logic does not change.
 #
-# BOOKING_CONFIRMED and APPOINTMENT_REMINDER have no entry here: each is
-# built from the notification's appointment in _build_message instead of
-# being a static lookup (see docs/DECISIONS.md § Step (d) decisions and
-# § Step (e) decisions) — the manage-link URL and the human-readable
-# appointment time can't be fixed strings.
+# BOOKING_CONFIRMED, APPOINTMENT_REMINDER and BOOKING_CREATED have no entry
+# here: each is built from the notification's appointment in _build_message
+# (BOOKING_CONFIRMED and APPOINTMENT_REMINDER by _build_booking_email, with
+# their texts in _BOOKING_EMAIL_TEXTS below) — the link, the appointment's
+# details and the money lines can't be fixed strings.
 _MESSAGES: dict[str, dict[str, tuple[str, str]]] = {
     NotificationTrigger.BOOKING_CANCELLED.value: {
         "en": ("Your booking was cancelled", "Your booking has been cancelled."),
@@ -121,18 +130,17 @@ def _recipient_language(notification: Notification) -> str | None:
     return None
 
 
-def _build_message(notification: Notification) -> tuple[str, str]:
+def _build_message(notification: Notification, *, now: dt.datetime) -> tuple[str, str]:
     """
     Map a notification's trigger_type to its (subject, body), rendered in
     the recipient's language — the one place the wording lives.
 
-    Every trigger but BOOKING_CONFIRMED and APPOINTMENT_REMINDER is a
-    per-language lookup in _MESSAGES. Those two are built from the
-    notification's appointment instead (salon name, human-readable local
-    time, the re-derived guest-access manage link) — see docs/DECISIONS.md
-    § Step (d) decisions and § Step (e) decisions — with the literal
-    fragments per-language-keyed and the interpolated values (salon.name,
-    formatted time) resolved in the same language. A trigger_type with no
+    Every trigger but BOOKING_CONFIRMED, APPOINTMENT_REMINDER and
+    BOOKING_CREATED is a per-language lookup in _MESSAGES. Those three are
+    built from the notification's appointment instead, with the literal
+    fragments per-language-keyed and the interpolated values resolved in the
+    same language; BOOKING_CONFIRMED and APPOINTMENT_REMINDER go through
+    _build_booking_email (docs/DECISIONS.md "Notifications"). A trigger_type with no
     entry in _MESSAGES and no special case here (EMAIL_VERIFICATION today)
     raises rather than sending a blank email: a missing message is a bug,
     not a valid empty send.
@@ -140,68 +148,28 @@ def _build_message(notification: Notification) -> tuple[str, str]:
     preferred = _recipient_language(notification)
     lang_code = resolve_language_code(preferred)
 
-    # The two dynamic branches keep their structure parallel and their
-    # template literals inline — no shared appointment-email helper
-    # (docs/DECISIONS.md § Step (e); that refactor stays deferred).
-    if notification.trigger_type == NotificationTrigger.APPOINTMENT_REMINDER:
+    if notification.trigger_type in (
+        NotificationTrigger.BOOKING_CONFIRMED,
+        NotificationTrigger.APPOINTMENT_REMINDER,
+    ):
         appointment = notification.appointment
         if appointment is None:
             raise ValueError(
-                "APPOINTMENT_REMINDER notification "
+                f"{notification.trigger_type} notification "
                 f"{notification.pk!r} has no appointment to build its message from"
             )
-        salon = appointment.salon
-        subject, body_template = {
-            "en": (
-                "Reminder: your appointment tomorrow",
-                "This is a reminder of your appointment at {salon} on {when}.\n\n"
-                "View or cancel your booking: {link}",
-            ),
-            "uk": (
-                "Нагадування: ваш запис завтра",
-                "Нагадуємо про ваш запис до {salon} на {when}.\n\n"
-                "Переглянути або скасувати запис: {link}",
-            ),
-        }[lang_code]
-        when = format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang=lang_code)
-        token = derive_guest_token(appointment.id)
-        link = build_salon_frontend_url(
-            salon.slug, f"/appointments/{appointment.id}/manage/{token}/"
-        )
-        body = body_template.format(
-            salon=resolve_translation(salon.name, preferred), when=when, link=link
-        )
-        return subject, body
-
-    if notification.trigger_type == NotificationTrigger.BOOKING_CONFIRMED:
-        appointment = notification.appointment
-        if appointment is None:
-            raise ValueError(
-                "BOOKING_CONFIRMED notification "
-                f"{notification.pk!r} has no appointment to build its message from"
+        # The guest-token lookup goes through a tenant-scoped manager; bind
+        # the appointment's own salon so the build also works where the
+        # caller has no tenant bound (CLAUDE.md: code outside a request binds
+        # tenant_context itself).
+        with tenant_context(appointment.salon_id):
+            return _build_booking_email(
+                appointment,
+                reminder=notification.trigger_type == NotificationTrigger.APPOINTMENT_REMINDER,
+                lang_code=lang_code,
+                preferred=preferred,
+                now=now,
             )
-        salon = appointment.salon
-        subject, body_template = {
-            "en": (
-                "Your booking is confirmed",
-                "Your booking at {salon} on {when} is confirmed.\n\n"
-                "View or cancel your booking: {link}",
-            ),
-            "uk": (
-                "Ваш запис підтверджено",
-                "Ваш запис до {salon} на {when} підтверджено.\n\n"
-                "Переглянути або скасувати запис: {link}",
-            ),
-        }[lang_code]
-        when = format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang=lang_code)
-        token = derive_guest_token(appointment.id)
-        link = build_salon_frontend_url(
-            salon.slug, f"/appointments/{appointment.id}/manage/{token}/"
-        )
-        body = body_template.format(
-            salon=resolve_translation(salon.name, preferred), when=when, link=link
-        )
-        return subject, body
 
     if notification.trigger_type == NotificationTrigger.BOOKING_CREATED:
         appointment = notification.appointment
@@ -257,6 +225,161 @@ def _build_message(notification: Notification) -> tuple[str, str]:
         raise ValueError(
             f"no message builder for notification trigger_type {notification.trigger_type!r}"
         ) from None
+
+
+_BOOKING_EMAIL_TEXTS: dict[str, dict[str, str]] = {
+    "uk": {
+        "confirmed_subject": "Ваш запис у {salon} підтверджено",
+        "reminder_subject": "Нагадування: завтра о {time} у {salon}",
+        "greeting": "Вітаємо, {name}!",
+        "confirmed_intro": "Ваш запис підтверджено:",
+        "reminder_intro": "Нагадуємо про ваш запис завтра:",
+        "service": "Послуга: {value}",
+        "specialist": "Майстер: {value}",
+        "when": "Коли: {value}",
+        "duration": "Тривалість: {value}",
+        "deposit": "Передоплата: {value} (сплачено)",
+        "amount_due": "Оплата при візиті: {value}",
+        "deadline": (
+            "Скасувати запис з поверненням передоплати можна не пізніше ніж за 24 години "
+            "до візиту, тобто до {deadline}. Пізніше передоплата не повертається."
+        ),
+        "deadline_passed": (
+            "До візиту менше 24 годин, тому при скасуванні передоплата не повертається."
+        ),
+        "confirmed_link": "Переглянути або скасувати запис:",
+        "reminder_link": "Якщо плани змінились, скасувати запис можна за посиланням:",
+        "last_with_phone": (
+            "Якщо ви не записувалися в {salon}, будь ласка, повідомте салон за номером вище."
+        ),
+        "last_without_phone": "Якщо ви не записувалися в {salon}, будь ласка, повідомте салон.",
+    },
+    "en": {
+        "confirmed_subject": "Your booking at {salon} is confirmed",
+        "reminder_subject": "Reminder: tomorrow at {time} at {salon}",
+        "greeting": "Hello, {name}!",
+        "confirmed_intro": "Your booking is confirmed:",
+        "reminder_intro": "This is a reminder of your booking tomorrow:",
+        "service": "Service: {value}",
+        "specialist": "Specialist: {value}",
+        "when": "When: {value}",
+        "duration": "Duration: {value}",
+        "deposit": "Deposit: {value} (paid)",
+        "amount_due": "Pay at the visit: {value}",
+        "deadline": (
+            "You can cancel with a refund of the deposit no later than 24 hours before the "
+            "visit, that is until {deadline}. After that the deposit is not refunded."
+        ),
+        "deadline_passed": (
+            "There are less than 24 hours before the visit, so the deposit is not refunded "
+            "if you cancel."
+        ),
+        "confirmed_link": "View or cancel your booking:",
+        "reminder_link": "If your plans have changed, you can cancel your booking here:",
+        "last_with_phone": (
+            "If you did not book at {salon}, please let the salon know at the number above."
+        ),
+        "last_without_phone": "If you did not book at {salon}, please let the salon know.",
+    },
+}
+
+
+def _booking_email_link(appointment: Appointment) -> str:
+    """
+    The link in BOOKING_CONFIRMED and APPOINTMENT_REMINDER (docs/DECISIONS.md
+    "Notifications"): the guest manage page when the appointment has a guest
+    token row, /client otherwise. These emails are sent by the payment
+    webhook and the reminder sweep, which do not know how the booking was
+    made; a token row exists only for guest bookings, so it is the record of
+    that. Never inferred from whether the Customer has an Account. The token
+    sits in the fragment, never the path (a path reaches server logs).
+    """
+    salon = appointment.salon
+    if GuestAccessToken.objects.filter(appointment=appointment).exists():
+        token = derive_guest_token(appointment.id)
+        return build_salon_frontend_url(
+            salon.slug, f"/appointments/{appointment.id}/manage#token={token}"
+        )
+    return build_salon_frontend_url(salon.slug, "/client")
+
+
+def _build_booking_email(
+    appointment: Appointment,
+    *,
+    reminder: bool,
+    lang_code: str,
+    preferred: str | None,
+    now: dt.datetime,
+) -> tuple[str, str]:
+    """
+    BOOKING_CONFIRMED (`reminder=False`) and APPOINTMENT_REMINDER texts, as
+    recorded in docs/DECISIONS.md "Notifications". Money values come from
+    booking.amounts (the same code as the guest and account serializers), the
+    refund deadline from booking.services.refund_deadline through
+    amounts.refund_deadline_or_none. Without a succeeded Payment the money
+    lines and the deadline sentence are left out; this never raises for it,
+    because a raising build fails the send task and the email is never sent.
+    `now` is the build moment (send_notification's own `now`): once the
+    refund deadline is past, the deadline sentence becomes "no refund".
+    """
+    texts = _BOOKING_EMAIL_TEXTS[lang_code]
+    salon = appointment.salon
+    salon_name = resolve_translation(salon.name, preferred)
+    tz = salon.timezone
+    money_currency = amounts.currency(appointment)
+    paid = amounts.has_succeeded_payment(appointment)
+    deposit = amounts.deposit_amount(appointment) if paid else None
+    amount_due = amounts.amount_due_at_visit(appointment) if paid else None
+
+    lines = [
+        texts["greeting"].format(name=appointment.customer.name),
+        texts["reminder_intro" if reminder else "confirmed_intro"],
+        texts["service"].format(value=resolve_translation(appointment.service.name, preferred)),
+        texts["specialist"].format(
+            value=resolve_translation(appointment.specialist.name, preferred)
+        ),
+        texts["when"].format(
+            value=format_full_datetime_for_salon(appointment.start_datetime, tz, lang=lang_code)
+        ),
+    ]
+    if not reminder:
+        minutes = int((appointment.end_datetime - appointment.start_datetime).total_seconds() // 60)
+        lines.append(texts["duration"].format(value=format_duration(minutes, lang=lang_code)))
+        if deposit is not None:
+            lines.append(texts["deposit"].format(value=format_amount(deposit, money_currency)))
+    if amount_due is not None:
+        lines.append(texts["amount_due"].format(value=format_amount(amount_due, money_currency)))
+    if not reminder:
+        # The reminder never mentions the deadline: it arrives 24-25 hours
+        # before the visit, when the deadline is about to pass.
+        # A booking made less than 24 hours ahead must not promise a refund
+        # until a moment that has already passed: decided at build time,
+        # with the cancel flow's own comparison.
+        deadline = amounts.refund_deadline_or_none(appointment)
+        if deadline is not None and amounts.cancellation_refunds_at(appointment, now):
+            lines.append(
+                texts["deadline"].format(
+                    deadline=format_deadline_for_salon(deadline, tz, lang=lang_code)
+                )
+            )
+        elif deadline is not None:
+            lines.append(texts["deadline_passed"])
+    lines.append(texts["reminder_link" if reminder else "confirmed_link"])
+    lines.append(_booking_email_link(appointment))
+    lines.append(salon_name)
+    contacts = " · ".join(value for value in (salon.phone, salon.address) if value)
+    if contacts:
+        lines.append(contacts)
+    last = "last_with_phone" if salon.phone else "last_without_phone"
+    lines.append(texts[last].format(salon=salon_name))
+
+    if reminder:
+        subject = texts["reminder_subject"].format(
+            time=format_time_for_salon(appointment.start_datetime, tz), salon=salon_name
+        )
+    else:
+        subject = texts["confirmed_subject"].format(salon=salon_name)
+    return subject, "\n".join(lines)
 
 
 def send_notification(
@@ -317,7 +440,7 @@ def send_notification(
             return
 
         recipient = _resolve_recipient(notification)
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=now)
         channel.send(recipient=recipient, subject=subject, body=body)
 
         notification.status = NotificationStatus.SENT

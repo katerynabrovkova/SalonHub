@@ -473,12 +473,24 @@ def refund_deadline(start_datetime: dt.datetime) -> dt.datetime:
     return start_datetime - REFUND_ELIGIBILITY_CUTOFF
 
 
+def customer_cancellation_refunds(*, now: dt.datetime, start_datetime: dt.datetime) -> bool:
+    """
+    Whether a customer cancelling at `now` still gets the deposit back:
+    `now <= refund_deadline(start)`, the boundary inclusive. The one
+    comparison behind both the cancel-time decision (`_is_refund_eligible`)
+    and the BOOKING_CONFIRMED email's deadline sentence
+    (notifications.services), so the email can never promise a refund the
+    cancel flow would refuse.
+    """
+    return now <= refund_deadline(start_datetime)
+
+
 def _is_refund_eligible(
     *, cancelled_by: str, now: dt.datetime, start_datetime: dt.datetime
 ) -> bool:
     if cancelled_by not in _CUSTOMER_INITIATED_CANCELLATIONS:
         return True
-    return now <= refund_deadline(start_datetime)
+    return customer_cancellation_refunds(now=now, start_datetime=start_datetime)
 
 
 def cancel_appointment(

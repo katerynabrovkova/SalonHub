@@ -19,7 +19,7 @@ import pytest
 from django.conf import settings
 
 from accounts.models import Customer
-from booking.guest_tokens import derive_guest_token
+from booking.guest_tokens import derive_guest_token, issue_guest_token
 from core.formatting import format_datetime_for_salon
 from core.tenancy import tenant_context
 from notifications.channels.base import NotificationChannel
@@ -118,70 +118,78 @@ def test_resolve_recipient_returns_salon_contact_email_when_customer_is_null(sal
 
 @pytest.mark.parametrize("trigger", _IMPLEMENTED_TRIGGERS)
 def test_build_message_returns_nonempty_subject_and_body(trigger):
-    subject, body = _build_message(Notification(trigger_type=trigger))
+    subject, body = _build_message(Notification(trigger_type=trigger), now=NOW)
     assert subject
     assert body
 
 
 def test_build_message_raises_for_an_unimplemented_trigger():
     with pytest.raises(ValueError, match="trigger_type"):
-        _build_message(Notification(trigger_type=NotificationTrigger.EMAIL_VERIFICATION))
+        _build_message(Notification(trigger_type=NotificationTrigger.EMAIL_VERIFICATION), now=NOW)
+
+
+def _guest_appointment(salon, customer, specialist, service):
+    """An appointment with the guest token row a guest booking has, so the
+    BOOKING_CONFIRMED / APPOINTMENT_REMINDER link is the manage page
+    (docs/DECISIONS.md "Notifications": without a row the link is /client)."""
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+    )
+    with tenant_context(salon.id):
+        issue_guest_token(appointment)
+    return appointment
+
+
+def _manage_link(salon, appointment) -> str:
+    return (
+        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
+        f"/manage#token={derive_guest_token(appointment.id)}"
+    )
 
 
 def test_build_message_for_booking_confirmed_builds_subject_body_and_link(
     salon, customer, specialist, service
 ):
-    appointment = make_appointment(
-        salon=salon,
-        customer=customer,
-        specialist=specialist,
-        service=service,
-        start=APPOINTMENT_START,
-    )
+    appointment = _guest_appointment(salon, customer, specialist, service)
     notification = _make_notification(salon, customer=customer, appointment=appointment)
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Your booking is confirmed"
+    assert subject == "Your booking at Bella Demo Salon is confirmed"
     assert "Bella Demo Salon" in body
-    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
-    manage_link = (
-        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
-        f"/manage/{derive_guest_token(appointment.id)}/"
-    )
-    assert manage_link in body
-    assert "View or cancel" in body
+    # 2026-09-26 11:00 UTC is Saturday 14:00 in Kyiv (EEST).
+    assert "When: Saturday, 26 September 2026, 14:00" in body.splitlines()
+    assert _manage_link(salon, appointment) in body.splitlines()
+    assert "View or cancel your booking:" in body.splitlines()
 
 
 def test_build_message_for_booking_confirmed_link_carries_the_re_derived_token(
     salon, customer, specialist, service
 ):
-    appointment = make_appointment(
-        salon=salon,
-        customer=customer,
-        specialist=specialist,
-        service=service,
-        start=APPOINTMENT_START,
-    )
+    appointment = _guest_appointment(salon, customer, specialist, service)
     notification = _make_notification(salon, customer=customer, appointment=appointment)
 
     with tenant_context(salon.id):
-        _subject, body = _build_message(notification)
+        _subject, body = _build_message(notification, now=NOW)
 
     expected_token = derive_guest_token(appointment.id)
     expected_link = (
         f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
-        f"/manage/{expected_token}/"
+        f"/manage#token={expected_token}"
     )
-    assert expected_link in body
+    assert expected_link in body.splitlines()
 
 
 def test_build_message_raises_for_booking_confirmed_without_an_appointment(salon, customer):
     notification = _make_notification(salon, customer=customer, appointment=None)
 
     with tenant_context(salon.id), pytest.raises(ValueError, match="appointment"):
-        _build_message(notification)
+        _build_message(notification, now=NOW)
 
 
 # --- _build_message for APPOINTMENT_REMINDER (dynamic, mirrors BOOKING_CONFIRMED)
@@ -190,13 +198,7 @@ def test_build_message_raises_for_booking_confirmed_without_an_appointment(salon
 def test_build_message_for_appointment_reminder_builds_subject_body_and_link(
     salon, customer, specialist, service
 ):
-    appointment = make_appointment(
-        salon=salon,
-        customer=customer,
-        specialist=specialist,
-        service=service,
-        start=APPOINTMENT_START,
-    )
+    appointment = _guest_appointment(salon, customer, specialist, service)
     notification = _make_notification(
         salon,
         customer=customer,
@@ -205,24 +207,26 @@ def test_build_message_for_appointment_reminder_builds_subject_body_and_link(
     )
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Reminder: your appointment tomorrow"
-    assert "Bella Demo Salon" in body
-    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
-    manage_link = (
-        f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
-        f"/manage/{derive_guest_token(appointment.id)}/"
-    )
-    assert manage_link in body
-    assert "View or cancel your booking:" in body
-    # The exact body, including the required blank line between the two
-    # sentences (docs/DECISIONS.md § Step (e), email text). `salon.name`
-    # resolves to its English value for a customer with no preferred_language.
-    expected_body = (
-        f"This is a reminder of your appointment at Bella Demo Salon on "
-        f"{format_datetime_for_salon(appointment.start_datetime, salon.timezone)}.\n\n"
-        f"View or cancel your booking: {manage_link}"
+    assert subject == "Reminder: tomorrow at 14:00 at Bella Demo Salon"
+    # The exact body (docs/DECISIONS.md "Notifications", texts of
+    # APPOINTMENT_REMINDER). `salon.name` resolves to its English value for a
+    # customer with no preferred_language. No Payment here, so no "Pay at the
+    # visit" line; the fixture salon has no phone or address, so no contact
+    # line and the short last line.
+    expected_body = "\n".join(
+        [
+            "Hello, Alice!",
+            "This is a reminder of your booking tomorrow:",
+            "Service: Manicure",
+            "Specialist: Jane",
+            "When: Saturday, 26 September 2026, 14:00",
+            "If your plans have changed, you can cancel your booking here:",
+            _manage_link(salon, appointment),
+            "Bella Demo Salon",
+            "If you did not book at Bella Demo Salon, please let the salon know.",
+        ]
     )
     assert body == expected_body
 
@@ -230,13 +234,7 @@ def test_build_message_for_appointment_reminder_builds_subject_body_and_link(
 def test_build_message_for_appointment_reminder_link_carries_the_re_derived_token(
     salon, customer, specialist, service
 ):
-    appointment = make_appointment(
-        salon=salon,
-        customer=customer,
-        specialist=specialist,
-        service=service,
-        start=APPOINTMENT_START,
-    )
+    appointment = _guest_appointment(salon, customer, specialist, service)
     notification = _make_notification(
         salon,
         customer=customer,
@@ -245,14 +243,14 @@ def test_build_message_for_appointment_reminder_link_carries_the_re_derived_toke
     )
 
     with tenant_context(salon.id):
-        _subject, body = _build_message(notification)
+        _subject, body = _build_message(notification, now=NOW)
 
     expected_token = derive_guest_token(appointment.id)
     expected_link = (
         f"{settings.FRONTEND_URL.format(slug=salon.slug)}/appointments/{appointment.id}"
-        f"/manage/{expected_token}/"
+        f"/manage#token={expected_token}"
     )
-    assert expected_link in body
+    assert expected_link in body.splitlines()
 
 
 def test_build_message_raises_for_appointment_reminder_without_an_appointment(salon, customer):
@@ -264,16 +262,17 @@ def test_build_message_raises_for_appointment_reminder_without_an_appointment(sa
     )
 
     with tenant_context(salon.id), pytest.raises(ValueError, match="appointment"):
-        _build_message(notification)
+        _build_message(notification, now=NOW)
 
 
 # --- _build_message for BOOKING_CREATED (dynamic, mirrors BOOKING_CONFIRMED) --
 #
-# docs/DECISIONS.md § Stage 14 planning decisions: the payment link uses a
-# URL fragment, not a query parameter or a path segment —
+# docs/DECISIONS.md "Booking > Guest token": the payment link uses a URL
+# fragment, never a query parameter or a path segment —
 # build_salon_frontend_url(slug, "/booking/pay") +
-# f"#appointment_id={id}&token={token}" — unlike BOOKING_CONFIRMED/
-# APPOINTMENT_REMINDER's manage link, which is a path segment.
+# f"#appointment_id={id}&token={token}" — the same fragment form as
+# BOOKING_CONFIRMED/APPOINTMENT_REMINDER's manage link
+# (`/appointments/<id>/manage#token=<token>`).
 
 
 def test_build_message_for_booking_created_builds_subject_body_and_payment_link(
@@ -295,7 +294,7 @@ def test_build_message_for_booking_created_builds_subject_body_and_payment_link(
     )
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
     assert subject == "Your booking is created"
     assert "Bella Demo Salon" in body
@@ -327,7 +326,7 @@ def test_build_message_for_booking_created_link_carries_the_re_derived_token(
     )
 
     with tenant_context(salon.id):
-        _subject, body = _build_message(notification)
+        _subject, body = _build_message(notification, now=NOW)
 
     expected_token = derive_guest_token(appointment.id)
     expected_link = (
@@ -346,7 +345,7 @@ def test_build_message_raises_for_booking_created_without_an_appointment(salon, 
     )
 
     with tenant_context(salon.id), pytest.raises(ValueError, match="appointment"):
-        _build_message(notification)
+        _build_message(notification, now=NOW)
 
 
 # --- _build_message language resolution (docs/DECISIONS.md § "Notification
@@ -371,7 +370,7 @@ def test_build_message_static_trigger_renders_in_customer_preferred_language(sal
     )
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
     assert subject == "Ваш запис скасовано"
     assert body == "Ваш запис було скасовано."
@@ -396,13 +395,14 @@ def test_build_message_dynamic_branch_renders_in_customer_preferred_language(
     )
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Ваш запис підтверджено"
+    # The fixture salon has only an English name, so it resolves to that.
+    assert subject == "Ваш запис у Bella Demo Salon підтверджено"
     assert "підтверджено" in body
     assert "Переглянути або скасувати запис:" in body
-    # The interpolated datetime is rendered with the Ukrainian tables too.
-    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang="uk") in body
+    # The interpolated datetime is rendered with the Ukrainian full tables too.
+    assert "Коли: субота, 26 вересня 2026, 14:00" in body.splitlines()
 
 
 def test_build_message_for_booking_expired_renders_in_customer_preferred_language(salon):
@@ -412,7 +412,7 @@ def test_build_message_for_booking_expired_renders_in_customer_preferred_languag
     )
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
     assert subject == "Термін бронювання минув"
     assert body == (
@@ -427,7 +427,7 @@ def test_build_message_for_booking_expired_renders_in_english_by_default(salon):
     )
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
     assert subject == "Your booking has expired"
     assert body == "Your booking has expired because payment was not completed in time."
@@ -453,7 +453,7 @@ def test_build_message_for_booking_created_renders_in_customer_preferred_languag
     )
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
     assert subject == "Ваш запис створено"
     assert "створено" in body
@@ -468,7 +468,7 @@ def test_build_message_customer_less_notification_builds_in_english(salon):
     )
 
     with tenant_context(salon.id):
-        subject, body = _build_message(notification)
+        subject, body = _build_message(notification, now=NOW)
 
     assert subject == "Payment received"
     assert body == "We have received your deposit payment."
@@ -496,7 +496,7 @@ def test_send_notification_transitions_pending_to_sent_and_delivers_to_the_clien
     reloaded = _reload(salon, notification.id)
     assert reloaded.status == NotificationStatus.SENT
     assert reloaded.sent_at == NOW
-    subject, body = _build_message(notification)
+    subject, body = _build_message(notification, now=NOW)
     assert channel.sent == [(customer.email, subject, body)]
 
 
