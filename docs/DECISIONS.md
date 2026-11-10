@@ -87,6 +87,21 @@ Every open, deferred and gated item in one place, grouped by where it is
 due. One line each; the topic section named in brackets holds the detail.
 When an item is done, delete its line here and update its topic section.
 
+### In progress: guest manage page (decided 10.11.2026)
+
+Fixes two gaps: the manage link in `BOOKING_CONFIRMED` and
+`APPOINTMENT_REMINDER` is a 404 (no frontend route), and account bookings get
+the same guest-token link although they have no token. Each sub-step is its
+own RED/GREEN/commit, in this order:
+
+- (a) Backend: the guest detail and cancel responses gain the account list's
+  read-only fields. [Booking: guest token]
+- (b) Backend: the manage link moves to the fragment form; `BOOKING_CONFIRMED`
+  and `APPOINTMENT_REMINDER` choose between the manage page and `/client` from
+  the guest token row; the new texts of both emails, including full weekday
+  and genitive month tables in `core/formatting.py`. [Notifications]
+- (c) Frontend: the guest manage page. [Frontend: guest manage page]
+
 ### Before Stage 18
 
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
@@ -138,6 +153,9 @@ on top of it.
   retention, deletion), with the salon admin UI. [Assistant]
 - Starter FAQ template (health, payment, cancellation, preparation) that a
   new salon owner edits. [Assistant]
+- Guest manage page: a banner "create an account with this email to see all
+  your bookings in one place" (verifying that email links the old guest
+  bookings automatically). [Frontend: guest manage page]
 
 ### Stage 19
 
@@ -212,7 +230,9 @@ on top of it.
   connection.
 - Resume payment after lost frontend state; check first how much the
   "Оплатити" endpoint already covers.
-- 0% deposit flow, and what WayForPay does with a 0.00 amount.
+- 0% deposit flow, and what WayForPay does with a 0.00 amount. When it is
+  decided, revisit the "Передоплата: X (сплачено)" line of the
+  `BOOKING_CONFIRMED` email. [Notifications]
 
 ### Stage 22 (productionization)
 
@@ -296,11 +316,11 @@ on top of it.
   ends up at `/login` (known limitation).
 - The `/client` layout does not check the role, so an admin Account can reach
   client pages.
-- Account bookings: `APPOINTMENT_REMINDER` and `BOOKING_CONFIRMED` still build
-  guest-token links; decide what an account booking should link to (as was
-  done for `BOOKING_CREATED`).
 - Cancel link in the email-change notice to the old address.
 - Shared appointment-email builder refactor.
+- `BOOKING_CANCELLED` email is static ("Ваш запис було скасовано.") and does
+  not say whether the deposit will be refunded; rewrite it in the style of
+  the new `BOOKING_CONFIRMED` email. [Notifications]
 - More BellaBeauty FAQ items (salon content, not code).
 
 ### Deliberately not scheduled
@@ -325,10 +345,6 @@ on top of it.
 
 ### Found 10.11.2026 in the docs-cleanup code check, target to decide
 
-- Guest manage link is dead: the `BOOKING_CONFIRMED` and
-  `APPOINTMENT_REMINDER` emails link to `/appointments/<id>/manage/<token>/`,
-  and no frontend route or rewrite exists for it, so the link is a 404. After
-  payment a guest has no way to view or cancel the booking from the email.
 - `REVIEW_REQUEST` is never dispatched: the message text exists, but the
   `CONFIRMED -> COMPLETED` sweep sends nothing. Docs claimed the email fires on
   completion (`ARCHITECTURE.md` § 12); corrected in the cleanup.
@@ -716,11 +732,26 @@ functions touch the ORM and need tenant context.
   a test walks every URL using it. General rule in `CLAUDE.md`.
 - **Transport:** the `X-Guest-Token` header (a custom header, so these
   endpoints have no CSRF surface). Rate limit `guest_token` 20/min per IP.
-- **Links in emails:** the payment link puts id and token in the URL
-  fragment (`/booking/pay#appointment_id=...&token=...`); the manage link
-  puts the token in the path (`/appointments/<id>/manage/<token>/`, a
-  persistent resource link, never a query string). The manage page does not
-  exist yet (see register).
+- **Only guest bookings get a token;** account bookings never do (see
+  "Account booking"). The token row is therefore the record of how a booking
+  was made, which the emails sent without a creating call site rely on (see
+  "Notifications").
+- **Links in emails carry the token in the URL fragment,** never in the path
+  or a query string: the payment link
+  `/booking/pay#appointment_id=...&token=...`, the manage link
+  `/appointments/<id>/manage#token=...` (decided 10.11.2026). Reason: a path
+  reaches the frontend server's request log (confirmed on the dev server,
+  which logs every request path); a fragment is never sent to a server. The
+  earlier reason for a path (no client page existed to read a fragment) no
+  longer holds. Links in the old path form stop working, accepted because
+  there are no real customers yet.
+- **Guest detail and cancel responses** (`GET guest/appointments/<id>/`,
+  `POST guest/appointments/<id>/cancel/`) carry the same read-only fields as
+  the account list (see "Account dashboard data"): `specialist` and
+  `service` as `{id, name}` resolved per `?lang=`, the price
+  (`service_price_at_booking`), `deposit_amount`, `amount_due_at_visit`,
+  `currency`, `deposit_outcome`, `refund_deadline`. Never the customer's
+  name, email or phone: the manage page can be opened from a forwarded email.
 
 ### Cancellation
 
@@ -863,12 +894,21 @@ functions touch the ORM and need tenant context.
   always `CONFIRMED` then), `BOOKING_CANCELLED`, `BOOKING_EXPIRED`,
   `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `APPOINTMENT_REMINDER`.
   `REVIEW_REQUEST` has message text but is never dispatched (see register).
-- **`BOOKING_CREATED` link depends on how the booking was made:** guest
-  bookings link to `/booking/pay#...` with the guest token, account bookings
-  to `/client`. The mode is passed explicitly by the creating call site and
-  persisted as `Notification.booking_link_mode` (the email is built later, in
-  another process); a missing or unknown mode raises, never falls back to the
-  guest link. Never inferred from whether the Customer has an Account.
+- **The link in a booking email depends on how the booking was made,** never
+  inferred from whether the Customer has an Account. Two mechanisms, kept on
+  purpose (10.11.2026):
+  - `BOOKING_CREATED`: guest bookings link to `/booking/pay#...` with the
+    guest token, account bookings to `/client`. It has a creating call site,
+    which passes the mode explicitly; it is persisted as
+    `Notification.booking_link_mode` (the email is built later, in another
+    process). A missing or unknown mode raises, never falls back to the guest
+    link.
+  - `BOOKING_CONFIRMED` and `APPOINTMENT_REMINDER`: an appointment with a
+    guest token row links to the manage page
+    (`/appointments/<id>/manage#token=...`), one without to `/client`. They
+    are sent by the payment webhook and the reminder sweep, which do not know
+    how the booking was made; a guest token row exists only for guest
+    bookings, so it is the record of that.
 - **Reminder:** one day-before reminder per appointment, hourly sweep,
   window `start in (now+24h, now+25h]`, `CONFIRMED` only (a bare filter, not
   `ACTIVE_APPOINTMENT_STATUSES`: that set drives the double-booking
@@ -882,7 +922,83 @@ functions touch the ORM and need tenant context.
   link); `appointment=None` raises `ValueError` (a background task with a
   missing appointment is a bug, not a blank send). Dates come from
   `core/formatting.py` with hardcoded weekday and month tables, never
-  `%a`/`%b` (OS locale).
+  `%a`/`%b` (OS locale); `BOOKING_CONFIRMED` and `APPOINTMENT_REMINDER` use
+  the full weekday and the month name in the genitive ("10 листопада").
+- **Texts of `BOOKING_CONFIRMED` and `APPOINTMENT_REMINDER`** (decided
+  10.11.2026). Amounts use the currency code for now; the greeting uses
+  `Customer.name` exactly as entered, not declined; the `<phone> · <address>`
+  line leaves out an empty contact and is omitted when both are empty. The
+  last line is the "за номером вище" / "at the number above" variant only
+  when the salon has a phone.
+
+  ```
+  Subject: Ваш запис у <salon> підтверджено
+  Вітаємо, <name>!
+  Ваш запис підтверджено:
+  Послуга: <service>
+  Майстер: <specialist>
+  Коли: <weekday>, <day> <month> <year>, <time>
+  Тривалість: <duration>
+  Передоплата: <deposit> (сплачено)
+  Оплата при візиті: <amount due>
+  Скасувати запис з поверненням передоплати можна не пізніше ніж за 24 години до візиту, тобто до <time> <weekday>, <day> <month>. Пізніше передоплата не повертається.
+  Переглянути або скасувати запис:
+  <link>
+  <salon>
+  <phone> · <address>
+  Якщо ви не записувалися в <salon>, будь ласка, повідомте салон за номером вище.
+  (no phone: Якщо ви не записувалися в <salon>, будь ласка, повідомте салон.)
+
+  Subject: Your booking at <salon> is confirmed
+  Hello, <name>!
+  Your booking is confirmed:
+  Service: <service>
+  Specialist: <specialist>
+  When: <weekday>, <day> <month> <year>, <time>
+  Duration: <duration>
+  Deposit: <deposit> (paid)
+  Pay at the visit: <amount due>
+  You can cancel with a refund of the deposit no later than 24 hours before the visit, that is until <time> on <weekday>, <day> <month>. After that the deposit is not refunded.
+  View or cancel your booking:
+  <link>
+  <salon>
+  <phone> · <address>
+  If you did not book at <salon>, please let the salon know at the number above.
+  (no phone: If you did not book at <salon>, please let the salon know.)
+  ```
+
+  ```
+  Subject: Нагадування: завтра о <time> у <salon>
+  Вітаємо, <name>!
+  Нагадуємо про ваш запис завтра:
+  Послуга: <service>
+  Майстер: <specialist>
+  Коли: <weekday>, <day> <month> <year>, <time>
+  Оплата при візиті: <amount due>
+  Якщо плани змінились, скасувати запис можна за посиланням:
+  <link>
+  <salon>
+  <phone> · <address>
+  Якщо ви не записувалися в <salon>, будь ласка, повідомте салон за номером вище.
+  (no phone: Якщо ви не записувалися в <salon>, будь ласка, повідомте салон.)
+
+  Subject: Reminder: tomorrow at <time> at <salon>
+  Hello, <name>!
+  This is a reminder of your booking tomorrow:
+  Service: <service>
+  Specialist: <specialist>
+  When: <weekday>, <day> <month> <year>, <time>
+  Pay at the visit: <amount due>
+  If your plans have changed, you can cancel your booking here:
+  <link>
+  <salon>
+  <phone> · <address>
+  If you did not book at <salon>, please let the salon know at the number above.
+  (no phone: If you did not book at <salon>, please let the salon know.)
+  ```
+
+  The reminder deliberately does not mention the refund deadline: it arrives
+  24-25 hours before the visit, when the deadline is about to pass.
 - **Language:** the recipient Customer's `preferred_language` through
   `resolve_language_code` (`en` fallback); salon-directed alerts are English.
   `_MESSAGES` is `{trigger: {lang: (subject, body)}}`.
@@ -1250,6 +1366,25 @@ generated OpenAPI client). Pins: see "Dependency pins".
   the list has at least one appointment; the list has bottom padding so
   nothing hides under it.
 
+### Guest manage page (`/appointments/<id>/manage`)
+
+Decided 10.11.2026; being built (see register).
+
+- **Token from the fragment** (`#token=...`): the page reads it, removes it
+  from the address bar and history (`history.replaceState`) and keeps it only
+  for the life of the tab. The page sends `Referrer-Policy: no-referrer`. Why
+  the fragment: see "Guest token".
+- **Shows:** service, specialist, salon-local date and time, duration; price,
+  deposit paid, amount due at the visit (all amounts from the backend).
+- **"Скасувати запис"**: the confirmation uses exactly the same texts as the
+  client dashboard, chosen from `refund_deadline`; after cancelling, the same
+  deposit-outcome labels as the dashboard.
+- **States:** cancelled (with the deposit outcome); completed ("Дякуємо за
+  візит"); no-show or past (a short message, no actions); invalid or expired
+  link (the same message as `/booking/pay` and a link to the salon home
+  page; the public salon info endpoint is not widened for this).
+- No review button, no rescheduling, no assistant widget.
+
 ---
 
 ## AI assistant: backend
@@ -1546,8 +1681,8 @@ design pass. Mockups: Design canvas, row "Stage 17: віджет асистен�
 
 - **Allowlist of pages** (exact paths): `/`, `/services`, `/specialists`,
   `/specialists/<id>`, `/reviews`, `/booking` (all steps). Not on
-  `/booking/pay`, auth pages, `/client/**`, `/admin`. A new page has no
-  widget until added.
+  `/booking/pay`, `/appointments/<id>/manage`, auth pages, `/client/**`,
+  `/admin`. A new page has no widget until added.
 - **Mounted in the root layout** by a server loader (salon info fetched with
   `lang=uk`). The loader renders nothing on a missing slug, a failed fetch or
   `assistant_enabled=false`, so it can never break other pages. The widget

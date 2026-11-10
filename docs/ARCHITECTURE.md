@@ -158,12 +158,15 @@ customer supplies name/email/phone; the `accounts` service layer does a `salon`-
 get-or-create on `Customer` by email (per `docs/DECISIONS.md`, email is unique per
 salon, so a returning guest's unlinked row is updated; a row linked to an Account keeps
 its name and phone). The guest token is a deterministic signed value over the
-appointment id (`booking/guest_tokens.py`), so emails can re-derive it. The payment link
-carries it in the URL fragment (`/booking/pay#appointment_id=...&token=...`); the
-confirmation and reminder emails carry it in the URL **path** on the salon's subdomain
-(`/appointments/<id>/manage/<token>/`), never a query string: a persistent resource
-link, not a one-time credential. The frontend page for that manage link does not exist
-yet (see the register in `docs/DECISIONS.md`). The API receives the token in the
+appointment id (`booking/guest_tokens.py`), so emails can re-derive it; only guest
+bookings get one. Email links on the salon's subdomain carry it in the URL **fragment**,
+never the path or a query string, so it never reaches a server log: the payment link
+`/booking/pay#appointment_id=...&token=...`, and the manage link in the confirmation and
+reminder emails `/appointments/<id>/manage#token=...`, whose page removes the token from
+the address bar once read. Confirmation and reminder emails for an appointment with no
+guest token (an account booking) link to `/client` instead; the token row, not whether
+the Customer has an Account, decides. The manage page and this link choice are in
+progress (see the register in `docs/DECISIONS.md`). The API receives the token in the
 `X-Guest-Token` header. A `GuestAccessToken` row stores the SHA-256
 hash of the signed token (`token_hash`), an `expires_at` (30 days after
 `Appointment.end_datetime`), and a nullable `cancelled_via_token_at`. The API
