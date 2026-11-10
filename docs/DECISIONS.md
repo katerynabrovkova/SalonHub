@@ -87,21 +87,6 @@ Every open, deferred and gated item in one place, grouped by where it is
 due. One line each; the topic section named in brackets holds the detail.
 When an item is done, delete its line here and update its topic section.
 
-### In progress: guest manage page (decided 10.11.2026)
-
-Fixes two gaps: the manage link in `BOOKING_CONFIRMED` and
-`APPOINTMENT_REMINDER` is a 404 (no frontend route), and account bookings get
-the same guest-token link although they have no token. Each sub-step is its
-own RED/GREEN/commit, in this order:
-
-- (a) ✓ Backend: the guest detail and cancel responses gain the account list's
-  read-only fields. [Booking: guest token]
-- (b) ✓ Backend: the manage link moves to the fragment form; `BOOKING_CONFIRMED`
-  and `APPOINTMENT_REMINDER` choose between the manage page and `/client` from
-  the guest token row; the new texts of both emails, including full weekday
-  and genitive month tables in `core/formatting.py`. [Notifications]
-- (c) Frontend: the guest manage page. [Frontend: guest manage page]
-
 ### Before Stage 18
 
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
@@ -1389,7 +1374,7 @@ generated OpenAPI client). Pins: see "Dependency pins".
 
 ### Guest manage page (`/appointments/<id>/manage`)
 
-Decided 10.11.2026; being built (see register).
+Decided 10.11.2026.
 
 - **Token from the fragment** (`#token=...`): the page reads it, removes it
   from the address bar and history (`history.replaceState`) and keeps it only
@@ -1400,6 +1385,12 @@ Decided 10.11.2026; being built (see register).
 - **"Скасувати запис"**: the confirmation uses exactly the same texts as the
   client dashboard, chosen from `refund_deadline`; after cancelling, the same
   deposit-outcome labels as the dashboard.
+- **A cancel that fails:** a 409 (the booking changed meanwhile) or a 400
+  (the token's cancel capability already spent, or the link expired) reloads
+  the detail and shows what it returns, the real state or the invalid-link
+  message, never a connection error; any other failure shows "Не вдалося
+  скасувати запис. Перевірте інтернет і спробуйте ще раз." and keeps the
+  button.
 - **States:** cancelled (with the deposit outcome); completed ("Дякуємо за
   візит"); no-show or past (a short message, no actions); invalid or expired
   link (the same message as `/booking/pay` and a link to the salon home

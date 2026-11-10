@@ -165,8 +165,7 @@ never the path or a query string, so it never reaches a server log: the payment 
 reminder emails `/appointments/<id>/manage#token=...`, whose page removes the token from
 the address bar once read. Confirmation and reminder emails for an appointment with no
 guest token (an account booking) link to `/client` instead; the token row, not whether
-the Customer has an Account, decides. The manage page and this link choice are in
-progress (see the register in `docs/DECISIONS.md`). The API receives the token in the
+the Customer has an Account, decides. The API receives the token in the
 `X-Guest-Token` header. A `GuestAccessToken` row stores the SHA-256
 hash of the signed token (`token_hash`), an `expires_at` (30 days after
 `Appointment.end_datetime`), and a nullable `cancelled_via_token_at`. The API
