@@ -71,38 +71,14 @@ class SalonLocalDateTimeField(serializers.Field):
         return value.isoformat()
 
 
-class AppointmentGuestSerializer(serializers.ModelSerializer):
-    """Read-only representation for the guest view/cancel endpoints (booking/views.py)."""
-
-    start_datetime = SalonLocalDateTimeField()
-    end_datetime = SalonLocalDateTimeField()
-
-    class Meta:
-        model = Appointment
-        fields = [
-            "id",
-            "status",
-            "start_datetime",
-            "end_datetime",
-            "specialist",
-            "service",
-            "cancelled_at",
-            "cancelled_by",
-            "cancellation_reason",
-        ]
-        read_only_fields = fields
-
-
 class AppointmentSpecialistSerializer(serializers.ModelSerializer):
     """
-    The `specialist` block on AppointmentAccountSerializer, below --
-    `{id, name}` with `name` resolved for the request's `?lang=`. Mirrors
+    The `specialist` block on _AppointmentCustomerViewBase, below (so on
+    both the account and the guest appointment serializers) -- `{id, name}`
+    with `name` resolved for the request's `?lang=`. Mirrors
     `reviews.serializers.ReviewSpecialistSerializer`'s identical shape/
     resolution, not reused directly: booking does not depend on reviews (the
-    reverse dependency already exists -- reviews imports `booking.models`),
-    and this app's own established convention is a separate serializer per
-    read surface even with overlapping shape (AppointmentAccountSerializer's
-    own docstring, "kept as a separate class... free to diverge later").
+    reverse dependency already exists -- reviews imports `booking.models`).
     """
 
     name = serializers.SerializerMethodField()
@@ -119,7 +95,7 @@ class AppointmentSpecialistSerializer(serializers.ModelSerializer):
 
 
 class AppointmentServiceSerializer(serializers.ModelSerializer):
-    """The `service` block on AppointmentAccountSerializer -- see
+    """The `service` block on _AppointmentCustomerViewBase -- see
     AppointmentSpecialistSerializer's docstring, same reasoning/shape."""
 
     name = serializers.SerializerMethodField()
@@ -139,8 +115,9 @@ def _refund_deadline_or_none(appointment: Appointment) -> dt.datetime | None:
     """
     When a customer cancellation stops being refund-eligible
     (docs/DECISIONS.md § Stage 15 planning, item 14 design details), for
-    AppointmentAccountSerializer's `refund_deadline`. A deadline, not a
-    boolean: the dashboard compares it with the clock at click time, so a
+    _AppointmentCustomerViewBase's `refund_deadline`. A deadline, not a
+    boolean: the dashboard and the guest manage page compare it with the
+    clock at click time, so a
     page left open across the boundary still words its confirm dialog
     correctly. Derived from `booking.services.refund_deadline`, the same rule
     `cancel_appointment` evaluates at cancel time, which remains the final
@@ -162,18 +139,18 @@ def _refund_deadline_or_none(appointment: Appointment) -> dt.datetime | None:
     return refund_deadline(appointment.start_datetime)
 
 
-class AppointmentAccountSerializer(serializers.ModelSerializer):
+class _AppointmentCustomerViewBase(serializers.ModelSerializer):
     """
-    Read-only representation for AccountAppointmentListView and
-    AccountAppointmentCancelView (docs/DECISIONS.md § Stage 15 planning,
-    items 1 and 4). Kept as a separate class from AppointmentGuestSerializer,
-    not reused, since the two endpoints have different identities/permissions
-    and are free to diverge later.
+    The computed read-only fields a customer sees about their own
+    appointment, shared by AppointmentAccountSerializer (the account list and
+    cancel) and AppointmentGuestSerializer (the guest-token detail and
+    cancel), so the two can never compute a value differently
+    (docs/DECISIONS.md § "Booking > Guest token", "Guest detail and cancel
+    responses"). Never used on its own: each subclass names in its own
+    `Meta.fields` which of these it returns (DRF does not require a field
+    declared on a parent class to be listed).
 
-    Carries the raw price/deposit snapshot fields (`service_price_at_booking`,
-    `deposit_percentage_at_booking`) plus `deposit_amount` and `currency`
-    (docs/DECISIONS.md § "Price and prepayment on dashboard cards", point
-    1). `deposit_amount` is `Payment.amount` when a Payment exists,
+    `deposit_amount` is `Payment.amount` when a Payment exists,
     otherwise `payments.services.compute_deposit_amount` -- the same helper
     `initiate_payment` charges with, made public for this so the rounding
     rule exists once -- and `null` whenever the deposit is 0 (a 0%
@@ -190,25 +167,22 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     recomputed from the cancellation rules here (§ "Persisted refund
     decision (`Payment.refund_due`)").
 
-    `payment_status`/`payment_amount`/`amount_due_at_visit` read the
-    OneToOneField reverse accessor `appointment.payment`
-    (payments/models.py's `Payment.appointment`), which raises
-    `Payment.DoesNotExist` when no Payment row exists rather than returning
-    `None` -- `_payment()` below guards every read with
-    `getattr(appointment, "payment", None)`. Both value fields serialize to
-    `null` (never a placeholder like `0`/`"none"`) when no Payment exists,
-    matching this codebase's established null-means-absence convention
+    Every Payment read goes through the OneToOneField reverse accessor
+    `appointment.payment` (payments/models.py's `Payment.appointment`), which
+    raises `Payment.DoesNotExist` when no Payment row exists rather than
+    returning `None` -- `_payment()` below guards every read with
+    `getattr(appointment, "payment", None)`. Value fields serialize to
+    `null` (never a placeholder like `0`/`"none"`) when there is nothing to
+    show, matching this codebase's established null-means-absence convention
     (`Payment.refund_initiated_at`, `Specialist.photo`).
 
-    `payment_amount`/`amount_due_at_visit` return `str(...)` of their
-    `Decimal`, not a bare `Decimal`: a `SerializerMethodField` has no
-    `to_representation` coercion of its own, so an un-stringified `Decimal`
-    renders as a bare JSON number (verified:
-    `JSONRenderer().render({"x": Decimal("12.34")})` -> `b'{"x":12.34}'`) --
-    inconsistent with `service_price_at_booking`/`deposit_percentage_at_booking`
-    above, real `DecimalField`s whose own `to_representation` always
-    produces a string (`"12.34"`). `str()` here makes every money field on
-    this serializer serialize the same way.
+    Money method fields return `str(...)` of their `Decimal`, not a bare
+    `Decimal`: a `SerializerMethodField` has no `to_representation` coercion
+    of its own, so an un-stringified `Decimal` renders as a bare JSON number
+    (verified: `JSONRenderer().render({"x": Decimal("12.34")})` ->
+    `b'{"x":12.34}'`) -- inconsistent with `service_price_at_booking`, a real
+    `DecimalField` whose own `to_representation` always produces a string
+    (`"12.34"`). `str()` makes every money field serialize the same way.
 
     `amount_due_at_visit` is computed here, in Python, rather than left for
     the frontend: it's a plain subtraction of two values the backend
@@ -217,25 +191,20 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     server-side keeps the "what does this client still owe" rule in one
     place -- the same reasoning that keeps `compute_deposit_amount`'s
     rounding logic out of the frontend (payments/services.py), just for a
-    trivial case of it. The queryset this serializer runs against
-    (`AccountAppointmentListView.get_queryset`) adds
-    `select_related("payment", ..., "salon")`, so these fields and
-    `deposit_amount`/`currency` cost no extra query per row across a list.
+    trivial case of it.
 
     `specialist`/`service` are nested `AppointmentSpecialistSerializer`/
-    `AppointmentServiceSerializer` (`{id, name}`), not the default
-    `ModelSerializer` FK behavior (a bare pk) -- the client dashboard needs
-    a display name per card, not just an id (docs/DECISIONS.md § Stage 15
-    planning, item 4). Reading `.name` on each traverses the FK, so
-    `AccountAppointmentListView.get_queryset()` also adds
-    `select_related("specialist", "service")` alongside `"payment"`, for the
-    same N+1 reason, and `"salon"` for SalonLocalDateTimeField's time zone.
+    `AppointmentServiceSerializer` (`{id, name}`, name resolved per
+    `?lang=`), not the default `ModelSerializer` FK behavior (a bare pk) --
+    a customer needs a display name, not just an id (docs/DECISIONS.md §
+    Stage 15 planning, item 4). A list view using a subclass must
+    `select_related("payment", "specialist", "service", "salon")` so these
+    fields, and SalonLocalDateTimeField's time zone, cost no query per row
+    (see `AccountAppointmentListView.get_queryset`).
     """
 
     specialist = AppointmentSpecialistSerializer()
     service = AppointmentServiceSerializer()
-    payment_status = serializers.SerializerMethodField()
-    payment_amount = serializers.SerializerMethodField()
     amount_due_at_visit = serializers.SerializerMethodField()
     deposit_amount = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
@@ -244,40 +213,8 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
     end_datetime = SalonLocalDateTimeField()
     refund_deadline = SalonLocalDateTimeField(value_from=_refund_deadline_or_none)
 
-    class Meta:
-        model = Appointment
-        fields = [
-            "id",
-            "status",
-            "start_datetime",
-            "end_datetime",
-            "specialist",
-            "service",
-            "cancelled_at",
-            "cancelled_by",
-            "cancellation_reason",
-            "service_price_at_booking",
-            "deposit_percentage_at_booking",
-            "payment_status",
-            "payment_amount",
-            "amount_due_at_visit",
-            "deposit_amount",
-            "currency",
-            "deposit_outcome",
-            "refund_deadline",
-        ]
-        read_only_fields = fields
-
     def _payment(self, appointment: Appointment) -> Payment | None:
         return getattr(appointment, "payment", None)
-
-    def get_payment_status(self, appointment: Appointment) -> str | None:
-        payment = self._payment(appointment)
-        return payment.status if payment is not None else None
-
-    def get_payment_amount(self, appointment: Appointment) -> str | None:
-        payment = self._payment(appointment)
-        return str(payment.amount) if payment is not None else None
 
     def get_amount_due_at_visit(self, appointment: Appointment) -> str | None:
         payment = self._payment(appointment)
@@ -314,6 +251,85 @@ class AppointmentAccountSerializer(serializers.ModelSerializer):
         ):
             return "withheld"
         return None
+
+
+class AppointmentAccountSerializer(_AppointmentCustomerViewBase):
+    """
+    Read-only representation for AccountAppointmentListView and
+    AccountAppointmentCancelView (docs/DECISIONS.md § Stage 15 planning,
+    items 1 and 4). The computed fields come from _AppointmentCustomerViewBase,
+    shared with AppointmentGuestSerializer; on top of those this adds the raw
+    `deposit_percentage_at_booking` snapshot and the Payment's own
+    `payment_status`/`payment_amount` (null without a Payment), which the
+    dashboard reads and the guest responses do not carry.
+    """
+
+    payment_status = serializers.SerializerMethodField()
+    payment_amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Appointment
+        fields = [
+            "id",
+            "status",
+            "start_datetime",
+            "end_datetime",
+            "specialist",
+            "service",
+            "cancelled_at",
+            "cancelled_by",
+            "cancellation_reason",
+            "service_price_at_booking",
+            "deposit_percentage_at_booking",
+            "payment_status",
+            "payment_amount",
+            "amount_due_at_visit",
+            "deposit_amount",
+            "currency",
+            "deposit_outcome",
+            "refund_deadline",
+        ]
+        read_only_fields = fields
+
+    def get_payment_status(self, appointment: Appointment) -> str | None:
+        payment = self._payment(appointment)
+        return payment.status if payment is not None else None
+
+    def get_payment_amount(self, appointment: Appointment) -> str | None:
+        payment = self._payment(appointment)
+        return str(payment.amount) if payment is not None else None
+
+
+class AppointmentGuestSerializer(_AppointmentCustomerViewBase):
+    """
+    Read-only representation for the guest-token detail and cancel endpoints
+    (booking/views.py), the data of the guest manage page (docs/DECISIONS.md
+    § "Booking > Guest token", "Guest detail and cancel responses"). The
+    computed fields come from _AppointmentCustomerViewBase, shared with
+    AppointmentAccountSerializer. Never the customer's name, email or phone:
+    the page can be opened from a forwarded email.
+    """
+
+    class Meta:
+        model = Appointment
+        fields = [
+            "id",
+            "status",
+            "start_datetime",
+            "end_datetime",
+            "specialist",
+            "service",
+            "cancelled_at",
+            "cancelled_by",
+            "cancellation_reason",
+            "service_price_at_booking",
+            "deposit_amount",
+            "amount_due_at_visit",
+            "currency",
+            "deposit_outcome",
+            "refund_deadline",
+        ]
+        read_only_fields = fields
 
 
 class SpecialistOrAnyField(serializers.PrimaryKeyRelatedField):
