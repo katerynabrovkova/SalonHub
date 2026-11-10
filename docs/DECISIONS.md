@@ -40,7 +40,7 @@ current stage. `Stage N` references elsewhere point at this list.
 14. Frontend booking flow + payment + confirmation ✓
 15. Frontend customer account + guest token management ✓ (20.10.2026)
 16. AI assistant backend ✓ (27.10.2026)
-17. AI assistant frontend widget
+17. AI assistant frontend widget ✓ (10.11.2026)
     Before Stage 18: plan the roadmap gap (see "Open item: roadmap gap");
     the design pass does not start until that plan is recorded.
 18. Admin shell + dashboard + appointments list
@@ -7603,7 +7603,29 @@ items already assigned to Stage 17 elsewhere in this section.
     - the privacy policy page [Stage 16 "Open items"]. The condition
       stays: the assistant is not enabled for real customers without it;
     - Next 16 deprecates the middleware file convention in favour of
-      proxy; rename `middleware.ts` before it is removed.
+      proxy; rename `middleware.ts` before it is removed;
+    - **Assistant quality before launch** [Stage 17, 17.10; decided
+      10.11.2026]: a gate before production. The 17.8 polish stopped
+      there; the remaining assistant quality work happens here, before
+      the assistant is enabled for real customers. Open questions:
+      - the model and reasoning effort: today `gpt-6-luna` with effort
+        `low` (see "Sub-step 10 details"); an experiment with `medium` is
+        planned;
+      - the budget per salon;
+      - architecture: give the model a snapshot of the whole salon
+        (services, specialists with bios and hours, FAQ, contacts) in the
+        instructions instead of fetching everything through tools. Found
+        when the assistant missed that Олена does nail design, which is
+        only in her bio. Questions to answer then: size in tokens, cost
+        with prompt caching, latency, a cap for large salons, and strict
+        per-salon assembly with a two-salon test.
+
+      Live issues seen in 17.8 that remain: the assistant reads data
+      narrowly, for example it says "майстрині не працюють" when only the
+      specialist for that service is off; it missed Олена's nail design
+      (above). The items from the last Stage 16 manual check ("Overall
+      tone", "'Any' with only one specialist", "Ви працюєте в неділю?",
+      "After 17") have no recorded result after 17.8; recheck them here.
   - Deliberately not scheduled:
     - human handoff and a knowledge base that learns from staff answers
       [Stage 16 "Deferred"]: needs the deferred second notification
@@ -8707,7 +8729,8 @@ Each sub-step is its own recon, RED, GREEN and commit cycle.
   keyboard dictation, and not worth the time now. Moved to "Later
   features" under "Agreed stage order". The number is not reused.
 - **17.10 Stage 17 closure:** comes right after 17.8. It keeps its number
-  so existing references stay valid.
+  so existing references stay valid. Done 10.11.2026: see "Stage 17
+  closure (10.11.2026)".
 
 ### Open item: roadmap gap
 
@@ -8721,3 +8744,81 @@ Business model: still open. Current leaning (Katya, 30.10.2026): a
 recurring subscription per salon (monthly or yearly), with the platform
 hosting and maintaining each salon's site, rather than a one-off site
 sale. Not decided; settle it when the gap is planned.
+
+### Stage 17 closure (10.11.2026)
+
+- **Closed 10.11.2026** (17.10). The 17.8 assistant polish stops here;
+  further assistant quality work moves to the gate "Assistant quality
+  before launch" (Stage 22 group of the Stage 17 triage list in "Stage 16
+  closure"). Marked ✓ in "Agreed stage order".
+- **Built** (details in "Stage 17 sub-step order"):
+  - 17.1 Backend opening fixes: active-only
+    `SpecialistsAtTimeQuerySerializer`, the engine's salon guard, the
+    `accounts/tokens.py` docstring, the salon name in the salon API.
+  - 17.2 Backend for the widget: status events, proposal cards stored in
+    history, the blocked `safety_identifier` error code.
+  - 17.3 Widget shell: the salon header taken from the host only, the
+    server loader with the page allowlist, stripe, small window, side
+    panel and minimise.
+  - 17.4 Conversation: the NDJSON stream, session id after `done`,
+    history after a reload, the expired-conversation notice.
+  - 17.5 Statuses and errors: step texts, the failure table and
+    "Повторити".
+  - 17.6 Card and booking: the proposal card, the site-wide navigation
+    progress bar, the dimmed booking step, phone minimise after a card
+    click, `source=assistant` in both booking forms.
+  - 17.7 Expired conversation, draft and interface details: dividers,
+    draft, open state and pending turn after a reload, step 4 on a full
+    load, stripe after hydration, history retry, scrolling, starter
+    questions, the AI notice.
+  - 17.8 Assistant polish: no greeting from the model, the feminine
+    assistant in the instructions and widget texts, service names in the
+    customer's language, the only free specialist named on the card, the
+    FAQ checked first, the demo salon commands.
+  - 17.9 Voice input: not built; moved to "Later features".
+- **Final gates (fresh run, 10.11.2026):** backend `pytest` 1602
+  passed; `ruff check .` all checks passed; `ruff format --check .` 306
+  files already formatted; `mypy .` no issues in 191 source files.
+  Frontend `npm test` 1102 passed (86 files); `npm run lint` and
+  `npm run typecheck` exit 0.
+- **Not changed by the closure:** the assistant stays disabled for real
+  customers until the conditions already recorded are met: the privacy
+  policy page ("Open items" of Stage 16) and now the gate "Assistant
+  quality before launch".
+
+**Carried from Stage 17.**
+
+- Design pass (Stages 18-21):
+  - the widget's visual design; it was built with neutral styling
+    ("Stage 17 scope" in "Stage 16 closure");
+  - the colours of the amber failure block, borrowed from
+    `VerificationBanner` (17.7c);
+  - a styled tooltip for the desktop header buttons, if wanted (17.7c);
+  - the final look of the "↓" button (17.7i);
+  - price and deposit in the step 4 summary, found in the 17.7f recon
+    (deferred list under "Agreed stage order").
+- Salon settings stage (with the stage that first lets a salon edit its
+  own settings, at the latest Stage 22; see the Stage 17 triage list):
+  - assistant starters filled in for every language (17.7c);
+  - idea, not decided: the assistant's grammatical gender per salon
+    (17.8 D);
+  - lost update on salon settings (17.8).
+- Before production:
+  - "Assistant quality before launch" (17.10, Stage 22 group of the
+    triage list);
+  - the privacy page: the AI notice links to `/privacy`, which returns
+    404 until the Stage 22 page exists (block D, 17.7c).
+- Phone checks after deployment:
+  - the phone keyboard after sending, checked only in DevTools device
+    mode (17.7c);
+  - the AI notice against the iPhone home indicator
+    (`env(safe-area-inset-bottom)`, 0 until `viewport-fit=cover`; 17.7c);
+  - the keyboard changes the message list height without a scroll
+    event, so the 80 px bottom check is not re-run (17.7i).
+- Recorded in 17.x with no target:
+  - a step 4 submit for a specialist who no longer performs the service
+    shows the form's generic error; rare (17.6a known gap);
+  - a restored side panel shifts the page after load; accepted, revisit
+    if it proves annoying (17.7d);
+  - the 17.3a test helper `forwardedRequestHeaders` must be re-checked
+    whenever Next.js is upgraded.
