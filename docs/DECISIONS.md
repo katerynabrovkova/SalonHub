@@ -94,9 +94,9 @@ Fixes two gaps: the manage link in `BOOKING_CONFIRMED` and
 the same guest-token link although they have no token. Each sub-step is its
 own RED/GREEN/commit, in this order:
 
-- (a) Backend: the guest detail and cancel responses gain the account list's
+- (a) ✓ Backend: the guest detail and cancel responses gain the account list's
   read-only fields. [Booking: guest token]
-- (b) Backend: the manage link moves to the fragment form; `BOOKING_CONFIRMED`
+- (b) ✓ Backend: the manage link moves to the fragment form; `BOOKING_CONFIRMED`
   and `APPOINTMENT_REMINDER` choose between the manage page and `/client` from
   the guest token row; the new texts of both emails, including full weekday
   and genitive month tables in `core/formatting.py`. [Notifications]
@@ -318,6 +318,9 @@ on top of it.
   client pages.
 - Cancel link in the email-change notice to the old address.
 - Shared appointment-email builder refactor.
+- Guest bookings store no `Customer.preferred_language`, so every email to a
+  guest is in English; the booking forms should send the site language.
+  [Notifications]
 - `BOOKING_CANCELLED` email is static ("Ваш запис було скасовано.") and does
   not say whether the deposit will be refunded; rewrite it in the style of
   the new `BOOKING_CONFIRMED` email. [Notifications]
@@ -925,11 +928,29 @@ functions touch the ORM and need tenant context.
   `%a`/`%b` (OS locale); `BOOKING_CONFIRMED` and `APPOINTMENT_REMINDER` use
   the full weekday and the month name in the genitive ("10 листопада").
 - **Texts of `BOOKING_CONFIRMED` and `APPOINTMENT_REMINDER`** (decided
-  10.11.2026). Amounts use the currency code for now; the greeting uses
+  10.11.2026). Amounts use the currency code for now, whole amounts without
+  ".00" ("24 UAH"), others with cents ("24.50 UAH"), the same rule as the
+  assistant's replies; the day of the month has no leading zero, the hour
+  has one ("6 листопада 2026, 09:00"); the weekday of the Ukrainian
+  refund-deadline sentence is in the genitive ("до 14:00 п'ятниці, 13
+  листопада"); the greeting uses
   `Customer.name` exactly as entered, not declined; the `<phone> · <address>`
   line leaves out an empty contact and is omitted when both are empty. The
   last line is the "за номером вище" / "at the number above" variant only
-  when the salon has a phone.
+  when the salon has a phone. The greeting name is the appointment's
+  Customer (`appointment.customer.name`). Without a succeeded Payment the
+  builder omits the "Передоплата" / "Deposit" and "Оплата при візиті" /
+  "Pay at the visit" lines and the refund-deadline sentence, and never
+  raises: a raising build fails the send task, so the email would never be
+  sent. When the refund deadline has already passed at the moment the email
+  is built (a booking made less than 24 hours before the visit), the
+  deadline sentence is replaced by "До візиту менше 24 годин, тому при
+  скасуванні передоплата не повертається." / "There are less than 24 hours
+  before the visit, so the deposit is not refunded if you cancel.", the same
+  rule as the client dashboard's cancel dialog; decided with the cancel
+  flow's own comparison (`now <= refund_deadline`, the build moment passed
+  explicitly), so the email never promises a refund the cancel would refuse
+  (decided 10.11.2026, after the manual check).
 
   ```
   Subject: Ваш запис у <salon> підтверджено
