@@ -1,37 +1,28 @@
 # Backend Architecture
 
-This document is the detailed design for the backend, produced in Stage 1 (see the
-"Agreed stage order" in `docs/DECISIONS.md`). It describes *how* the system is built;
-`docs/DECISIONS.md` remains the source of truth for *why* the foundational choices
-(multi-tenancy shape, identity model, timezone, currency, payments/notifications
-provider strategy, frontend cadence) were made — this document references those
-decisions rather than restating them, and goes one level deeper into structure and
-mechanism.
-
-Stages 1–3 (domain models, and auth/roles/tenant isolation/guest identity) are done;
-this document is revised as later-stage implementation surfaces problems with it. The
-concrete numbers referenced throughout (deposit percentage, cancellation cutoff,
-booking window limits, payment hold duration) live in `docs/DECISIONS.md` § Business
-rules, not here.
+This document describes *how* the backend is built: apps, entities, mechanisms and
+invariants. `docs/DECISIONS.md` is the source of truth for *why* (and for endpoint lists,
+error codes and rejected alternatives); this document references it rather than
+restating it. The concrete numbers (deposit percentage, cancellation cutoff, booking
+window, hold duration) live in `docs/DECISIONS.md` § "Business rules", not here.
 
 ---
 
 ## 1. Django project structure and app boundaries
 
-One Django project (`config`, already scaffolded), domain-bounded apps added as their
-stage arrives. Proposed app list and responsibility:
+One Django project (`config`), domain-bounded apps:
 
 | App | Responsibility |
 |---|---|
 | `core` | Cross-cutting infrastructure with no domain meaning of its own: the tenant-scoped abstract base model and manager/queryset, the domain exception hierarchy, shared permission base classes, common mixins (e.g. a `TimeStamped` abstract base with `created_at`/`updated_at`), shared pagination/error-envelope config. |
 | `tenants` | `Salon` — the tenant root entity — plus salon-level settings (timezone, business hours defaults, deposit percentage — single salon-wide value, no per-service override — booking lead-time/advance-window limits), the salon FAQ (`FAQItem`, salon-authored questions and answers read by the assistant), and the tenant-resolution middleware. |
-| `accounts` | `User` (platform/admin auth only), `Account` (per-salon login credential every JWT authenticates as), `Customer` (per-salon identity, guest or registered, see `docs/DECISIONS.md` § Identity), salon-scoped registration/login/verification. |
+| `accounts` | `User` (platform/admin auth only), `Account` (per-salon login credential every JWT authenticates as), `Customer` (per-salon identity, guest or registered, see `docs/DECISIONS.md` § "Identity"), salon-scoped registration/login/verification. |
 | `catalog` | `ServiceCategory`, `Service`. |
 | `specialists` | `Specialist`, which services a specialist performs, `WorkingHours` (recurring weekly schedule), `TimeOff` (dated exceptions). |
 | `scheduling` | The availability engine: pure, stateless computation of open slots from `specialists` schedule data and `booking` appointments. Owns no models of its own (see § 6). |
 | `booking` | `Appointment`, booking creation/cancellation service layer, concurrency guarantees. |
 | `payments` | `Payment` (deposit lifecycle), the `PaymentProvider` interface, the mock adapter, webhook ingestion, refunds. |
-| `notifications` | `Notification` (send log / idempotency record), the `NotificationChannel` interface, the email adapter (Telegram adapter added later, same interface). |
+| `notifications` | `Notification` (send log / idempotency record), the `NotificationChannel` interface, the email adapter (a second channel is deferred; it would use the same interface). |
 | `reviews` | `Review`, completed-appointment eligibility gating. |
 | `ai_assistant` | Grounding tool functions, propose-only booking handoff, aggregate daily usage counters. Stores no conversation text and nothing about individual customers — conversation state lives in Redis (see § 10). |
 
@@ -52,11 +43,11 @@ Domain entities, all modeled in code (field-level detail lives in the models):
 
 - **Salon** — tenant root. Everything else scopes to it via a `salon` FK. `is_active`
   (default `True`) gates tenant resolution — an inactive or unknown slug resolves the
-  same way, `404` (§ 3, `docs/DECISIONS.md` § Stage 3 decisions). `name` and `about`
-  (salon-profile free text, blank/optional, added in Stage 11.5) are translatable
+  same way, `404` (`docs/DECISIONS.md` § "Multi-tenancy"). `name` and `about`
+  (salon-profile free text, blank/optional) are translatable
   `JSONField`s — `{lang_code: string}` dicts, `en` fallback — per § Content
   localization.
-- **User** — Django auth identity, platform-wide (not salon-scoped). Post-3-R it
+- **User** — Django auth identity, platform-wide (not salon-scoped). It
   authenticates only via the session-based Django `/admin/` (platform operators) — it
   is not the customer or salon-staff login. `email_verified_at` (nullable) has no
   write path anymore: the registration/verification flow (§ 3) runs against
@@ -66,39 +57,33 @@ Domain entities, all modeled in code (field-level detail lives in the models):
   (`AccountRole`: `client`/`admin`), `is_active`, `email_verified_at`, `customer`
   (nullable `OneToOneField`→`Customer`, `SET_NULL`) — the link from a login to its
   per-salon `Customer` row runs this direction, not a FK on `Customer`.
-- **Customer** — per-salon identity, guest or registered, per `docs/DECISIONS.md` §
-  Identity. All customer-facing domain rows (appointments, reviews) hang off this, not
+- **Customer** — per-salon identity, guest or registered, per `docs/DECISIONS.md` § "Identity". All customer-facing domain rows (appointments, reviews) hang off this, not
   off `User` or `Account`. A registered customer is linked from an `Account` via
   `Account.customer` (above), not via any FK on this model.
 - **ServiceCategory** — salon FK, name, ordering. `name` is a translatable
-  `JSONField` (Stage 11.5, § Content localization).
+  `JSONField` (§ Content localization).
 - **Service** — salon FK, category FK, name, duration, price, buffer minutes (time
   blocked on the calendar after the appointment for cleanup/room turnaround, never
   itself offered as a bookable start — see § 6–7; kept per-service, not salon-wide,
   because turnaround differs by service). `name` is a translatable `JSONField`
-  (Stage 11.5, § Content localization).
-- **Specialist** — salon FK, name, bio, is_active (Stage 5). No login in this build
-  (`docs/DECISIONS.md` § Business rules). `name` and `bio` are translatable
-  `JSONField`s (Stage 11.5, § Content localization).
+  (§ Content localization).
+- **Specialist** — salon FK, name, bio, is_active. No login in this build
+  (`docs/DECISIONS.md` § "Business rules"). `name` and `bio` are translatable
+  `JSONField`s (§ Content localization).
 - **`Service` and `Specialist` rows can never be hard-deleted once an `Appointment`
   references them** — the FK would either cascade-delete real booking history or
   require `SET NULL`/`PROTECT` gymnastics that make "delete" mean something
   different depending on whether the row has ever been booked. `Service` and
-  `ServiceCategory` got an `is_active` soft-deactivation field in Stage 4;
-  `Specialist` gets its own `is_active` in Stage 5, not at Stage 20 as
-  originally planned here (see `docs/DECISIONS.md` § Stage 5 decisions for why
-  that moved earlier). Its meaning on `Specialist` is employment status only —
+  `ServiceCategory` and `Specialist` each have an `is_active` soft-deactivation
+  field. Its meaning on `Specialist` is employment status only —
   True currently employed, False no longer employed — not a general
   availability/visibility flag: temporary absence (vacation, sick leave,
   parental leave) is modelled as `TimeOff` rows, never as a status on
   `Specialist`. For these three models, soft deactivation means flipping
   `is_active`, never a `DELETE` of a row an `Appointment` might reference.
   Deactivating a `Specialist` is additionally refused outright (409) while
-  they still have a future non-cancelled `Appointment` — Stage 5 has no
-  payment/notification/conflict-resolution layer yet to honor the standing
-  rule that such a conflict be explicitly resolved, never silently orphaned
-  (`docs/DECISIONS.md` § Business rules, § Stage 5 decisions); revisit at
-  Stage 19.
+  they still have a future non-cancelled `Appointment`, until the conflict
+  resolution flow exists (Stage 19; `docs/DECISIONS.md` § "Specialists").
 - **Specialist ↔ Service** — many-to-many via an explicit `SpecialistService`
   through model, not a bare `ManyToManyField` (not every specialist performs
   every service) — the explicit through model is needed so the pairing
@@ -119,17 +104,20 @@ Domain entities, all modeled in code (field-level detail lives in the models):
   creation for `PENDING_PAYMENT` appointments — see § lifecycle), status (see §
   lifecycle), audit fields (`created_at`, `cancelled_at`, `cancelled_by`,
   `cancellation_reason`), `source` (`direct` or `assistant`: supplied by the client
-  for analytics only, so it never affects money or access; Stage 16).
+  for analytics only, so it never affects money or access).
 - **GuestAccessToken** — salon FK, appointment FK, `token_hash` (SHA-256 of the
   signed token, never the raw value), `expires_at`, `cancelled_via_token_at`
   (nullable — separate from `expires_at` so cancelling doesn't revoke view access;
-  see § 3). Lives in `booking`, not `accounts` (`docs/DECISIONS.md` § Stage 3
-  sub-step 3 decisions).
+  see § 3). Lives in `booking`, not `accounts` (`booking` depends on `accounts`,
+  never the reverse).
 - **Payment** — salon FK, appointment FK (one deposit payment per appointment),
-  amount, status (see § lifecycle), provider reference id.
+  amount, currency (frozen at creation), status (see § lifecycle), provider
+  reference id (unique), `provider_data`, `refund_due` (a refund is owed, recorded
+  when decided), `refund_initiated_at`.
 - **ProcessedWebhookEvent** — provider event id (unique), processed timestamp. Not a
   domain entity as such — an idempotency ledger for § 8/9.
-- **Notification** — salon FK, recipient (customer or user), channel, trigger type,
+- **Notification** — salon FK, recipient customer (null means an alert to the salon's
+  contact email), channel, trigger type,
   natural key for dedup (see § 9), status, sent timestamp.
 - **Review** — salon FK, appointment FK (**one-to-one** — see § 11), customer FK,
   denormalized specialist FK (grouped-by-specialist read path; snapshot of who
@@ -151,13 +139,13 @@ for its own sake — see § 5 for why.
 
 ## 3. Authentication architecture, including guest identity
 
-Two separate identity tracks, per `docs/DECISIONS.md` § Identity:
+Two separate identity tracks, per `docs/DECISIONS.md` § "Identity":
 
-**Accounts (`Account`).** Standard email + password, issued JWTs via DRF SimpleJWT,
-authenticated by `AccountJWTAuthentication` (`accounts/authentication.py`) — the only
-JWT auth path in the API (`DEFAULT_AUTHENTICATION_CLASSES`). Login, refresh and logout
-are salon-scoped (`/api/v1/salons/<slug>/auth/login|refresh|logout/`, landed in Stage
-3-R.E). Every issued token carries an `identity_model: "account"` claim, checked
+**Accounts (`Account`).** Standard email + password, issued JWTs via DRF SimpleJWT and
+carried in httpOnly cookies set by Django (details: `docs/DECISIONS.md` § "Auth and
+accounts"). Login, refresh and logout are salon-scoped (`/api/v1/salons/<slug>/auth/...`).
+Every token also carries `session_version`, so a password change or reset ends every
+session. Every issued token carries an `identity_model: "account"` claim, checked
 *before* any pk lookup: `User` and `Account` are separate tables with independent
 auto-increment sequences that can legitimately share a pk, so this guards against a
 still-valid legacy token resolving against the wrong table. Once the claim passes,
@@ -168,19 +156,15 @@ Django `/admin/`; there is no `User` JWT path anywhere in the API.
 **Guests (a `Customer` with no linked `Account`).** No login at all. At booking time, the
 customer supplies name/email/phone; the `accounts` service layer does a `salon`-scoped
 get-or-create on `Customer` by email (per `docs/DECISIONS.md`, email is unique per
-salon, so a returning guest updates their existing row). The confirmation email links
-to a frontend route with a signed token (Django's `core.signing`, keyed off
-`SECRET_KEY`, encoding the `Customer`/`Appointment` id) in the URL **path**
-(currently `{FRONTEND_URL}/salons/<slug>/appointments/<id>/manage/<token>/`),
-never a query string or fragment — this is a persistent, long-lived resource
-link, not a one-time credential (`docs/DECISIONS.md` § Step (d) decisions). The
-`/salons/<slug>/` path segment is scheduled to change to a subdomain form
-(`https://<slug>.salonhub.com/appointments/<id>/manage/<token>/`) once the
-tracked follow-up in `docs/DECISIONS.md` § Stage 12 ("Frontend routing:
-subdomain-based") is implemented; the signed-token-in-the-path design is
-unaffected. How the frontend reads the token out of that route and presents it
-to the API is a Stage 18-21 frontend detail, not yet specified. A
-`GuestAccessToken` row stores the SHA-256
+salon, so a returning guest's unlinked row is updated; a row linked to an Account keeps
+its name and phone). The guest token is a deterministic signed value over the
+appointment id (`booking/guest_tokens.py`), so emails can re-derive it. The payment link
+carries it in the URL fragment (`/booking/pay#appointment_id=...&token=...`); the
+confirmation and reminder emails carry it in the URL **path** on the salon's subdomain
+(`/appointments/<id>/manage/<token>/`), never a query string: a persistent resource
+link, not a one-time credential. The frontend page for that manage link does not exist
+yet (see the register in `docs/DECISIONS.md`). The API receives the token in the
+`X-Guest-Token` header. A `GuestAccessToken` row stores the SHA-256
 hash of the signed token (`token_hash`), an `expires_at` (30 days after
 `Appointment.end_datetime`), and a nullable `cancelled_via_token_at`. The API
 re-hashes the presented token, looks it up by `token_hash`, and checks
@@ -193,14 +177,10 @@ the default) directly — never a `User`. Linking happens at verification, not
 registration: `VerifyEmailView` stamps `Account.email_verified_at` and, only if the
 account has no `Customer` yet, looks for a `Customer` row in *that same salon*
 matching the verified email and adopts it (`Account.customer` set) — same-salon and
-email-matched, never a cross-salon sweep keyed off a `User`'s email. The
-`Customer.user` field and the cross-salon `link_guest_customers` sweep this paragraph
-used to describe were both removed (Stage 3-R.D.2; the field itself, migration
-`0006_remove_customer_user`).
+email-matched, never a cross-salon sweep. Verification does not gate login.
 
 **Salon staff.** A per-salon `Account` (§ 4) carrying `role = admin`; back-office
-authorization is that role, not a separate auth mechanism. (`SalonStaff`, the former
-`User` × `Salon` join, was removed in Stage 3-R.B — see `docs/DECISIONS.md` § Stage 3-R.)
+authorization is that role, not a separate auth mechanism.
 
 ## 4. Authorization: roles, permission classes, reach
 
@@ -214,22 +194,16 @@ Roles:
 - **Salon admin** (a per-salon `Account` with `role = admin`) — back-office reach for
   that one salon only: catalog, specialists, schedules, appointments, clients,
   reviews, notifications. **One staff role for v1**; `Account.role` is kept open-ended
-  so a second, more restricted role can be added later without a shape migration
-  (`docs/DECISIONS.md` § Stage 3-R decisions).
+  so a second, more restricted role can be added later without a shape migration.
 - **Platform superuser** (Django `is_superuser`, not tenant-scoped) — Django admin
   only, for operational access across all salons. Not part of the product UX.
 
-Permission classes (DRF, added when the API lands):
+Permission classes:
 
 - `IsSalonStaff(*roles)` — checks `request.user` is an `Account` carrying a staff role
   for the resolved tenant (§ 5); empty `*roles` means the staff-role set (`{admin}` for
   v1), or pass explicit roles to narrow it. The `isinstance` check against `Account` is
-  also the token-type guard for the `USER_ID_FIELD` cross-model collision
-  (`docs/DECISIONS.md` § Stage 3-R decisions).
-- `IsAuthenticatedCustomer` — checks `request.user` is authenticated and has a
-  `Customer` row in the resolved tenant (§ 5).
-- `IsOwnCustomer` — object-level check that the acting `Customer` (from the JWT or
-  a validated guest token) matches the object's `customer` FK.
+  also the token-type guard for the `User`/`Account` id collision.
 - `HasValidGuestToken` — validates the signed token from § 3 in `has_permission` (not
   `has_object_permission`, so the check runs regardless of view shape — see
   `CLAUDE.md`'s "DRF object-level permissions" rule); the target object is then
@@ -240,9 +214,13 @@ These are a second line of defense on writes; the tenant-scoped manager (§ 5) i
 first line, so a missing permission check fails toward "wrong data invisible," not
 "wrong data mutable."
 
+Account-owned endpoints (my appointments, cancel, pay) resolve ownership through the
+caller's linked `Customer` and answer 404 for anyone else's object. (`IsAuthenticatedCustomer`
+and `IsOwnCustomer` exist in `core/permissions.py` but no view uses them yet.)
+
 ## 5. Multi-tenancy: making the unscoped query the hard path
 
-Building on `docs/DECISIONS.md` § Multi-tenancy (shared schema, row-level isolation,
+Building on `docs/DECISIONS.md` § "Multi-tenancy" (shared schema, row-level isolation,
 path-prefix resolution):
 
 - `core.TenantScopedModel` — abstract base with `salon = ForeignKey(Salon, ...)`,
@@ -280,7 +258,7 @@ path-prefix resolution):
   matches before saving; at the DB level, the implemented pattern is a composite
   unique index `(id, salon)` on parent tables plus a composite FK `(child.parent_id,
   child.salon) → (parent.id, parent.salon)` on children (`core/db.py`'s
-  `composite_tenant_fk`, 14 call sites across migrations as of Stage 3) — this makes
+  `composite_tenant_fk`) — this makes
   cross-tenant linkage a constraint violation, not just an application bug waiting to
   happen.
 
@@ -292,7 +270,7 @@ requested date range, read as `(start, blocked_until)` busy intervals — i.e.
 duration **plus buffer**, not just duration (see below); the requested `Service`'s
 duration and `buffer_minutes`; the salon's slot granularity, minimum booking lead
 time, and maximum advance-booking window (all salon-level settings — defaults
-recorded in `docs/DECISIONS.md` § Business rules); the salon's timezone (for
+recorded in `docs/DECISIONS.md` § "Business rules"); the salon's timezone (for
 local-time display); the current time.
 
 **Algorithm shape** (pure, no side effects): for a given specialist + service + date
@@ -303,8 +281,7 @@ range —
    first — minus every overlapping interval from a generalised blocking-interval
    list, subtracted in full whether it clips an edge, splits the window, or
    covers it entirely (currently just `TimeOff`; a future closure source is one
-   additional entry in that list, not a rewrite of this step — see
-   `docs/DECISIONS.md` § Stage 6 decisions and § Open questions).
+   additional entry in that list, not a rewrite of this step).
 2. Subtract busy intervals from existing appointments in that range, using each
    appointment's `(start, blocked_until)` — the buffer is calendar-blocking time, so
    it occupies the busy interval exactly like the service itself does.
@@ -325,7 +302,7 @@ buffer.
 specialist. A separate, thin composition function in the same `scheduling` app
 handles the case where no specialist is specified — it enumerates the service's
 `SpecialistService`-qualified, active specialists and unions each one's
-per-specialist availability (`docs/DECISIONS.md` § Stage 6 decisions).
+per-specialist availability.
 
 There are two booking entry paths into this engine, differing only in the
 wrapper above it: an **"any specialist"** path, which reads through the
@@ -334,8 +311,7 @@ specialist is free then), and a **"specific specialist"** path, which calls
 the per-specialist algorithm directly with no composition. In the
 "any specialist" path, which specialists are actually free at each time is
 computed as part of the union but served separately, from a second lookup
-once a client has chosen a time, not inline with the first response
-(`docs/DECISIONS.md` § Stage 6 and § Stage 6.G decisions).
+once a client has chosen a time, not inline with the first response.
 
 **Exposed via one `GET` endpoint** taking the service, a date range, and an
 optional specialist: present, it serves the specific-specialist path above
@@ -343,9 +319,8 @@ directly; absent, it serves the any-specialist composition's result. Both
 return the same shape — a list of candidate start times converted to the
 salon's local time — never a list of specialists; which specialists are
 actually free at a chosen time is the second, separate lookup already
-described above. Endpoint path, status-code mapping, and permission class are
-Catalog-precedent detail (`docs/DECISIONS.md` § Stage 4 decisions' endpoint
-lists), not restated here — see `docs/DECISIONS.md` § Stage 6.I decisions.
+described above. Endpoint path, status codes and permissions: `docs/DECISIONS.md`
+§ "Scheduling".
 
 **Where it lives:** `scheduling`, as a stateless service function, not a persisted
 "slots" table. This is a deliberate correctness-over-performance call: a materialized
@@ -365,7 +340,7 @@ those writes, not a change in what the source of truth is.
   this function only stops offering that slot going forward; it does not resolve
   the existing conflict. Detection and resolution (rebook with another specialist,
   rebook the same specialist later, or a fully-refunded salon-initiated
-  cancellation) is a recorded requirement (`docs/DECISIONS.md` § Business rules),
+  cancellation) is a recorded requirement (`docs/DECISIONS.md` § "Business rules"),
   with the resolution UI landing in the admin calendar (Stage 19).
 - A service duration longer than any single open window never produces a slot —
   correct behavior, not a bug.
@@ -377,8 +352,7 @@ those writes, not a change in what the source of truth is.
   date being computed, not a fixed offset — the same DST-aware conversion
   also applies when converting final candidate slots back to local time for
   the response (step 5). Handling this only at display time and building
-  step 1's windows in naive UTC would be wrong on a transition day
-  (`docs/DECISIONS.md` § Stage 6 decisions).
+  step 1's windows in naive UTC would be wrong on a transition day.
 
 ## 7. Booking: transaction boundaries and double-booking prevention
 
@@ -393,7 +367,7 @@ lifecycle), all inside one transaction.
    gives a fast, friendly error for the common case.
 2. **Database-level guarantee** — a Postgres exclusion constraint (`EXCLUDE USING
    gist`, requiring the `btree_gist` extension) on
-   `(specialist_id, tsrange(start, blocked_until))` filtered to non-cancelled
+   `(specialist_id, tstzrange(start, blocked_until))` filtered to active
    statuses. **The constraint operates on the buffered interval, not the bare
    service interval** — `blocked_until` already includes the service's buffer
    minutes (§ 2), stored on the `Appointment` row itself at creation time rather
@@ -418,7 +392,7 @@ On constraint violation, the transaction rolls back and the API returns a
 eligibility branches on `cancelled_by` first, then, only for a customer-initiated
 cancellation, on a cutoff against `now()` vs. appointment start — a salon-initiated
 cancellation is always fully refunded regardless of timing. The concrete cutoff and
-the full policy are recorded in `docs/DECISIONS.md` § Business rules, not restated
+the full policy are recorded in `docs/DECISIONS.md` § "Business rules", not restated
 here.
 
 ## 8. Payments: state machine, deposit calculation, webhook idempotency
@@ -429,13 +403,14 @@ appointment.deposit_percentage_at_booking)` — read from the snapshot stored on
 `Appointment` at booking time (§ 2), never from the live `Service.price` or
 `Salon.deposit_percentage`, so a later price or deposit-percentage change never
 rewrites what an existing booking owes. The percentage itself is a single
-salon-wide setting, no per-service override in v1 (`docs/DECISIONS.md` § Business
-rules).
+salon-wide setting, no per-service override in v1. One money helper serves payment
+initiation, the dashboard and the assistant, so the amounts can never differ.
 
 **Payment/deposit lifecycle** (separate from the appointment lifecycle — see the
 combined state-machine section below).
 
-**Webhook idempotency:** the payment provider (mock now, Stripe-shaped later) may
+**Webhook idempotency:** the payment provider (mock everywhere today; a WayForPay
+adapter exists but is not wired) may
 redeliver the same event. Every inbound webhook event id is recorded in
 `ProcessedWebhookEvent` (unique constraint on `provider_event_id`) before any state
 change is applied; a replayed event id is a no-op. Additionally, the state-transition
@@ -443,29 +418,33 @@ handlers themselves are idempotent (e.g. `PENDING → SUCCEEDED` applied twice i
 no-op, not an error) — belt and suspenders, since at-least-once delivery is the
 standard guarantee providers like Stripe actually offer, not a hypothetical.
 
-The remaining balance (80% of price) is paid in person at the salon and is not
-tracked or collected by the platform in any form (`docs/DECISIONS.md` § Business
-rules).
+**Refunds:** the decision that a refund is owed is stored on the `Payment`
+(`refund_due`) in the same transaction that makes it; `REFUND_PENDING` is written
+before the provider is called; a periodic sweep retries owed refunds that never
+reached the provider, and another flags refunds stuck in `REFUND_PENDING`. Any path
+that locks both rows locks the `Appointment` first, then the `Payment`.
+
+The remaining balance is paid in person at the salon and is not tracked by the
+platform.
 
 ## 9. Notifications: channel abstraction, duplicate-send prevention
 
-Building on `docs/DECISIONS.md` § Notifications (channel abstraction from day one,
+Building on `docs/DECISIONS.md` § "Notifications" (channel abstraction from day one,
 email adapter first): a `NotificationChannel` interface with a `send(notification)`
 method, one adapter per channel.
 
-**Trigger points:** booking confirmed, booking cancelled, appointment reminder
-(scheduled, § 12), payment succeeded/failed, review request after an appointment
-completes. **Guest→User email verification and password reset** (§ 3) are not
-routed through this abstraction for Stage 3 — they're sent by a standalone Celery
-task in `accounts/tasks.py` (plain `django.core.mail.send_mail`), with none of the
-dedup/idempotency machinery below. Routing them through `Notification` is deferred
-to Stage 9: `Notification.salon` is non-nullable, and verification/reset are
-salon-less `User` events.
+**Trigger points:** booking created, confirmed (payment received), cancelled and
+expired; appointment reminder (scheduled, § 12); payment succeeded/failed. A
+review-request message exists but is not dispatched yet. **Account emails**
+(verification, password reset, email change, password changed) do not go through this
+abstraction: they are standalone Celery tasks in `accounts/tasks.py` (plain
+`send_mail`) without the dedup machinery below; routing them through `Notification` is
+planned (Stage 21).
 
 **Duplicate-send prevention** uses the same idempotency shape as § 8: a `Notification`
 row is created in `PENDING` status *before* any send is attempted. `Notification.
-appointment` is **nullable** — a salon-less trigger (e.g. a future, Stage-9-routed
-verification email) would have no appointment to hang off — so the dedup natural key
+appointment` is **nullable** — a trigger that is not about an appointment has none
+to hang off — so the dedup natural key
 can't be `(trigger type, appointment id, channel)` as originally stated: a nullable
 column doesn't enforce uniqueness in Postgres (multiple `NULL`s never collide).
 Instead the unique constraint is on `(trigger type, channel, dedup_key)`, where
@@ -478,7 +457,7 @@ duplicate trigger (e.g. a webhook firing twice) cannot produce two emails for th
 event. Reusing the same pattern in two independent apps (`payments`, `notifications`)
 is intentional consistency, not coincidence.
 
-**Message language (Stage 11.5):** `_build_message` renders each notification in the
+**Message language:** `_build_message` renders each notification in the
 recipient's language (`Customer.preferred_language`, `en` fallback) — the templates in
 `_MESSAGES` and the dynamic builders become per-language-keyed. Human-readable dates in
 those emails come from `core/formatting.py`, which carries hardcoded English **and**
@@ -504,8 +483,7 @@ logged-in ones; there is no "logged-in customers keep their history" exception.
 Salon chat routinely surfaces
 health-adjacent personal information (skin conditions, allergies, treatment
 contraindications), and the deliberate choice is to not retain that for anyone by
-default, not to make retention opt-in per user type (`docs/DECISIONS.md` § Business
-rules). Redis is already in the stack for Celery, so this adds no new
+default, not to make retention opt-in per user type. Redis is already in the stack for Celery, so this adds no new
 infrastructure.
 
 **Booking handoff is propose-only.** The assistant can call the same read-only
@@ -519,7 +497,7 @@ malformed parameter must never be able to produce a real, paid appointment.
 **Provider abstraction.** The model is reached through an `AssistantProvider`
 interface, following the payments pattern (§ 8): a mock adapter for tests and local
 development, and an OpenAI adapter behind the same interface, chosen by a setting
-(Stage 16). A provider is a pipe for one model turn: it streams text and tool-call
+(`ASSISTANT_PROVIDER`). A provider is a pipe for one model turn: it streams text and tool-call
 events, never executes tools, never logs content, and knows nothing about salons or
 tenant context. Vendor formats and vendor errors are translated inside the adapter, so
 nothing else in the assistant depends on the vendor's SDK. Tests never need the
@@ -529,7 +507,7 @@ network.
 the tools it asks for run against tenant-scoped data under the bound tenant context
 (§ 5), and their results go back to the model until it answers in text. The loop is
 capped by a number of model calls and an overall deadline (values in
-`docs/DECISIONS.md` § Stage 16). Text is streamed to the client as typed events as it
+`docs/DECISIONS.md` § "AI assistant: backend"). Text is streamed to the client as typed events as it
 arrives. The customer sees only the name of a known tool, in a status event right
 before it runs; tool arguments, tool results and provider events are never shown to
 the customer, and tool calls and raw tool results are never stored in the session.
@@ -568,16 +546,16 @@ join through the appointment.
 
 ## 12. Background tasks: scheduled vs. event-driven
 
-**Event-driven** (Celery task fired by a service-layer call, not polling): booking
-confirmation/cancellation email, payment webhook processing, review-request email
-(fired the moment an appointment is marked `COMPLETED`).
+**Event-driven** (a notification dispatched by a service-layer call, not polling):
+booking created, confirmed, cancelled and expired emails, and payment emails from the
+webhook. (A review-request email on completion is planned but not built.)
 
 **Scheduled** (Celery beat): appointment reminders (a single day-before reminder, hourly sweep),
 expiring `PENDING_PAYMENT` appointments once `hold_expires_at` passes (hold
-duration recorded in `docs/DECISIONS.md` § Business rules), transitioning
+duration recorded in `docs/DECISIONS.md` § "Business rules"), transitioning
 `CONFIRMED` appointments to `COMPLETED` once `end_datetime` passes (with a staff
-override available in the admin, per § 11), sweeping abandoned payment sessions to
-`EXPIRED`.
+override available in the admin, per § 11), flagging stuck refunds and retrying owed
+refunds (every 30 minutes each).
 
 The split follows directly from whether there's an event to hook into: anything that
 must react immediately to a state change is event-driven; anything driven purely by
@@ -591,12 +569,10 @@ because there is no trigger to attach to.
   request without inspecting headers.
 - **URL shape:** essentially everything lives under `/api/v1/salons/<slug>/...`,
   consistent with the path-prefix tenant resolution in `docs/DECISIONS.md` — this
-  includes auth (register, verify-email, password-reset, password-reset/confirm,
-  resend-verification, login, refresh, logout; landed across Stage 3-R.D/3-R.E)
-  alongside the domain resources. The only paths outside a salon prefix are `/admin/`
+  includes auth (`/auth/...`) and the assistant (`/assistant/...`) alongside the domain
+  resources. The only paths outside a salon prefix are `/admin/`
   (Django's session-based admin) and `/api/v1/webhooks/...` (payment provider
-  callbacks, inherently cross-tenant). There is no flat `/api/v1/auth/...` prefix — it
-  was fully removed in 3-R.E — and no `/api/v1/me/...` endpoint; it was never built.
+  callbacks, inherently cross-tenant). There is no flat `/api/v1/auth/...` prefix.
 - **Pagination:** `PageNumberPagination`, a fixed default page size, overridable up to
   a capped maximum (so `?page_size=100000` can't be used to force an unbounded
   response). Chosen over offset/limit for predictability in admin list UIs (page N of
@@ -630,25 +606,28 @@ client); the full traceback is still logged server-side.
 
 ## Content localization
 
-Salon-authored, client-facing text is translatable (Stage 11.5). Supported languages
+Salon-authored, client-facing text is translatable. Supported languages
 are `en` and `uk` for now, with `en` as the single global fallback; there is no
 per-salon default-language field. Each translatable field is a `JSONField` storing a
 `{lang_code: string}` dict rather than per-language columns or a translation table, so
-adding a language needs no migration. Translatable fields: `ServiceCategory.name`,
-`Service.name`, `Salon.name`, `Salon.about` (new, 2000-char-per-language DB check),
-`Specialist.name`, `Specialist.bio`, and the notification message templates (§ 9).
+adding a language needs no new columns (only a migration for its per-language
+constraints). Translatable fields: `ServiceCategory.name`,
+`Service.name`, `Salon.name`, `Salon.about` (2000 characters per language, DB check),
+`Salon.assistant_starters`, `Specialist.name`, `Specialist.bio`, and the notification
+message templates (§ 9).
 Not translatable — customer-authored or internal-only: `Review.text`, `TimeOff.reason`,
 `Appointment.cancellation_reason`.
 
 `(salon, name)` uniqueness on `ServiceCategory` / `Service` is checked per populated
 language key, not against one canonical language — a value shared under the same key
 within a salon is a conflict. The email language a customer receives is
-`Customer.preferred_language` (new field, set at booking, `en` fallback). Date
-rendering for emails lives in `core/formatting.py`, now with English and Ukrainian
-weekday/month tables (still never OS-locale dependent).
+`Customer.preferred_language` (set at booking, `en` fallback). Date rendering for emails
+lives in `core/formatting.py`, with English and Ukrainian weekday/month tables (never
+OS-locale dependent).
 
 Out of scope: frontend UI-string translation (a separate frontend i18n concern) and
-any staff/admin interface language. Full contract: `docs/DECISIONS.md` § Stage 11.5.
+any staff/admin interface language. Full contract: `docs/DECISIONS.md`
+§ "Localization (content)".
 
 ---
 
@@ -673,28 +652,28 @@ CONFIRMED       --(staff marks no-show)------> NO_SHOW
 `NO_SHOW` has no automatic effects in v1 — the deposit is already forfeited by
 appointment start regardless (per the cancellation policy), and there is no further
 customer penalty. It exists for admin record-keeping and statistics only
-(`docs/DECISIONS.md` § Business rules).
+(`docs/DECISIONS.md` § "Business rules").
 
 A slot is reserved (visible to the double-booking exclusion constraint, § 7) as soon
 as `PENDING_PAYMENT` is created, not only once payment succeeds — otherwise two
 customers could be mid-checkout for the same slot simultaneously with no guard at all.
 `hold_expires_at` is set at creation (`created_at` plus the hold duration recorded in
-`docs/DECISIONS.md` § Business rules); the `EXPIRED` transition (§ 12) is what
+`docs/DECISIONS.md` § "Business rules"); the `EXPIRED` transition (§ 12) is what
 releases a held slot once that passes without a completed payment.
 
 ### Payment / deposit lifecycle
 
 ```
-PENDING     --(provider intent/session created)--> PROCESSING
-PROCESSING  --(provider confirms)-----------------> SUCCEEDED
-PROCESSING  --(provider declines)-----------------> FAILED
-PROCESSING  --(checkout session times out)--------> EXPIRED
-PENDING/PROCESSING --(appointment cancelled first)-> CANCELLED
-SUCCEEDED   --(refund initiated)------------------> REFUND_PENDING
+PENDING        --(webhook: payment succeeded)-----> SUCCEEDED
+PENDING        --(webhook: payment failed)--------> FAILED
+FAILED         --(customer pays again)------------> PENDING
+PENDING        --(appointment cancelled first)----> CANCELLED
+SUCCEEDED      --(refund initiated)---------------> REFUND_PENDING
 REFUND_PENDING --(provider confirms refund)-------> REFUNDED
 ```
 
-`FAILED`, `EXPIRED`, `CANCELLED`, `REFUNDED` are terminal.
+`CANCELLED` and `REFUNDED` are terminal. `PROCESSING` and `EXPIRED` exist in the
+status enum but nothing sets them today.
 
 The two machines are coupled only at specific, explicit points: the webhook handler
 that receives "payment succeeded" transitions **both** `Payment → SUCCEEDED` and
@@ -709,5 +688,5 @@ is `SUCCEEDED` triggers a refund (`Payment → REFUND_PENDING`) rather than muta
 
 The concrete numbers this document's mechanisms depend on — deposit percentage,
 cancellation cutoff, booking window limits, payment hold duration, and the rest —
-are recorded once, in `docs/DECISIONS.md` § Business rules, not restated here, to
+are recorded once, in `docs/DECISIONS.md` § "Business rules", not restated here, to
 avoid a second source of truth.
