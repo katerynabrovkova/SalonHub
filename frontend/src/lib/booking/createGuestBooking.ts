@@ -22,6 +22,7 @@
  * versus any other failure.
  */
 import { ApiError } from "@/lib/api/errors";
+import { getSiteLanguage } from "@/lib/i18n/siteLanguage";
 
 export interface CreateGuestBookingResult {
   appointment: {
@@ -83,6 +84,9 @@ export async function createGuestBooking({
       customer_name: customerName,
       customer_email: customerEmail,
       customer_phone: customerPhone,
+      // Stored as the customer's email language (docs/DECISIONS.md §
+      // Identity); added here so every guest booking sends it.
+      language: getSiteLanguage(),
       ...(source !== undefined ? { source } : {}),
     }),
   });

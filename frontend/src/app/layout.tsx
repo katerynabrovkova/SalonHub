@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
 
+import { getSiteLanguage } from "@/lib/i18n/siteLanguage";
+
 import AssistantWidgetLoader from "./AssistantWidgetLoader";
 import { AuthProvider } from "./AuthContext";
 import NavigationProgress from "./NavigationProgress";
@@ -25,7 +27,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="uk"
+      lang={getSiteLanguage()}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">

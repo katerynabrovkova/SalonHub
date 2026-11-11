@@ -15,6 +15,7 @@
  * (409 `SLOT_NO_LONGER_AVAILABLE`, 403 `email_not_verified`).
  */
 import { apiRequest } from "@/lib/api/client";
+import { getSiteLanguage } from "@/lib/i18n/siteLanguage";
 
 export interface CreateAccountBookingParams {
   slug: string;
@@ -44,6 +45,10 @@ export async function createAccountBooking({
     service,
     specialist,
     start_datetime: startDatetime,
+    // Stored as the customer's email language (docs/DECISIONS.md §
+    // Identity), linked Customer or not; added here so every account
+    // booking sends it.
+    language: getSiteLanguage(),
   };
   if (contact !== undefined) {
     body.customer_name = contact.name;

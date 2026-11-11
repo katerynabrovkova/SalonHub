@@ -2,7 +2,7 @@
  * Browser client for the assistant endpoints (docs/DECISIONS.md § "Stage 17
  * sub-step order", 17.4a; Stage 16 "Sub-step 7 details"):
  *
- *   POST /api/v1/salons/<slug>/assistant/messages/?lang=uk  (NDJSON stream)
+ *   POST /api/v1/salons/<slug>/assistant/messages/?lang=<site language>  (NDJSON stream)
  *   GET  /api/v1/salons/<slug>/assistant/history/
  *
  * Both endpoints are public and ignore cookies, so requests carry no
@@ -16,14 +16,11 @@
  * check in 17.4b does.
  */
 import { apiErrorFromBody } from "@/lib/api/errors";
+import { getSiteLanguage } from "@/lib/i18n/siteLanguage";
 
 import { readNdjson } from "./readNdjson";
 
 const SESSION_HEADER = "X-Assistant-Session";
-
-// The interface language (`<html lang="uk">`), the same as the widget's
-// salon-info fetch.
-const LANG = "uk";
 
 /**
  * Stream events as the backend sends them today. The backend may add types
@@ -79,7 +76,9 @@ export async function sendAssistantMessage(
     headers.set(SESSION_HEADER, sessionId);
   }
 
-  const response = await fetch(salonUrl(slug, `/assistant/messages/?lang=${LANG}`), {
+  // The site language, the same as `<html lang>` and the widget's salon fetch.
+  const lang = encodeURIComponent(getSiteLanguage());
+  const response = await fetch(salonUrl(slug, `/assistant/messages/?lang=${lang}`), {
     method: "POST",
     headers,
     body: JSON.stringify({ message }),

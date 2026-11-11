@@ -87,6 +87,9 @@ describe("createGuestBooking", () => {
       customer_name: "Alice",
       customer_email: "alice@example.com",
       customer_phone: "+10000000000",
+      // The site language, added by the helper (docs/DECISIONS.md §
+      // Frontend › "Site language").
+      language: "uk",
     });
   });
 
