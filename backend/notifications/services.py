@@ -22,12 +22,10 @@ import psycopg
 from django.db import IntegrityError, transaction
 
 from booking import amounts
-from booking.constants import SLOT_HOLD_DURATION
 from booking.guest_tokens import derive_guest_token
 from booking.models import Appointment, AppointmentStatus, GuestAccessToken
 from core.formatting import (
     format_amount,
-    format_datetime_for_salon,
     format_deadline_for_salon,
     format_duration,
     format_full_datetime_for_salon,
@@ -44,6 +42,7 @@ from notifications.models import (
     NotificationTrigger,
 )
 from notifications.models import NotificationChannel as ChannelChoices
+from payments.models import PaymentStatus
 from tenants.models import Salon
 
 
@@ -70,35 +69,12 @@ def _resolve_recipient(notification: Notification) -> str:
 # {trigger: {lang_code: (subject, body)}}. When another language is added
 # it gets a key here; the resolution logic does not change.
 #
-# BOOKING_CONFIRMED, APPOINTMENT_REMINDER and BOOKING_CREATED have no entry
-# here: each is built from the notification's appointment in _build_message
-# (BOOKING_CONFIRMED and APPOINTMENT_REMINDER by _build_booking_email, with
-# their texts in _BOOKING_EMAIL_TEXTS below) — the link, the appointment's
-# details and the money lines can't be fixed strings.
+# Every booking email has no entry here: each is built from the
+# notification's appointment in _build_message, with its texts in
+# _BOOKING_EMAIL_TEXTS below — the link, the appointment's details and the
+# money lines can't be fixed strings. PAYMENT_SUCCEEDED is no longer sent
+# (docs/DECISIONS.md "Notifications") and has no text: building one raises.
 _MESSAGES: dict[str, dict[str, tuple[str, str]]] = {
-    NotificationTrigger.BOOKING_CANCELLED.value: {
-        "en": ("Your booking was cancelled", "Your booking has been cancelled."),
-        "uk": ("Ваш запис скасовано", "Ваш запис було скасовано."),
-    },
-    NotificationTrigger.BOOKING_EXPIRED.value: {
-        "en": (
-            "Your booking has expired",
-            "Your booking has expired because payment was not completed in time.",
-        ),
-        "uk": (
-            "Термін бронювання минув",
-            "Термін дії вашого бронювання минув, оскільки оплату не було здійснено "
-            "вчасно. Ви можете забронювати знову.",
-        ),
-    },
-    NotificationTrigger.PAYMENT_SUCCEEDED.value: {
-        "en": ("Payment received", "We have received your deposit payment."),
-        "uk": ("Оплату отримано", "Ми отримали вашу передоплату."),
-    },
-    NotificationTrigger.PAYMENT_FAILED.value: {
-        "en": ("Payment failed", "Your deposit payment could not be processed."),
-        "uk": ("Помилка оплати", "Не вдалося обробити вашу передоплату."),
-    },
     NotificationTrigger.REVIEW_REQUEST.value: {
         "en": (
             "How was your visit?",
@@ -135,23 +111,20 @@ def _build_message(notification: Notification, *, now: dt.datetime) -> tuple[str
     Map a notification's trigger_type to its (subject, body), rendered in
     the recipient's language — the one place the wording lives.
 
-    Every trigger but BOOKING_CONFIRMED, APPOINTMENT_REMINDER and
-    BOOKING_CREATED is a per-language lookup in _MESSAGES. Those three are
-    built from the notification's appointment instead, with the literal
-    fragments per-language-keyed and the interpolated values resolved in the
-    same language; BOOKING_CONFIRMED and APPOINTMENT_REMINDER go through
-    _build_booking_email (docs/DECISIONS.md "Notifications"). A trigger_type with no
-    entry in _MESSAGES and no special case here (EMAIL_VERIFICATION today)
-    raises rather than sending a blank email: a missing message is a bug,
-    not a valid empty send.
+    Every booking email (BOOKING_CREATED, BOOKING_CONFIRMED,
+    BOOKING_CANCELLED, BOOKING_EXPIRED, PAYMENT_FAILED, APPOINTMENT_REMINDER)
+    is built from the notification's appointment, with the literal fragments
+    per-language-keyed in _BOOKING_EMAIL_TEXTS and the interpolated values
+    resolved in the same language (docs/DECISIONS.md "Notifications"). Any
+    other trigger is a per-language lookup in _MESSAGES. A trigger_type with
+    no entry in _MESSAGES and no builder here (EMAIL_VERIFICATION, and
+    PAYMENT_SUCCEEDED, which is no longer sent) raises rather than sending a
+    blank email: a missing message is a bug, not a valid empty send.
     """
     preferred = _recipient_language(notification)
     lang_code = resolve_language_code(preferred)
 
-    if notification.trigger_type in (
-        NotificationTrigger.BOOKING_CONFIRMED,
-        NotificationTrigger.APPOINTMENT_REMINDER,
-    ):
+    if notification.trigger_type in _APPOINTMENT_TRIGGERS:
         appointment = notification.appointment
         if appointment is None:
             raise ValueError(
@@ -163,61 +136,20 @@ def _build_message(notification: Notification, *, now: dt.datetime) -> tuple[str
         # caller has no tenant bound (CLAUDE.md: code outside a request binds
         # tenant_context itself).
         with tenant_context(appointment.salon_id):
-            return _build_booking_email(
-                appointment,
-                reminder=notification.trigger_type == NotificationTrigger.APPOINTMENT_REMINDER,
-                lang_code=lang_code,
-                preferred=preferred,
-                now=now,
+            if notification.trigger_type in (
+                NotificationTrigger.BOOKING_CONFIRMED,
+                NotificationTrigger.APPOINTMENT_REMINDER,
+            ):
+                return _build_booking_email(
+                    appointment,
+                    reminder=notification.trigger_type == NotificationTrigger.APPOINTMENT_REMINDER,
+                    lang_code=lang_code,
+                    preferred=preferred,
+                    now=now,
+                )
+            return _build_status_email(
+                notification, appointment, lang_code=lang_code, preferred=preferred
             )
-
-    if notification.trigger_type == NotificationTrigger.BOOKING_CREATED:
-        appointment = notification.appointment
-        if appointment is None:
-            raise ValueError(
-                "BOOKING_CREATED notification "
-                f"{notification.pk!r} has no appointment to build its message from"
-            )
-        salon = appointment.salon
-        subject, body_template = {
-            "en": (
-                "Your booking is created",
-                "Your booking at {salon} on {when} is created. Pay within {minutes} "
-                "minutes to confirm it.\n\nComplete your payment: {link}",
-            ),
-            "uk": (
-                "Ваш запис створено",
-                "Ваш запис до {salon} на {when} створено. Оплатіть протягом {minutes} "
-                "хвилин, щоб підтвердити його.\n\nЗавершити оплату: {link}",
-            ),
-        }[lang_code]
-        when = format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang=lang_code)
-        # booking_link_mode is set by record_and_dispatch_notification at
-        # record time (docs/DECISIONS.md § Stage 15 planning, item 5, Cycle
-        # C) and read back here, not re-derived or inferred -- explicit
-        # checks, no fall-through else, so a future third mode (or a bug
-        # that leaves the field unset) fails loudly instead of silently
-        # becoming a guest link.
-        if notification.booking_link_mode == BookingLinkMode.GUEST:
-            token = derive_guest_token(appointment.id)
-            link = (
-                build_salon_frontend_url(salon.slug, "/booking/pay")
-                + f"#appointment_id={appointment.id}&token={token}"
-            )
-        elif notification.booking_link_mode == BookingLinkMode.ACCOUNT:
-            link = build_salon_frontend_url(salon.slug, "/client")
-        else:
-            raise ValueError(
-                "BOOKING_CREATED notification "
-                f"{notification.pk!r} has booking_link_mode="
-                f"{notification.booking_link_mode!r}, expected "
-                f"{BookingLinkMode.GUEST!r} or {BookingLinkMode.ACCOUNT!r}"
-            )
-        minutes = int(SLOT_HOLD_DURATION.total_seconds() // 60)
-        body = body_template.format(
-            salon=resolve_translation(salon.name, preferred), when=when, link=link, minutes=minutes
-        )
-        return subject, body
 
     try:
         return _MESSAGES[str(notification.trigger_type)][lang_code]
@@ -253,6 +185,37 @@ _BOOKING_EMAIL_TEXTS: dict[str, dict[str, str]] = {
             "Якщо ви не записувалися в {salon}, будь ласка, повідомте салон за номером вище."
         ),
         "last_without_phone": "Якщо ви не записувалися в {salon}, будь ласка, повідомте салон.",
+        "created_subject": "Ваш запис у {salon} створено, залишилось оплатити",
+        "created_intro": "Ваш запис створено:",
+        "deposit_due": "Передоплата: {value}",
+        "created_hold": (
+            "Ми тримаємо цей час для вас до {time}. Якщо не встигнете оплатити, запис "
+            "скасується автоматично."
+        ),
+        "created_guest_link": "Оплатити передоплату:",
+        "created_account_link": "Оплатити передоплату можна в особистому кабінеті:",
+        "cancelled_subject": "Ваш запис у {salon} скасовано",
+        "cancelled_intro": "Ваш запис скасовано:",
+        "refund_owed": (
+            "Передоплату {value} буде повернено на картку, з якої ви платили. "
+            "Термін залежить від вашого банку."
+        ),
+        "deposit_kept": (
+            "Запис скасовано менш ніж за 24 години до візиту, тому передоплата {value} "
+            "не повертається."
+        ),
+        "book_again": "Записатися знову:",
+        "cancelled_last_with_phone": (
+            "Якщо ви не скасовували цей запис, будь ласка, зверніться до салону за номером вище."
+        ),
+        "cancelled_last_without_phone": (
+            "Якщо ви не скасовували цей запис, будь ласка, зверніться до салону."
+        ),
+        "expired_subject": "Запис у {salon} не підтверджено",
+        "expired_intro": "Час на оплату минув, тому запис не підтверджено і цей час звільнено:",
+        "failed_subject": "Оплата в {salon} не пройшла",
+        "failed_intro": "Не вдалося провести передоплату за запис:",
+        "failed_hold": "Ми ще тримаємо цей час для вас до {time}. Спробувати оплатити ще раз:",
     },
     "en": {
         "confirmed_subject": "Your booking at {salon} is confirmed",
@@ -280,8 +243,55 @@ _BOOKING_EMAIL_TEXTS: dict[str, dict[str, str]] = {
             "If you did not book at {salon}, please let the salon know at the number above."
         ),
         "last_without_phone": "If you did not book at {salon}, please let the salon know.",
+        "created_subject": "Your booking at {salon} is created, the deposit is still to be paid",
+        "created_intro": "Your booking is created:",
+        "deposit_due": "Deposit: {value}",
+        "created_hold": (
+            "We are holding this time for you until {time}. If you do not pay in time, the "
+            "booking will be cancelled automatically."
+        ),
+        "created_guest_link": "Pay the deposit:",
+        "created_account_link": "You can pay the deposit in your account:",
+        "cancelled_subject": "Your booking at {salon} is cancelled",
+        "cancelled_intro": "Your booking is cancelled:",
+        "refund_owed": (
+            "The deposit of {value} will be refunded to the card you paid with. "
+            "How long it takes depends on your bank."
+        ),
+        "deposit_kept": (
+            "The booking was cancelled less than 24 hours before the visit, so the deposit "
+            "of {value} is not refunded."
+        ),
+        "book_again": "Book again:",
+        "cancelled_last_with_phone": (
+            "If you did not cancel this booking, please contact the salon at the number above."
+        ),
+        "cancelled_last_without_phone": (
+            "If you did not cancel this booking, please contact the salon."
+        ),
+        "expired_subject": "Your booking at {salon} was not confirmed",
+        "expired_intro": (
+            "The time to pay has run out, so the booking was not confirmed and this time "
+            "has been released:"
+        ),
+        "failed_subject": "Your payment at {salon} did not go through",
+        "failed_intro": "We could not process the deposit payment for your booking:",
+        "failed_hold": "We are still holding this time for you until {time}. Try to pay again:",
     },
 }
+
+# The booking emails, all built from the notification's appointment.
+_APPOINTMENT_TRIGGERS = frozenset(
+    trigger.value
+    for trigger in (
+        NotificationTrigger.BOOKING_CREATED,
+        NotificationTrigger.BOOKING_CONFIRMED,
+        NotificationTrigger.BOOKING_CANCELLED,
+        NotificationTrigger.BOOKING_EXPIRED,
+        NotificationTrigger.PAYMENT_FAILED,
+        NotificationTrigger.APPOINTMENT_REMINDER,
+    )
+)
 
 
 def _booking_email_link(appointment: Appointment) -> str:
@@ -301,6 +311,188 @@ def _booking_email_link(appointment: Appointment) -> str:
             salon.slug, f"/appointments/{appointment.id}/manage#token={token}"
         )
     return build_salon_frontend_url(salon.slug, "/client")
+
+
+def _pay_link(appointment: Appointment) -> str:
+    """The guest pay page with the re-derived token in the fragment, never
+    the path (docs/DECISIONS.md "Booking > Guest token")."""
+    token = derive_guest_token(appointment.id)
+    return (
+        build_salon_frontend_url(appointment.salon.slug, "/booking/pay")
+        + f"#appointment_id={appointment.id}&token={token}"
+    )
+
+
+def _detail_lines(
+    appointment: Appointment,
+    texts: dict[str, str],
+    *,
+    lang_code: str,
+    preferred: str | None,
+    specialist: bool = True,
+) -> list[str]:
+    """The service, specialist and full-date lines every booking email shares."""
+    lines = [
+        texts["service"].format(value=resolve_translation(appointment.service.name, preferred))
+    ]
+    if specialist:
+        lines.append(
+            texts["specialist"].format(
+                value=resolve_translation(appointment.specialist.name, preferred)
+            )
+        )
+    lines.append(
+        texts["when"].format(
+            value=format_full_datetime_for_salon(
+                appointment.start_datetime, appointment.salon.timezone, lang=lang_code
+            )
+        )
+    )
+    return lines
+
+
+def _duration_line(appointment: Appointment, texts: dict[str, str], *, lang_code: str) -> str:
+    minutes = int((appointment.end_datetime - appointment.start_datetime).total_seconds() // 60)
+    return texts["duration"].format(value=format_duration(minutes, lang=lang_code))
+
+
+def _footer_lines(
+    salon: Salon, salon_name: str, texts: dict[str, str], *, last_prefix: str | None = "last"
+) -> list[str]:
+    """The salon name, the `<phone> · <address>` line (an empty contact left
+    out, the line omitted when both are empty) and the last line, whose "at
+    the number above" variant needs a phone. `last_prefix` picks the last
+    line's pair of texts; None leaves the last line out (BOOKING_EXPIRED and
+    PAYMENT_FAILED say nothing came of the booking, so there is nothing to
+    report, and BOOKING_CREATED already carried the line; docs/DECISIONS.md
+    "Notifications")."""
+    lines = [salon_name]
+    contacts = " · ".join(value for value in (salon.phone, salon.address) if value)
+    if contacts:
+        lines.append(contacts)
+    if last_prefix is not None:
+        variant = "with_phone" if salon.phone else "without_phone"
+        lines.append(texts[f"{last_prefix}_{variant}"].format(salon=salon_name))
+    return lines
+
+
+def _build_status_email(
+    notification: Notification,
+    appointment: Appointment,
+    *,
+    lang_code: str,
+    preferred: str | None,
+) -> tuple[str, str]:
+    """
+    BOOKING_CREATED, BOOKING_CANCELLED, BOOKING_EXPIRED and PAYMENT_FAILED
+    texts, as recorded in docs/DECISIONS.md "Notifications" ("Texts of the
+    other booking emails"). Money values come from booking.amounts. The hold
+    time is `hold_expires_at` in the salon's time zone. The cancellation
+    money line is decided from `Payment.refund_due`, never from the Payment
+    status: by the time this runs the refund may already be REFUND_PENDING
+    or REFUNDED.
+    """
+    texts = _BOOKING_EMAIL_TEXTS[lang_code]
+    salon = appointment.salon
+    salon_name = resolve_translation(salon.name, preferred)
+    tz = salon.timezone
+    money_currency = amounts.currency(appointment)
+    trigger = notification.trigger_type
+    hold_time = format_time_for_salon(appointment.hold_expires_at, tz)
+    last_prefix: str | None = "last"
+
+    lines = [texts["greeting"].format(name=appointment.customer.name)]
+
+    if trigger == NotificationTrigger.BOOKING_CREATED:
+        # booking_link_mode is set by record_and_dispatch_notification at
+        # record time (docs/DECISIONS.md "Notifications", the link bullet)
+        # and read back here, not re-derived or inferred -- explicit checks,
+        # no fall-through else, so a future third mode (or a bug that leaves
+        # the field unset) fails loudly instead of silently becoming a guest
+        # link.
+        if notification.booking_link_mode == BookingLinkMode.GUEST:
+            link_lines = [texts["created_guest_link"], _pay_link(appointment)]
+        elif notification.booking_link_mode == BookingLinkMode.ACCOUNT:
+            link_lines = [
+                texts["created_account_link"],
+                build_salon_frontend_url(salon.slug, "/client"),
+            ]
+        else:
+            raise ValueError(
+                "BOOKING_CREATED notification "
+                f"{notification.pk!r} has booking_link_mode="
+                f"{notification.booking_link_mode!r}, expected "
+                f"{BookingLinkMode.GUEST!r} or {BookingLinkMode.ACCOUNT!r}"
+            )
+        subject_key = "created_subject"
+        lines.append(texts["created_intro"])
+        lines.extend(_detail_lines(appointment, texts, lang_code=lang_code, preferred=preferred))
+        lines.append(_duration_line(appointment, texts, lang_code=lang_code))
+        deposit = amounts.deposit_amount(appointment)
+        if deposit is not None:
+            lines.append(texts["deposit_due"].format(value=format_amount(deposit, money_currency)))
+        lines.append(
+            texts["amount_due"].format(
+                value=format_amount(amounts.amount_due_after_deposit(appointment), money_currency)
+            )
+        )
+        lines.append(texts["created_hold"].format(time=hold_time))
+        lines.extend(link_lines)
+
+    elif trigger == NotificationTrigger.BOOKING_CANCELLED:
+        subject_key = "cancelled_subject"
+        last_prefix = "cancelled_last"
+        lines.append(texts["cancelled_intro"])
+        lines.extend(_detail_lines(appointment, texts, lang_code=lang_code, preferred=preferred))
+        payment = amounts.payment_of(appointment)
+        deposit = amounts.deposit_amount(appointment)
+        if payment is not None and deposit is not None:
+            value = format_amount(deposit, money_currency)
+            if payment.refund_due:
+                lines.append(texts["refund_owed"].format(value=value))
+            elif payment.status == PaymentStatus.SUCCEEDED:
+                lines.append(texts["deposit_kept"].format(value=value))
+        lines.append(texts["book_again"])
+        lines.append(build_salon_frontend_url(salon.slug, "/services"))
+
+    elif trigger == NotificationTrigger.BOOKING_EXPIRED:
+        subject_key = "expired_subject"
+        last_prefix = None
+        lines.append(texts["expired_intro"])
+        lines.extend(
+            _detail_lines(
+                appointment, texts, lang_code=lang_code, preferred=preferred, specialist=False
+            )
+        )
+        lines.append(texts["book_again"])
+        lines.append(build_salon_frontend_url(salon.slug, "/services"))
+
+    elif trigger == NotificationTrigger.PAYMENT_FAILED:
+        subject_key = "failed_subject"
+        last_prefix = None
+        lines.append(texts["failed_intro"])
+        lines.extend(
+            _detail_lines(
+                appointment, texts, lang_code=lang_code, preferred=preferred, specialist=False
+            )
+        )
+        deposit = amounts.deposit_amount(appointment)
+        if deposit is not None:
+            lines.append(texts["deposit_due"].format(value=format_amount(deposit, money_currency)))
+        lines.append(texts["failed_hold"].format(time=hold_time))
+        # Sent by the payment webhook, which does not know how the booking
+        # was made: the guest token row is the record of a guest booking
+        # (the same rule as _booking_email_link), linking to the pay page.
+        if GuestAccessToken.objects.filter(appointment=appointment).exists():
+            lines.append(_pay_link(appointment))
+        else:
+            lines.append(build_salon_frontend_url(salon.slug, "/client"))
+
+    else:
+        raise ValueError(f"no status-email builder for trigger_type {trigger!r}")
+
+    lines.extend(_footer_lines(salon, salon_name, texts, last_prefix=last_prefix))
+    return texts[subject_key].format(salon=salon_name), "\n".join(lines)
 
 
 def _build_booking_email(
@@ -334,17 +526,10 @@ def _build_booking_email(
     lines = [
         texts["greeting"].format(name=appointment.customer.name),
         texts["reminder_intro" if reminder else "confirmed_intro"],
-        texts["service"].format(value=resolve_translation(appointment.service.name, preferred)),
-        texts["specialist"].format(
-            value=resolve_translation(appointment.specialist.name, preferred)
-        ),
-        texts["when"].format(
-            value=format_full_datetime_for_salon(appointment.start_datetime, tz, lang=lang_code)
-        ),
+        *_detail_lines(appointment, texts, lang_code=lang_code, preferred=preferred),
     ]
     if not reminder:
-        minutes = int((appointment.end_datetime - appointment.start_datetime).total_seconds() // 60)
-        lines.append(texts["duration"].format(value=format_duration(minutes, lang=lang_code)))
+        lines.append(_duration_line(appointment, texts, lang_code=lang_code))
         if deposit is not None:
             lines.append(texts["deposit"].format(value=format_amount(deposit, money_currency)))
     if amount_due is not None:
@@ -366,12 +551,7 @@ def _build_booking_email(
             lines.append(texts["deadline_passed"])
     lines.append(texts["reminder_link" if reminder else "confirmed_link"])
     lines.append(_booking_email_link(appointment))
-    lines.append(salon_name)
-    contacts = " · ".join(value for value in (salon.phone, salon.address) if value)
-    if contacts:
-        lines.append(contacts)
-    last = "last_with_phone" if salon.phone else "last_without_phone"
-    lines.append(texts[last].format(salon=salon_name))
+    lines.extend(_footer_lines(salon, salon_name, texts))
 
     if reminder:
         subject = texts["reminder_subject"].format(

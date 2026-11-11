@@ -95,17 +95,16 @@ def test_send_notification_task_marks_failed_when_retry_signals_exhausted(
     # exhausted signal directly, so nothing here depends on how Celery's
     # eager mode counts or re-invokes retries.
     #
-    # PAYMENT_SUCCEEDED, not BOOKING_CONFIRMED: this test is about the
-    # retry-exhausted failure path, not message building, and
-    # PAYMENT_SUCCEEDED stays a static _MESSAGES lookup that needs no
-    # appointment.
+    # REVIEW_REQUEST, not BOOKING_CONFIRMED: this test is about the
+    # retry-exhausted failure path, not message building, and REVIEW_REQUEST
+    # stays a static _MESSAGES lookup that needs no appointment.
     monkeypatch.setitem(notif_tasks._CHANNELS, "email", _RaisingChannel)
 
     def _retry_exhausted(*args, **kwargs):
         raise MaxRetriesExceededError("simulated: retries exhausted")
 
     monkeypatch.setattr(send_notification_task, "retry", _retry_exhausted)
-    notification = _make_pending(salon, customer, trigger=NotificationTrigger.PAYMENT_SUCCEEDED)
+    notification = _make_pending(salon, customer, trigger=NotificationTrigger.REVIEW_REQUEST)
 
     result = send_notification_task.delay(notification.id, salon.id)
 

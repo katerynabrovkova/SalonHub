@@ -171,12 +171,15 @@ class PaymentWebhookView(PublicEndpointMixin, APIView):
             # this lock is released first; initiate_refund re-acquires its
             # own fresh lock on the (by-then-committed) SUCCEEDED row.
             with transaction.atomic():
-                if event_type == _PAYMENT_SUCCEEDED:
+                if event_type in (_PAYMENT_SUCCEEDED, _PAYMENT_FAILED):
                     # Appointment before Payment: the parent-before-child
                     # lock order cancel_appointment also follows, so a
-                    # concurrent cancel and payment-success webhook cannot
-                    # deadlock (docs/DECISIONS.md § "Persisted refund
-                    # decision (`Payment.refund_due`)"). The appointment id
+                    # concurrent cancel and payment webhook cannot deadlock
+                    # (docs/DECISIONS.md § "Persisted refund decision
+                    # (`Payment.refund_due`)"). Both events read the
+                    # appointment's status under this lock: success to
+                    # confirm or refund, failure to decide whether
+                    # PAYMENT_FAILED is still sent. The appointment id
                     # comes from the unlocked read above; it never changes
                     # (one-to-one). The Payment status is rechecked below,
                     # under its own lock.
@@ -193,20 +196,9 @@ class PaymentWebhookView(PublicEndpointMixin, APIView):
                         if appointment_row.status == AppointmentStatus.PENDING_PAYMENT:
                             appointment_row.status = AppointmentStatus.CONFIRMED
                             appointment_row.save(update_fields=["status"])
-                            # PAYMENT_SUCCEEDED is recorded only on this
-                            # confirming path, never on the EXPIRED branch
-                            # below (docs/DECISIONS.md § Step (c) —
-                            # PAYMENT_SUCCEEDED suppressed on the
-                            # EXPIRED-appointment branch): an "we received
-                            # your payment" email moments before a silent
-                            # refund, with no booking, is a misleading
-                            # confirmation.
-                            record_and_dispatch_notification(
-                                salon=salon,
-                                trigger_type=NotificationTrigger.PAYMENT_SUCCEEDED,
-                                appointment=appointment_row,
-                                dedup_key=f"payment_succeeded:payment:{payment_row.pk}",
-                            )
+                            # BOOKING_CONFIRMED only: it already says the
+                            # deposit is paid, so PAYMENT_SUCCEEDED is not
+                            # sent (docs/DECISIONS.md "Notifications").
                             record_and_dispatch_notification(
                                 salon=salon,
                                 trigger_type=NotificationTrigger.BOOKING_CONFIRMED,
@@ -249,22 +241,23 @@ class PaymentWebhookView(PublicEndpointMixin, APIView):
                     if payment_row.status == PaymentStatus.PENDING:
                         payment_row.status = PaymentStatus.FAILED
                         payment_row.save(update_fields=["status"])
-                        # appointment_row is not loaded on this branch (no
-                        # appointment transition here) — one fetch, reused
-                        # for the FK and the recipient. dedup_key carries
+                        # Sent only while the appointment still waits for
+                        # payment (docs/DECISIONS.md "Notifications"): an
+                        # expired or cancelled appointment's customer
+                        # already has that email, and "we are still holding
+                        # this time" would be false. dedup_key carries
                         # provider_reference_id so a legitimate retry (a new
-                        # ref, per initiate_payment) is a new notification
-                        # (docs/DECISIONS.md § Step (c) `dedup_key` formats).
-                        failed_appointment = Appointment.objects.get(pk=payment_row.appointment_id)
-                        record_and_dispatch_notification(
-                            salon=salon,
-                            trigger_type=NotificationTrigger.PAYMENT_FAILED,
-                            appointment=failed_appointment,
-                            dedup_key=(
-                                f"payment_failed:payment:{payment_row.pk}:"
-                                f"{payment_row.provider_reference_id}"
-                            ),
-                        )
+                        # ref, per initiate_payment) is a new notification.
+                        if appointment_row.status == AppointmentStatus.PENDING_PAYMENT:
+                            record_and_dispatch_notification(
+                                salon=salon,
+                                trigger_type=NotificationTrigger.PAYMENT_FAILED,
+                                appointment=appointment_row,
+                                dedup_key=(
+                                    f"payment_failed:payment:{payment_row.pk}:"
+                                    f"{payment_row.provider_reference_id}"
+                                ),
+                            )
                     else:
                         _warn_if_impossible_transition(
                             event_id=event_id,

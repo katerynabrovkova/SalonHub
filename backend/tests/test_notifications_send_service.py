@@ -20,7 +20,7 @@ from django.conf import settings
 
 from accounts.models import Customer
 from booking.guest_tokens import derive_guest_token, issue_guest_token
-from core.formatting import format_datetime_for_salon
+from booking.models import AppointmentStatus
 from core.tenancy import tenant_context
 from notifications.channels.base import NotificationChannel
 from notifications.channels.mock import MockNotificationChannel
@@ -31,7 +31,7 @@ from notifications.services import (
     mark_notification_failed,
     send_notification,
 )
-from tests.conftest import make_appointment
+from tests.conftest import make_appointment as _conftest_make_appointment
 
 pytestmark = pytest.mark.django_db
 
@@ -39,19 +39,24 @@ NOW = dt.datetime(2026, 9, 3, 12, 0, tzinfo=dt.UTC)
 EARLIER = dt.datetime(2026, 9, 1, 8, 0, tzinfo=dt.UTC)
 APPOINTMENT_START = dt.datetime(2026, 9, 26, 11, 0, tzinfo=dt.UTC)
 
-# BOOKING_CONFIRMED, APPOINTMENT_REMINDER, and BOOKING_CREATED are excluded:
-# none is a static _MESSAGES lookup — each builds a subject/body from a real
-# appointment (salon name, local start time, a guest link), so each has its
-# own dedicated tests below instead of running through this generic check.
-# BOOKING_EXPIRED is a static _MESSAGES entry (no per-appointment link), so
-# it is included here like BOOKING_CANCELLED.
+# Every booking email is excluded: none is a static _MESSAGES lookup — each
+# builds a subject/body from a real appointment (salon name, local start
+# time, a link, money), so each has its own dedicated tests instead of
+# running through this generic check. REVIEW_REQUEST is the only static
+# entry left.
 _IMPLEMENTED_TRIGGERS = [
-    NotificationTrigger.BOOKING_CANCELLED,
-    NotificationTrigger.BOOKING_EXPIRED,
-    NotificationTrigger.PAYMENT_SUCCEEDED,
-    NotificationTrigger.PAYMENT_FAILED,
     NotificationTrigger.REVIEW_REQUEST,
 ]
+
+
+def make_appointment(**kwargs):
+    """conftest's make_appointment, reloaded from the database: the booking
+    emails read the money snapshots, which the fixture service holds as an
+    unsaved string price until the row is read back."""
+    appointment = _conftest_make_appointment(**kwargs)
+    with tenant_context(appointment.salon_id):
+        appointment.refresh_from_db()
+    return appointment
 
 
 class _RaisingChannel(NotificationChannel):
@@ -123,9 +128,16 @@ def test_build_message_returns_nonempty_subject_and_body(trigger):
     assert body
 
 
-def test_build_message_raises_for_an_unimplemented_trigger():
+@pytest.mark.parametrize(
+    "trigger",
+    [NotificationTrigger.EMAIL_VERIFICATION, NotificationTrigger.PAYMENT_SUCCEEDED],
+    ids=["email_verification", "payment_succeeded"],
+)
+def test_build_message_raises_for_an_unimplemented_trigger(trigger):
+    """PAYMENT_SUCCEEDED is no longer sent (docs/DECISIONS.md "Notifications")
+    and has no text: its enum value stays only for existing rows."""
     with pytest.raises(ValueError, match="trigger_type"):
-        _build_message(Notification(trigger_type=NotificationTrigger.EMAIL_VERIFICATION), now=NOW)
+        _build_message(Notification(trigger_type=trigger), now=NOW)
 
 
 def _guest_appointment(salon, customer, specialist, service):
@@ -296,15 +308,15 @@ def test_build_message_for_booking_created_builds_subject_body_and_payment_link(
     with tenant_context(salon.id):
         subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Your booking is created"
-    assert "Bella Demo Salon" in body
-    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone) in body
+    assert subject == "Your booking at Bella Demo Salon is created, the deposit is still to be paid"
+    lines = body.splitlines()
+    assert "Bella Demo Salon" in lines
+    assert "When: Saturday, 26 September 2026, 14:00" in lines
     payment_link = (
         f"{settings.FRONTEND_URL.format(slug=salon.slug)}/booking/pay"
         f"#appointment_id={appointment.id}&token={derive_guest_token(appointment.id)}"
     )
-    assert payment_link in body
-    assert "15 minutes" in body
+    assert lines[lines.index("Pay the deposit:") + 1] == payment_link
 
 
 def test_build_message_for_booking_created_link_carries_the_re_derived_token(
@@ -363,17 +375,32 @@ def _uk_customer(salon):
         )
 
 
-def test_build_message_static_trigger_renders_in_customer_preferred_language(salon):
+def test_build_message_for_booking_cancelled_renders_in_customer_preferred_language(
+    salon, specialist, service
+):
     customer = _uk_customer(salon)
+    appointment = make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+        status=AppointmentStatus.CANCELLED,
+    )
     notification = _make_notification(
-        salon, customer=customer, trigger=NotificationTrigger.BOOKING_CANCELLED
+        salon,
+        customer=customer,
+        appointment=appointment,
+        trigger=NotificationTrigger.BOOKING_CANCELLED,
     )
 
     with tenant_context(salon.id):
         subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Ваш запис скасовано"
-    assert body == "Ваш запис було скасовано."
+    assert subject == "Ваш запис у Bella Demo Salon скасовано"
+    lines = body.splitlines()
+    assert lines[:2] == ["Вітаємо, Оля!", "Ваш запис скасовано:"]
+    assert "Записатися знову:" in lines
 
 
 def test_build_message_dynamic_branch_renders_in_customer_preferred_language(
@@ -405,32 +432,58 @@ def test_build_message_dynamic_branch_renders_in_customer_preferred_language(
     assert "Коли: субота, 26 вересня 2026, 14:00" in body.splitlines()
 
 
-def test_build_message_for_booking_expired_renders_in_customer_preferred_language(salon):
+def _expired_appointment(salon, customer, specialist, service):
+    return make_appointment(
+        salon=salon,
+        customer=customer,
+        specialist=specialist,
+        service=service,
+        start=APPOINTMENT_START,
+        status=AppointmentStatus.EXPIRED,
+    )
+
+
+def test_build_message_for_booking_expired_renders_in_customer_preferred_language(
+    salon, specialist, service
+):
     customer = _uk_customer(salon)
+    appointment = _expired_appointment(salon, customer, specialist, service)
     notification = _make_notification(
-        salon, customer=customer, trigger=NotificationTrigger.BOOKING_EXPIRED
+        salon,
+        customer=customer,
+        appointment=appointment,
+        trigger=NotificationTrigger.BOOKING_EXPIRED,
     )
 
     with tenant_context(salon.id):
         subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Термін бронювання минув"
-    assert body == (
-        "Термін дії вашого бронювання минув, оскільки оплату не було здійснено "
-        "вчасно. Ви можете забронювати знову."
-    )
+    assert subject == "Запис у Bella Demo Salon не підтверджено"
+    assert body.splitlines()[:2] == [
+        "Вітаємо, Оля!",
+        "Час на оплату минув, тому запис не підтверджено і цей час звільнено:",
+    ]
 
 
-def test_build_message_for_booking_expired_renders_in_english_by_default(salon):
+def test_build_message_for_booking_expired_renders_in_english_by_default(
+    salon, customer, specialist, service
+):
+    """A notification with no recipient Customer has no language preference,
+    so it falls back to English."""
+    appointment = _expired_appointment(salon, customer, specialist, service)
     notification = _make_notification(
-        salon, customer=None, trigger=NotificationTrigger.BOOKING_EXPIRED
+        salon, customer=None, appointment=appointment, trigger=NotificationTrigger.BOOKING_EXPIRED
     )
 
     with tenant_context(salon.id):
         subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Your booking has expired"
-    assert body == "Your booking has expired because payment was not completed in time."
+    assert subject == "Your booking at Bella Demo Salon was not confirmed"
+    assert body.splitlines()[:2] == [
+        "Hello, Alice!",
+        "The time to pay has run out, so the booking was not confirmed and this time has "
+        "been released:",
+    ]
 
 
 def test_build_message_for_booking_created_renders_in_customer_preferred_language(
@@ -455,23 +508,25 @@ def test_build_message_for_booking_created_renders_in_customer_preferred_languag
     with tenant_context(salon.id):
         subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Ваш запис створено"
-    assert "створено" in body
-    assert "15 хвилин" in body
-    # The interpolated datetime is rendered with the Ukrainian tables too.
-    assert format_datetime_for_salon(appointment.start_datetime, salon.timezone, lang="uk") in body
+    # The fixture salon has only an English name, so it resolves to that.
+    assert subject == "Ваш запис у Bella Demo Salon створено, залишилось оплатити"
+    lines = body.splitlines()
+    assert "Ваш запис створено:" in lines
+    assert "Оплатити передоплату:" in lines
+    # The interpolated datetime is rendered with the Ukrainian full tables too.
+    assert "Коли: субота, 26 вересня 2026, 14:00" in lines
 
 
 def test_build_message_customer_less_notification_builds_in_english(salon):
     notification = _make_notification(
-        salon, customer=None, trigger=NotificationTrigger.PAYMENT_SUCCEEDED
+        salon, customer=None, trigger=NotificationTrigger.REVIEW_REQUEST
     )
 
     with tenant_context(salon.id):
         subject, body = _build_message(notification, now=NOW)
 
-    assert subject == "Payment received"
-    assert body == "We have received your deposit payment."
+    assert subject == "How was your visit?"
+    assert body == "We would love your feedback on your recent visit."
 
 
 # --- send_notification -------------------------------------------------
@@ -547,11 +602,11 @@ def test_send_notification_is_a_noop_when_the_row_is_already_failed(salon, custo
 
 
 def test_send_notification_propagates_a_channel_failure_and_leaves_the_row_pending(salon, customer):
-    # PAYMENT_SUCCEEDED, not BOOKING_CONFIRMED: this test is about channel
-    # failure handling, not message building, and PAYMENT_SUCCEEDED stays a
+    # REVIEW_REQUEST, not BOOKING_CONFIRMED: this test is about channel
+    # failure handling, not message building, and REVIEW_REQUEST stays a
     # static _MESSAGES lookup that needs no appointment.
     notification = _make_notification(
-        salon, customer=customer, trigger=NotificationTrigger.PAYMENT_SUCCEEDED
+        salon, customer=customer, trigger=NotificationTrigger.REVIEW_REQUEST
     )
 
     with tenant_context(salon.id), pytest.raises(RuntimeError, match="smtp down"):

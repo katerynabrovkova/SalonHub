@@ -24,7 +24,7 @@ from decimal import Decimal
 
 from booking.models import ACTIVE_APPOINTMENT_STATUSES, Appointment, AppointmentStatus
 from payments.models import Payment, PaymentStatus
-from payments.services import compute_deposit_amount
+from payments.services import compute_deposit_amount, compute_deposit_breakdown
 
 # amount_due_at_visit is only meaningful once a deposit has actually been
 # collected against a still-honored booking (docs/DECISIONS.md § Stage 15
@@ -65,6 +65,19 @@ def amount_due_at_visit(appointment: Appointment) -> Decimal | None:
     ):
         return None
     return appointment.service_price_at_booking - payment.amount
+
+
+def amount_due_after_deposit(appointment: Appointment) -> Decimal:
+    """What will be left to pay at the visit once the deposit is paid, before
+    any Payment has succeeded: the `BOOKING_CREATED` email's line
+    (docs/DECISIONS.md "Notifications"). From the same breakdown as
+    `compute_deposit_amount` and the appointment's booking-time snapshots, so
+    there is no second formula. `amount_due_at_visit` stays the dashboard's
+    value (a succeeded payment only)."""
+    return compute_deposit_breakdown(
+        price=appointment.service_price_at_booking,
+        percentage=appointment.deposit_percentage_at_booking,
+    ).due_at_visit
 
 
 def currency(appointment: Appointment) -> str:

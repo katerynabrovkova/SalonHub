@@ -343,8 +343,9 @@ def test_guest_booking_with_uk_gets_a_ukrainian_booking_created_email(
     assert len(mail.outbox) == 1
     message = mail.outbox[0]
     assert message.to == [GUEST_EMAIL]
-    assert message.subject == "Ваш запис створено"
-    assert message.body.startswith("Ваш запис до ")
+    # The fixture salon has only an English name, so it resolves to that.
+    assert message.subject == "Ваш запис у Bella Demo Salon створено, залишилось оплатити"
+    assert message.body.splitlines()[1] == "Ваш запис створено:"
 
 
 # --- Two salons ----------------------------------------------------------------

@@ -1,13 +1,8 @@
 """
-Stage 9 step (c) commit 1 — the three webhook-fired notification triggers
-(docs/DECISIONS.md § Step (c) scope narrowing; § Step (c) `dedup_key`
-formats; § Step (c) — `PAYMENT_SUCCEEDED` suppressed on the
-EXPIRED-appointment branch). Real-DB integration tests over
-PaymentWebhookView.
-
-Written before payments/views.py records or dispatches any Notification —
-expected red: the assertions on Notification rows / dispatch fail until the
-view wires the three triggers.
+The webhook-fired notification triggers, `BOOKING_CONFIRMED` and
+`PAYMENT_FAILED` (docs/DECISIONS.md "Notifications": `PAYMENT_SUCCEEDED` is
+not sent; no confirmation email on the EXPIRED/CANCELLED late-payment
+branch). Real-DB integration tests over PaymentWebhookView.
 
 CELERY_TASK_ALWAYS_EAGER is True in tests (conftest._celery_eager), so a
 dispatched send_notification_task runs inline. The dispatch itself is
@@ -138,45 +133,32 @@ def _notifications(salon, **filters):
 # --- 1. payment_succeeded on a PENDING_PAYMENT appointment ----------------
 
 
-def test_payment_succeeded_records_payment_succeeded_and_booking_confirmed(
+def test_payment_succeeded_records_booking_confirmed_only(
     client, salon, specialist, service, customer, monkeypatch, django_capture_on_commit_callbacks
 ):
     """The confirming path: a successful payment on a PENDING_PAYMENT
-    appointment records both PAYMENT_SUCCEEDED and BOOKING_CONFIRMED, each a
-    PENDING email Notification with its own dedup_key."""
+    appointment records one BOOKING_CONFIRMED email Notification.
+    PAYMENT_SUCCEEDED is not sent (docs/DECISIONS.md "Notifications")."""
     monkeypatch.setattr(PaymentWebhookView, "provider_class", _FakeProvider)
     appt = _appt(salon, specialist, service, customer, status=AppointmentStatus.PENDING_PAYMENT)
-    payment = _make_payment(
-        salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_1"
-    )
+    _make_payment(salon, appt, status=PaymentStatus.PENDING, provider_reference_id="ref_1")
 
     with django_capture_on_commit_callbacks(execute=True) as callbacks:
         response = _post(client, "evt_1", "payment_succeeded", "ref_1")
 
     assert response.status_code == 200
 
-    with tenant_context(salon.id):
-        rows = {n.trigger_type: n for n in Notification.objects.all()}
-    assert set(rows) == {
-        NotificationTrigger.PAYMENT_SUCCEEDED,
-        NotificationTrigger.BOOKING_CONFIRMED,
-    }
-
-    succeeded = rows[NotificationTrigger.PAYMENT_SUCCEEDED]
-    assert succeeded.status == NotificationStatus.SENT  # dispatched + delivered
-    assert succeeded.channel == NotificationChannel.EMAIL
-    assert succeeded.customer_id == customer.id
-    assert succeeded.appointment_id == appt.id
-    assert succeeded.dedup_key == f"payment_succeeded:payment:{payment.pk}"
-
-    confirmed = rows[NotificationTrigger.BOOKING_CONFIRMED]
+    rows = _notifications(salon)
+    assert [row.trigger_type for row in rows] == [NotificationTrigger.BOOKING_CONFIRMED]
+    confirmed = rows[0]
+    assert confirmed.status == NotificationStatus.SENT  # dispatched + delivered
     assert confirmed.channel == NotificationChannel.EMAIL
     assert confirmed.customer_id == customer.id
     assert confirmed.appointment_id == appt.id
     assert confirmed.dedup_key == f"booking_confirmed:appointment:{appt.pk}"
 
-    assert len(callbacks) == 2
-    assert [m.to for m in mail.outbox] == [[customer.email], [customer.email]]
+    assert len(callbacks) == 1
+    assert [m.to for m in mail.outbox] == [[customer.email]]
 
 
 # --- 2. second delivery on an already-confirmed booking ------------------
@@ -220,7 +202,7 @@ def test_payment_succeeded_second_delivery_on_confirmed_booking_records_no_new_n
     assert response.status_code == 200
     assert second_callbacks == []
     with tenant_context(salon.id):
-        assert Notification.objects.count() == 2  # still just the first delivery's pair
+        assert Notification.objects.count() == 1  # still just the first delivery's email
         assert Payment.objects.get(pk=payment.pk).status == PaymentStatus.SUCCEEDED
         assert Appointment.objects.get(pk=appt.pk).status == AppointmentStatus.CONFIRMED
     assert _FakeProvider.refund_calls == []
@@ -229,14 +211,13 @@ def test_payment_succeeded_second_delivery_on_confirmed_booking_records_no_new_n
 # --- 3. dedup unique constraint (notification_trigger_channel_dedup_uniq) -
 
 
-def test_payment_succeeded_dedup_unique_constraint_is_tolerated_per_row(
+def test_booking_confirmed_dedup_unique_constraint_is_tolerated(
     client, salon, specialist, service, customer, monkeypatch, django_capture_on_commit_callbacks
 ):
     """Covers notification_trigger_channel_dedup_uniq specifically. A row
-    already occupies the PAYMENT_SUCCEEDED dedup_key, so the webhook's
+    already occupies the BOOKING_CONFIRMED dedup_key, so the webhook's
     INSERT for it raises UniqueViolation; the helper tolerates that as a
-    no-op and dispatches nothing for it. BOOKING_CONFIRMED, created in its
-    own independent savepoint, is unaffected and still recorded. 200."""
+    no-op and dispatches nothing. The confirmation itself still commits. 200."""
     monkeypatch.setattr(PaymentWebhookView, "provider_class", _FakeProvider)
     appt = _appt(salon, specialist, service, customer, status=AppointmentStatus.PENDING_PAYMENT)
     payment = _make_payment(
@@ -248,9 +229,9 @@ def test_payment_succeeded_dedup_unique_constraint_is_tolerated_per_row(
             salon=salon,
             appointment=appt,
             customer_id=customer.id,
-            trigger_type=NotificationTrigger.PAYMENT_SUCCEEDED,
+            trigger_type=NotificationTrigger.BOOKING_CONFIRMED,
             channel=NotificationChannel.EMAIL,
-            dedup_key=f"payment_succeeded:payment:{payment.pk}",
+            dedup_key=f"booking_confirmed:appointment:{appt.pk}",
             status=NotificationStatus.SENT,
         )
 
@@ -259,15 +240,13 @@ def test_payment_succeeded_dedup_unique_constraint_is_tolerated_per_row(
 
     assert response.status_code == 200
     with tenant_context(salon.id):
-        succeeded = Notification.objects.filter(trigger_type=NotificationTrigger.PAYMENT_SUCCEEDED)
-        assert succeeded.count() == 1
-        assert succeeded.get().status == NotificationStatus.SENT  # untouched
-        assert (
-            Notification.objects.filter(trigger_type=NotificationTrigger.BOOKING_CONFIRMED).count()
-            == 1
-        )
-    assert len(callbacks) == 1  # only booking_confirmed dispatched
-    assert [m.to for m in mail.outbox] == [[customer.email]]
+        confirmed = Notification.objects.filter(trigger_type=NotificationTrigger.BOOKING_CONFIRMED)
+        assert confirmed.count() == 1
+        assert confirmed.get().status == NotificationStatus.SENT  # untouched
+        assert Payment.objects.get(pk=payment.pk).status == PaymentStatus.SUCCEEDED
+        assert Appointment.objects.get(pk=appt.pk).status == AppointmentStatus.CONFIRMED
+    assert callbacks == []
+    assert mail.outbox == []
 
 
 # --- 4. EXPIRED-appointment suppression ---------------------------------
@@ -453,7 +432,7 @@ def test_send_is_deferred_until_after_commit(
         assert mail.outbox == []
 
     assert response.status_code == 200
-    assert len(callbacks) == 2
+    assert len(callbacks) == 1
 
     for callback in callbacks:
         callback()
@@ -462,7 +441,7 @@ def test_send_is_deferred_until_after_commit(
         assert set(Notification.objects.values_list("status", flat=True)) == {
             NotificationStatus.SENT
         }
-    assert len(mail.outbox) == 2
+    assert len(mail.outbox) == 1
 
 
 # --- 9. the IntegrityError catch is narrowed to the dedup constraint ----
