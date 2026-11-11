@@ -87,6 +87,19 @@ Every open, deferred and gated item in one place, grouped by where it is
 due. One line each; the topic section named in brackets holds the detail.
 When an item is done, delete its line here and update its topic section.
 
+### In progress: booking emails
+
+Decided 11.11.2026. Built in this order, each step its own red/green and
+commit; (a), the new texts of `BOOKING_CREATED`, `BOOKING_CANCELLED`,
+`BOOKING_EXPIRED` and `PAYMENT_FAILED` and no more `PAYMENT_SUCCEEDED`, is
+done.
+
+- (b) Late-payment refund email, the new trigger `LATE_PAYMENT_REFUNDED`.
+  Its migration may only
+  add a choice to `Notification.trigger_type` (approved 11.11.2026); if it
+  needs anything else (`RemoveField`, `DeleteModel`, a constraint change),
+  stop and report. [Notifications]
+
 ### Before Stage 18
 
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
@@ -194,6 +207,8 @@ on top of it.
   restore the account. [Auth]
 - Merging two Customers when an email change hits an address already used.
   [Identity]
+- The salon receives no email about bookings, cancellations, expiries or late
+  refunds. [Notifications]
 
 ### Salon settings stage (first stage where a salon edits its own settings; at the latest Stage 22)
 
@@ -227,7 +242,8 @@ on top of it.
   "Оплатити" endpoint already covers.
 - 0% deposit flow, and what WayForPay does with a 0.00 amount. When it is
   decided, revisit the "Передоплата: X (сплачено)" line of the
-  `BOOKING_CONFIRMED` email. [Notifications]
+  `BOOKING_CONFIRMED` email and the payment lines of `BOOKING_CREATED`.
+  [Notifications]
 
 ### Stage 22 (productionization)
 
@@ -317,9 +333,7 @@ on top of it.
   client pages.
 - Cancel link in the email-change notice to the old address.
 - Shared appointment-email builder refactor.
-- `BOOKING_CANCELLED` email is static ("Ваш запис було скасовано.") and does
-  not say whether the deposit will be refunded; rewrite it in the style of
-  the new `BOOKING_CONFIRMED` email. [Notifications]
+- No email when a refund completes at the bank. [Notifications]
 - More BellaBeauty FAQ items (salon content, not code).
 
 ### Deliberately not scheduled
@@ -865,10 +879,12 @@ functions touch the ORM and need tenant context.
   `ProcessedWebhookEvent` first, so a replay is a no-op, and state handlers
   are idempotent as well. Orchestration lives in the view (single caller).
 - **`payment_succeeded`** confirms the appointment and dispatches
-  `BOOKING_CONFIRMED` and `PAYMENT_SUCCEEDED` in the same transaction. If the
-  appointment is already `EXPIRED` or `CANCELLED`, it is not confirmed, the
-  confirmation emails are suppressed, and the deposit is refunded in full
-  (the cancellation happened before the payment was confirmed).
+  `BOOKING_CONFIRMED` in the same transaction (`PAYMENT_SUCCEEDED` is not
+  sent, see "Notifications"). If the appointment is already `EXPIRED` or
+  `CANCELLED`, it is not confirmed, no confirmation email is sent, the
+  deposit is refunded in full (the cancellation happened before the payment
+  was confirmed), and the customer gets the late-payment refund email
+  (`LATE_PAYMENT_REFUNDED`).
 
 ### Refund decision and execution
 
@@ -935,8 +951,24 @@ functions touch the ORM and need tenant context.
 - **Triggers in use:** `BOOKING_CREATED` (on creation, with a payment link),
   `BOOKING_CONFIRMED` (only from the payment webhook, so the appointment is
   always `CONFIRMED` then), `BOOKING_CANCELLED`, `BOOKING_EXPIRED`,
-  `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `APPOINTMENT_REMINDER`.
+  `PAYMENT_FAILED`, `APPOINTMENT_REMINDER`, and `LATE_PAYMENT_REFUNDED`
+  (being built, see register "In progress: booking emails").
   `REVIEW_REQUEST` has message text but is never dispatched (see register).
+- **`PAYMENT_SUCCEEDED` is not sent** (decided 11.11.2026):
+  `BOOKING_CONFIRMED` already says the deposit is paid, and two emails in the
+  same second look like a bug. The enum value stays for existing rows.
+- **`PAYMENT_FAILED` is sent only while the appointment is
+  `PENDING_PAYMENT`** (decided 11.11.2026): by then an expired or cancelled
+  appointment's customer already has that email, and "we are still holding
+  this time" would be false.
+- **Late-payment refund email, `LATE_PAYMENT_REFUNDED`** (decided
+  11.11.2026): when the payment webhook receives a succeeded payment for an
+  appointment that is already `EXPIRED` or `CANCELLED` and refunds it, the
+  customer gets a refund email; before this the money was charged and
+  refunded with no message. Dedup is per Payment: one email for each
+  refunded late payment. It is sent for that refund decision, not when the
+  refund completes: no email when a bank later completes a refund (see
+  register).
 - **The link in a booking email depends on how the booking was made,** never
   inferred from whether the Customer has an Account. Two mechanisms, kept on
   purpose (10.11.2026):
@@ -952,6 +984,13 @@ functions touch the ORM and need tenant context.
     are sent by the payment webhook and the reminder sweep, which do not know
     how the booking was made; a guest token row exists only for guest
     bookings, so it is the record of that.
+  - `PAYMENT_FAILED` (decided 11.11.2026): sent by the payment webhook, so
+    the same token-row rule, but an appointment with a guest token row
+    links to the pay page (`/booking/pay#...`, as `BOOKING_CREATED`), one
+    without to `/client`.
+  - `BOOKING_CANCELLED`, `BOOKING_EXPIRED` and `LATE_PAYMENT_REFUNDED`
+    carry no appointment link, only the salon's `/services` page ("book
+    again"), the same for guest and account bookings.
 - **Reminder:** one day-before reminder per appointment, hourly sweep,
   window `start in (now+24h, now+25h]`, `CONFIRMED` only (a bare filter, not
   `ACTIVE_APPOINTMENT_STATUSES`: that set drives the double-booking
@@ -960,13 +999,15 @@ functions touch the ORM and need tenant context.
   row lock to keep counts honest, with the unique constraint as the real
   guard against concurrent runs. A beat drift can miss one reminder
   (accepted, soft failure).
-- **Message building:** dynamic builders for `BOOKING_CREATED`,
-  `BOOKING_CONFIRMED` and `APPOINTMENT_REMINDER` (salon name, local time,
-  link); `appointment=None` raises `ValueError` (a background task with a
+- **Message building:** dynamic builders for every booking email
+  (`BOOKING_CREATED`, `BOOKING_CONFIRMED`, `BOOKING_CANCELLED`,
+  `BOOKING_EXPIRED`, `PAYMENT_FAILED`, `APPOINTMENT_REMINDER` and
+  `LATE_PAYMENT_REFUNDED`: salon name, local time, link, money);
+  `appointment=None` raises `ValueError` (a background task with a
   missing appointment is a bug, not a blank send). Dates come from
   `core/formatting.py` with hardcoded weekday and month tables, never
-  `%a`/`%b` (OS locale); `BOOKING_CONFIRMED` and `APPOINTMENT_REMINDER` use
-  the full weekday and the month name in the genitive ("10 листопада").
+  `%a`/`%b` (OS locale); every booking email uses the full weekday and the
+  month name in the genitive ("10 листопада").
 - **Texts of `BOOKING_CONFIRMED` and `APPOINTMENT_REMINDER`** (decided
   10.11.2026). Amounts use the currency code for now, whole amounts without
   ".00" ("24 UAH"), others with cents ("24.50 UAH"), the same rule as the
@@ -1060,6 +1101,186 @@ functions touch the ORM and need tenant context.
 
   The reminder deliberately does not mention the refund deadline: it arrives
   24-25 hours before the visit, when the deadline is about to pass.
+- **Texts of the other booking emails** (decided 11.11.2026): `BOOKING_CREATED`
+  (guest and account), `BOOKING_CANCELLED`, `BOOKING_EXPIRED`,
+  `PAYMENT_FAILED` and `LATE_PAYMENT_REFUNDED`. The same style and
+  formatting rules as `BOOKING_CONFIRMED` above: greeting with the name as
+  entered, the full date, whole amounts without ".00", the contact-line and
+  last-line rules. `<salon footer>` below is the salon name line plus the
+  `<phone> · <address>` line under those rules. Which emails have a last line
+  (decided 11.11.2026, after the manual check), with or without a phone: the
+  "Якщо ви не записувалися..." / "If you did not book..." line appears in
+  emails that start or confirm something in force (`BOOKING_CREATED`,
+  `BOOKING_CONFIRMED`, `APPOINTMENT_REMINDER`, `LATE_PAYMENT_REFUNDED`);
+  `BOOKING_CANCELLED` has its own "Якщо ви не скасовували..." / "If you did
+  not cancel..." line; emails saying nothing came of the booking
+  (`BOOKING_EXPIRED`, `PAYMENT_FAILED`) have none, because the customer has
+  nothing to report and `BOOKING_CREATED` already carried the line. Money
+  comes from `booking.amounts`. The "Оплата при візиті" / "Pay at the visit"
+  line of `BOOKING_CREATED` is the amount due once the deposit is paid, from
+  a `booking.amounts` function computed from the same breakdown as
+  `compute_deposit_amount` (no second formula); `amount_due_at_visit` keeps
+  its meaning (a succeeded payment only) for the dashboard. The hold time is
+  `hold_expires_at` in salon-local `HH:MM`. The money line of the
+  cancellation email is decided from
+  `Payment.refund_due`, never from the Payment status (which can be
+  `SUCCEEDED`, `REFUND_PENDING` or `REFUNDED` by the time the email is
+  built): `refund_due` set means a refund is owed; a succeeded payment
+  without `refund_due` means the deposit is kept; otherwise nothing was paid
+  and there is no money line.
+
+  ```
+  BOOKING_CREATED, guest
+  Subject: Ваш запис у <salon> створено, залишилось оплатити
+  Вітаємо, <name>!
+  Ваш запис створено:
+  Послуга: <service>
+  Майстер: <specialist>
+  Коли: <weekday>, <day> <month> <year>, <time>
+  Тривалість: <duration>
+  Передоплата: <deposit>
+  Оплата при візиті: <amount due>
+  Ми тримаємо цей час для вас до <hold time>. Якщо не встигнете оплатити, запис скасується автоматично.
+  Оплатити передоплату:
+  <pay link>
+  <salon footer>
+  Якщо ви не записувалися в <salon>, будь ласка, повідомте салон за номером вище.
+  (no phone: Якщо ви не записувалися в <salon>, будь ласка, повідомте салон.)
+
+  BOOKING_CREATED, account: the same, but the two payment lines are
+  Оплатити передоплату можна в особистому кабінеті:
+  <link to /client>
+
+  Subject: Your booking at <salon> is created, the deposit is still to be paid
+  Hello, <name>!
+  Your booking is created:
+  Service: <service>
+  Specialist: <specialist>
+  When: <weekday>, <day> <month> <year>, <time>
+  Duration: <duration>
+  Deposit: <deposit>
+  Pay at the visit: <amount due>
+  We are holding this time for you until <hold time>. If you do not pay in time, the booking will be cancelled automatically.
+  Pay the deposit:
+  <pay link>
+  <salon footer>
+  If you did not book at <salon>, please let the salon know at the number above.
+  (no phone: If you did not book at <salon>, please let the salon know.)
+
+  BOOKING_CREATED, account: the same, but the two payment lines are
+  You can pay the deposit in your account:
+  <link to /client>
+  ```
+
+  ```
+  BOOKING_CANCELLED
+  Subject: Ваш запис у <salon> скасовано
+  Вітаємо, <name>!
+  Ваш запис скасовано:
+  Послуга: <service>
+  Майстер: <specialist>
+  Коли: <weekday>, <day> <month> <year>, <time>
+  (refund owed) Передоплату <deposit> буде повернено на картку, з якої ви платили. Термін залежить від вашого банку.
+  (deposit kept) Запис скасовано менш ніж за 24 години до візиту, тому передоплата <deposit> не повертається.
+  (nothing paid: no line)
+  Записатися знову:
+  <link to /services>
+  <salon footer>
+  Якщо ви не скасовували цей запис, будь ласка, зверніться до салону за номером вище.
+  (no phone: Якщо ви не скасовували цей запис, будь ласка, зверніться до салону.)
+
+  Subject: Your booking at <salon> is cancelled
+  Hello, <name>!
+  Your booking is cancelled:
+  Service: <service>
+  Specialist: <specialist>
+  When: <weekday>, <day> <month> <year>, <time>
+  (refund owed) The deposit of <deposit> will be refunded to the card you paid with. How long it takes depends on your bank.
+  (deposit kept) The booking was cancelled less than 24 hours before the visit, so the deposit of <deposit> is not refunded.
+  (nothing paid: no line)
+  Book again:
+  <link to /services>
+  <salon footer>
+  If you did not cancel this booking, please contact the salon at the number above.
+  (no phone: If you did not cancel this booking, please contact the salon.)
+  ```
+
+  ```
+  BOOKING_EXPIRED
+  Subject: Запис у <salon> не підтверджено
+  Вітаємо, <name>!
+  Час на оплату минув, тому запис не підтверджено і цей час звільнено:
+  Послуга: <service>
+  Коли: <weekday>, <day> <month> <year>, <time>
+  Записатися знову:
+  <link to /services>
+  <salon footer>
+  (no last line)
+
+  Subject: Your booking at <salon> was not confirmed
+  Hello, <name>!
+  The time to pay has run out, so the booking was not confirmed and this time has been released:
+  Service: <service>
+  When: <weekday>, <day> <month> <year>, <time>
+  Book again:
+  <link to /services>
+  <salon footer>
+  (no last line)
+  ```
+
+  ```
+  PAYMENT_FAILED
+  Subject: Оплата в <salon> не пройшла
+  Вітаємо, <name>!
+  Не вдалося провести передоплату за запис:
+  Послуга: <service>
+  Коли: <weekday>, <day> <month> <year>, <time>
+  Передоплата: <deposit>
+  Ми ще тримаємо цей час для вас до <hold time>. Спробувати оплатити ще раз:
+  <pay link, or link to /client>
+  <salon footer>
+  (no last line)
+
+  Subject: Your payment at <salon> did not go through
+  Hello, <name>!
+  We could not process the deposit payment for your booking:
+  Service: <service>
+  When: <weekday>, <day> <month> <year>, <time>
+  Deposit: <deposit>
+  We are still holding this time for you until <hold time>. Try to pay again:
+  <pay link, or link to /client>
+  <salon footer>
+  (no last line)
+  ```
+
+  ```
+  LATE_PAYMENT_REFUNDED
+  Subject: Повернення передоплати в <salon>
+  Вітаємо, <name>!
+  Ваша оплата надійшла, коли запис уже був недійсний (час на оплату минув або запис скасовано), тому ми повертаємо передоплату повністю:
+  Послуга: <service>
+  Коли: <weekday>, <day> <month> <year>, <time>
+  Сума повернення: <payment amount>
+  Гроші повернуться на картку, з якої ви платили. Термін залежить від вашого банку.
+  Щоб записатися знову, перейдіть на сайт салону:
+  <link to /services>
+  <salon footer>
+  Якщо ви не записувалися в <salon>, будь ласка, повідомте салон за номером вище.
+  (no phone: Якщо ви не записувалися в <salon>, будь ласка, повідомте салон.)
+
+  Subject: Deposit refund from <salon>
+  Hello, <name>!
+  Your payment arrived when the booking was no longer valid (the time to pay had run out or the booking had been cancelled), so we are refunding the deposit in full:
+  Service: <service>
+  When: <weekday>, <day> <month> <year>, <time>
+  Refund amount: <payment amount>
+  The money will return to the card you paid with. How long it takes depends on your bank.
+  To book again, go to the salon's website:
+  <link to /services>
+  <salon footer>
+  If you did not book at <salon>, please let the salon know at the number above.
+  (no phone: If you did not book at <salon>, please let the salon know.)
+  ```
 - **Language:** the recipient Customer's `preferred_language` (the site
   language at booking time, see Identity) through `resolve_language_code`
   (`en` fallback); salon-directed alerts are English.

@@ -436,7 +436,9 @@ email adapter first): a `NotificationChannel` interface with a `send(notificatio
 method, one adapter per channel.
 
 **Trigger points:** booking created, confirmed (payment received), cancelled and
-expired; appointment reminder (scheduled, § 12); payment succeeded/failed. A
+expired; appointment reminder (scheduled, § 12); payment failed, while the
+booking still waits for payment. A payment-succeeded trigger type exists for
+old rows but is no longer sent: the confirmation says the deposit is paid. A
 review-request message exists but is not dispatched yet. **Account emails**
 (verification, password reset, email change, password changed) do not go through this
 abstraction: they are standalone Celery tasks in `accounts/tasks.py` (plain
