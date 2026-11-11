@@ -413,6 +413,7 @@ class GuestBookingCreateView(PublicEndpointMixin, APIView):
             customer_name=body.validated_data["customer_name"],
             customer_email=body.validated_data["customer_email"],
             customer_phone=body.validated_data["customer_phone"],
+            language=body.validated_data.get("language"),
             source=body.validated_data.get("source", AppointmentSource.DIRECT),
         )
 
@@ -484,6 +485,7 @@ class AccountBookingCreateView(APIView):
             now=now,
             customer_name=body.validated_data.get("customer_name"),
             customer_phone=body.validated_data.get("customer_phone"),
+            language=body.validated_data.get("language"),
             source=body.validated_data.get("source", AppointmentSource.DIRECT),
         )
 

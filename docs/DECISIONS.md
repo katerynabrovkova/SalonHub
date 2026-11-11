@@ -89,9 +89,9 @@ When an item is done, delete its line here and update its topic section.
 
 ### In progress: customer email language (decided 11.11.2026)
 
-- (a) Backend: optional `language` on both booking endpoints, validated
-  against `SUPPORTED_LANGUAGES`, written to `Customer.preferred_language`
-  under the overwrite rule. [Booking, Identity]
+- (a) Done: backend, optional `language` on both booking endpoints,
+  validated against `SUPPORTED_LANGUAGES`, written to
+  `Customer.preferred_language` under the overwrite rule. [Booking, Identity]
 - (b) Frontend: the site-language module; both booking forms send it as
   `language`; `<html lang>`, the assistant API's `?lang=` and the widget
   loader's salon fetch read it. [Frontend: site language]

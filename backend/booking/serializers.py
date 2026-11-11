@@ -11,7 +11,7 @@ from booking.models import (
     AppointmentSource,
 )
 from catalog.models import Service
-from core.i18n import resolve_translation
+from core.i18n import SUPPORTED_LANGUAGES, resolve_translation
 from scheduling.serializers import _OffsetRequiredDateTimeField
 from specialists.models import Specialist
 
@@ -272,6 +272,11 @@ class GuestBookingRequestSerializer(serializers.Serializer):
     `source` is optional; a missing one means `direct`, and a value outside
     AppointmentSource is a 400 (docs/DECISIONS.md § Stage 16 planning,
     "Sub-step 9 details").
+
+    `language` is optional too: the site language, stored as the Customer's
+    `preferred_language` (docs/DECISIONS.md § Booking › Creation,
+    "`language`"). A value outside SUPPORTED_LANGUAGES is a 400; a missing
+    one leaves the stored value unchanged.
     """
 
     specialist = SpecialistOrAnyField(queryset=Specialist.unscoped_objects.none())
@@ -281,6 +286,7 @@ class GuestBookingRequestSerializer(serializers.Serializer):
     customer_email = serializers.EmailField()
     customer_phone = serializers.CharField(max_length=32)
     source = serializers.ChoiceField(choices=AppointmentSource.choices, required=False)
+    language = serializers.ChoiceField(choices=SUPPORTED_LANGUAGES, required=False)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
@@ -320,8 +326,10 @@ class AccountBookingRequestSerializer(serializers.Serializer):
     start_datetime = _OffsetRequiredDateTimeField()
     customer_name = serializers.CharField(max_length=255, required=False)
     customer_phone = serializers.CharField(max_length=32, required=False)
-    # Same optional `source` as GuestBookingRequestSerializer above.
+    # Same optional `source` and `language` as GuestBookingRequestSerializer
+    # above.
     source = serializers.ChoiceField(choices=AppointmentSource.choices, required=False)
+    language = serializers.ChoiceField(choices=SUPPORTED_LANGUAGES, required=False)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)

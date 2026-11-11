@@ -12,7 +12,9 @@ from accounts.models import Account, Customer
 from tenants.models import Salon
 
 
-def get_or_create_guest_customer(*, salon: Salon, name: str, email: str, phone: str) -> Customer:
+def get_or_create_guest_customer(
+    *, salon: Salon, name: str, email: str, phone: str, language: str | None = None
+) -> Customer:
     """
     docs/DECISIONS.md § Stage 7.C-bis decisions. Uses the ORM's own
     get_or_create() (not a hand-written check-then-create) so the
@@ -36,14 +38,24 @@ def get_or_create_guest_customer(*, salon: Salon, name: str, email: str, phone: 
     Customer; the name/phone typed for it are not stored. The link is looked
     up through the tenant-scoped `Account.objects`, so only an Account in
     this salon counts.
+
+    `language` (the site language, docs/DECISIONS.md § Identity) follows the
+    same rule as name/phone: stored on a new Customer and on a returning
+    unlinked one, never on a linked one. `None` (not sent) leaves the stored
+    value unchanged; a new Customer then keeps the model default `""`.
     """
-    customer, created = Customer.objects.get_or_create(
-        salon=salon, email=email, defaults={"name": name, "phone": phone}
-    )
+    defaults: dict[str, str] = {"name": name, "phone": phone}
+    if language is not None:
+        defaults["preferred_language"] = language
+    customer, created = Customer.objects.get_or_create(salon=salon, email=email, defaults=defaults)
     if not created and not Account.objects.filter(customer=customer).exists():
         customer.name = name
         customer.phone = phone
-        customer.save(update_fields=["name", "phone"])
+        update_fields = ["name", "phone", "updated_at"]
+        if language is not None:
+            customer.preferred_language = language
+            update_fields.append("preferred_language")
+        customer.save(update_fields=update_fields)
     return customer
 
 
