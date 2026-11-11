@@ -87,15 +87,6 @@ Every open, deferred and gated item in one place, grouped by where it is
 due. One line each; the topic section named in brackets holds the detail.
 When an item is done, delete its line here and update its topic section.
 
-### In progress: customer email language (decided 11.11.2026)
-
-- (a) Done: backend, optional `language` on both booking endpoints,
-  validated against `SUPPORTED_LANGUAGES`, written to
-  `Customer.preferred_language` under the overwrite rule. [Booking, Identity]
-- (b) Frontend: the site-language module; both booking forms send it as
-  `language`; `<html lang>`, the assistant API's `?lang=` and the widget
-  loader's salon fetch read it. [Frontend: site language]
-
 ### Before Stage 18
 
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
@@ -479,7 +470,7 @@ on top of it.
   guest booking. The values sent in such a guest form for a linked Customer
   are not stored anywhere.
 - **`Customer.preferred_language` is the site language at booking time**
-  (decided 11.11.2026, in progress, see register), so emails follow the
+  (decided 11.11.2026), so emails follow the
   language the customer used on the site. The server must store it because
   emails are sent later (payment webhook, reminder sweep), when the customer
   is not on the site. An account booking always writes it to the Account's
@@ -709,7 +700,7 @@ functions touch the ORM and need tenant context.
 - **`Appointment.source`:** `direct` (default) or `assistant`, accepted from
   both booking endpoints, any other value 400. Client-supplied and for
   analytics only: it must never affect money, discounts or access.
-- **`language`** (decided 11.11.2026, in progress, see register): optional
+- **`language`** (decided 11.11.2026): optional
   on both booking endpoints. Allowed values are `SUPPORTED_LANGUAGES`,
   anything else 400. When missing, the stored `Customer.preferred_language`
   is left unchanged: a booking is never blocked over it. Which Customer it
@@ -1310,12 +1301,13 @@ generated OpenAPI client). Pins: see "Dependency pins".
 ### Site language
 
 - **One module is the single source of the site language** (decided
-  11.11.2026, in progress, see register); today it returns `"uk"`. Both
-  booking forms send it as `language`. The places that hardcode `"uk"` with
-  the same meaning (`<html lang>`, the assistant API's `?lang=`, the widget
-  loader's salon fetch) read it from that module. When the UI language
-  switcher exists, the module reads the customer's choice instead of a
-  constant.
+  11.11.2026): `lib/i18n/siteLanguage.ts`, whose `getSiteLanguage()` today
+  returns `"uk"`. The two booking request helpers (`createGuestBooking`,
+  `createAccountBooking`) add it as `language`, so every booking sends it.
+  `<html lang>`, the assistant API's `?lang=` and the widget loader's salon
+  fetch read it from that module, never their own `"uk"` literal. When the
+  UI language switcher exists, the module reads the customer's choice
+  instead of a constant.
 - **The `"uk-UA"` formatting locales and `Intl.PluralRules("uk")` in
   `lib/i18n/reviewCount.ts` stay as they are** until the design pass.
 
