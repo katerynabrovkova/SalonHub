@@ -43,7 +43,7 @@ describe("getAvailability", () => {
     await getAvailability("bella-demo", "5", "2026-08-17", "2026-08-30");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE}/api/v1/salons/bella-demo/availability/?service=5&date_from=2026-08-17&date_to=2026-08-30`,
+      `${API_BASE}/api/v1/salons/bella-demo/availability/?service=5&date_from=2026-08-17&date_to=2026-08-30&lang=uk`,
     );
   });
 
@@ -54,7 +54,7 @@ describe("getAvailability", () => {
     await getAvailability("bella-demo", "5", "2026-08-17", "2026-08-30", "12");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE}/api/v1/salons/bella-demo/availability/?service=5&date_from=2026-08-17&date_to=2026-08-30&specialist=12`,
+      `${API_BASE}/api/v1/salons/bella-demo/availability/?service=5&date_from=2026-08-17&date_to=2026-08-30&specialist=12&lang=uk`,
     );
   });
 

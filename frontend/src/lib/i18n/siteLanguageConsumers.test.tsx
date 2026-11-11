@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
-import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// docs/DECISIONS.md § Frontend › "Site language": the booking requests, the
-// assistant API's ?lang= and the widget loader's salon fetch read the site
-// language from lib/i18n/siteLanguage.ts. The module is mocked to "en", not
-// the real "uk", so each test proves the code reads the module rather than
-// its own "uk" literal.
+// docs/DECISIONS.md § Frontend › "Site language": the booking requests and
+// the assistant API's ?lang= read the site language from
+// lib/i18n/siteLanguage.ts. The module is mocked to "en", not the real "uk",
+// so each test proves the code reads the module rather than its own "uk"
+// literal. The request layer's lang= (apiRequest, guestApiRequest,
+// internalApiUrl) is covered by siteLanguageRequests.test.tsx and
+// siteLanguageServerFetchers.test.ts.
 vi.mock("@/lib/i18n/siteLanguage", () => ({
   getSiteLanguage: () => "en",
 }));
@@ -15,33 +16,15 @@ vi.mock("@/lib/api/client", () => ({
   apiRequest: vi.fn(),
 }));
 
-vi.mock("next/headers", () => ({
-  headers: vi.fn(),
-}));
-
-vi.mock("@/lib/tenants/getSalonInfoPage", () => ({
-  getSalonInfoPage: vi.fn(),
-}));
-
-vi.mock("@/app/AssistantWidget", () => ({
-  default: () => <div data-testid="assistant-widget" />,
-}));
-
 // Imported after the mocks above so the mocked modules are what the code sees.
-import AssistantWidgetLoader from "@/app/AssistantWidgetLoader";
 import { apiRequest } from "@/lib/api/client";
 import { sendAssistantMessage } from "@/lib/assistant/assistantApi";
 import { createAccountBooking } from "@/lib/booking/createAccountBooking";
 import { createGuestBooking } from "@/lib/booking/createGuestBooking";
-import { getSalonInfoPage } from "@/lib/tenants/getSalonInfoPage";
-import { SALON_SLUG_HEADER } from "@/middleware";
-import { headers } from "next/headers";
 
 const API_BASE = "http://localhost:8000";
 
 const mockedApiRequest = vi.mocked(apiRequest);
-const mockedHeaders = vi.mocked(headers);
-const mockedGetSalonInfoPage = vi.mocked(getSalonInfoPage);
 
 const BOOKING = {
   slug: "bella-demo",
@@ -54,8 +37,6 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_API_URL = API_BASE;
   vi.stubGlobal("fetch", vi.fn());
   mockedApiRequest.mockReset();
-  mockedHeaders.mockReset();
-  mockedGetSalonInfoPage.mockReset();
 });
 
 describe("site language consumers", () => {
@@ -116,20 +97,4 @@ describe("site language consumers", () => {
     expect(url).toBe(`${API_BASE}/api/v1/salons/bella-demo/assistant/messages/?lang=en`);
   });
 
-  it("test_widget_loader_fetches_salon_info_in_the_site_language", async () => {
-    mockedHeaders.mockResolvedValue({
-      get: (name: string) => (name === SALON_SLUG_HEADER ? "bella-demo" : null),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal ReadonlyHeaders stand-in, only .get() is used by the loader
-    } as any);
-    mockedGetSalonInfoPage.mockResolvedValueOnce({
-      name: "Bella",
-      currency: "UAH",
-      assistant_enabled: true,
-      assistant_starters: [],
-    });
-
-    render(<>{await AssistantWidgetLoader()}</>);
-
-    expect(mockedGetSalonInfoPage).toHaveBeenCalledWith("bella-demo", "en");
-  });
 });

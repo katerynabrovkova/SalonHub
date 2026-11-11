@@ -3,9 +3,11 @@
  * (docs/DECISIONS.md § Stage 14). Mirrors apiRequest's shape (./client.ts)
  * but authenticates via an explicit guest token instead of cookies/CSRF:
  * no `credentials: "include"`, no `document.cookie` read, no
- * `X-CSRFToken` — the `X-Guest-Token` header is the only credential.
+ * `X-CSRFToken` — the `X-Guest-Token` header is the only credential. Like
+ * apiRequest, every URL carries the site language as `lang=`.
  */
 import { ApiError } from "./errors";
+import { withSiteLanguage } from "./withSiteLanguage";
 
 function isErrorEnvelope(
   body: unknown,
@@ -34,7 +36,7 @@ export async function guestApiRequest<T>(
   }
   headers.set("X-Guest-Token", token);
 
-  const response = await fetch(`${apiBase}/api/v1/salons/${slug}${path}`, {
+  const response = await fetch(`${apiBase}/api/v1/salons/${slug}${withSiteLanguage(path)}`, {
     ...options,
     method,
     headers,

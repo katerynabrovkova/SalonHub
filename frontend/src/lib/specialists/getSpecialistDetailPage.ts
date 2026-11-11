@@ -6,6 +6,7 @@
  * getSpecialistsPage.ts's conventions, except a 404 resolves to `null`
  * instead of throwing — the caller uses that to render notFound().
  */
+import { internalApiUrl } from "@/lib/api/internalApiUrl";
 
 export interface SpecialistDetail {
   id: number;
@@ -32,9 +33,7 @@ export async function getSpecialistDetailPage(
   slug: string,
   id: number,
 ): Promise<SpecialistDetail | null> {
-  const apiBase = process.env.INTERNAL_API_URL;
-
-  const response = await fetch(`${apiBase}/api/v1/salons/${slug}/specialists/${id}/`);
+  const response = await fetch(internalApiUrl(slug, `/specialists/${id}/`));
   if (response.status === 404) {
     return null;
   }

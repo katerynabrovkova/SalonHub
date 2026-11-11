@@ -38,7 +38,7 @@ describe("getServicesPage", () => {
     await getServicesPage("bella-demo", 2);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE}/api/v1/salons/bella-demo/services/?page=2`,
+      `${API_BASE}/api/v1/salons/bella-demo/services/?page=2&lang=uk`,
     );
   });
 
@@ -50,9 +50,12 @@ describe("getServicesPage", () => {
 
     await getServicesPage("bella-demo");
 
-    // Page 1 omits ?page= entirely — cleaner than a redundant ?page=1, and
-    // matches how a plain first-page browse would look.
-    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/services/`);
+    // Page 1 omits page= entirely — cleaner than a redundant page=1, and
+    // matches how a plain first-page browse would look; only the site
+    // language is sent.
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/salons/bella-demo/services/?lang=uk`,
+    );
   });
 
   it("test_maps_response_to_props_shape", async () => {

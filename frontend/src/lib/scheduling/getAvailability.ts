@@ -23,6 +23,7 @@
  * browser-only.
  */
 import { apiErrorFromBody } from "@/lib/api/errors";
+import { internalApiUrl } from "@/lib/api/internalApiUrl";
 
 export interface AvailabilityResult {
   availableTimes: string[];
@@ -35,15 +36,12 @@ export async function getAvailability(
   dateTo: string,
   specialist?: string,
 ): Promise<AvailabilityResult> {
-  const apiBase = process.env.INTERNAL_API_URL;
-  const path = `/api/v1/salons/${slug}/availability/`;
-  const params = new URLSearchParams({ service, date_from: dateFrom, date_to: dateTo });
+  const params: Record<string, string> = { service, date_from: dateFrom, date_to: dateTo };
   if (specialist !== undefined) {
-    params.set("specialist", specialist);
+    params.specialist = specialist;
   }
-  const url = `${apiBase}${path}?${params.toString()}`;
 
-  const response = await fetch(url);
+  const response = await fetch(internalApiUrl(slug, "/availability/", params));
   if (!response.ok) {
     throw apiErrorFromBody(response.status, await response.json());
   }

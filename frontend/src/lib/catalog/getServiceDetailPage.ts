@@ -13,6 +13,7 @@
  * page was removed; recreated here for the booking-summary use case, not
  * revived for that old page).
  */
+import { internalApiUrl } from "@/lib/api/internalApiUrl";
 
 export interface ServiceDetail {
   id: number;
@@ -21,9 +22,7 @@ export interface ServiceDetail {
 }
 
 export async function getServiceDetailPage(slug: string, id: number): Promise<ServiceDetail | null> {
-  const apiBase = process.env.INTERNAL_API_URL;
-
-  const response = await fetch(`${apiBase}/api/v1/salons/${slug}/services/${id}/`);
+  const response = await fetch(internalApiUrl(slug, `/services/${id}/`));
   if (response.status === 404) {
     return null;
   }

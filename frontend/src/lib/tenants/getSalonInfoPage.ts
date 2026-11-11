@@ -6,6 +6,7 @@
  * Mirrors getServicesPage.ts's fetch/error conventions, minus pagination —
  * this endpoint returns a single object, not a DRF list envelope.
  */
+import { internalApiUrl } from "@/lib/api/internalApiUrl";
 
 export interface SalonInfo {
   // Resolved by the backend for `?lang=` (docs/DECISIONS.md § Stage 11.5
@@ -19,16 +20,11 @@ export interface SalonInfo {
 }
 
 /**
- * `lang` is sent as `?lang=` only when given (docs/DECISIONS.md § "Stage 17
- * sub-step order", 17.3b); without it the URL is unchanged, so the existing
- * callers keep the backend's default language resolution.
+ * Always fetched in the site language: `internalApiUrl` adds it
+ * (docs/DECISIONS.md § Frontend › "Site language").
  */
-export async function getSalonInfoPage(slug: string, lang?: string): Promise<SalonInfo> {
-  const apiBase = process.env.INTERNAL_API_URL;
-  const base = `${apiBase}/api/v1/salons/${slug}/`;
-  const url = lang === undefined ? base : `${base}?lang=${encodeURIComponent(lang)}`;
-
-  const response = await fetch(url);
+export async function getSalonInfoPage(slug: string): Promise<SalonInfo> {
+  const response = await fetch(internalApiUrl(slug, "/"));
   if (!response.ok) {
     throw new Error(`Failed to fetch salon info for salon ${slug}`);
   }

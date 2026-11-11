@@ -26,20 +26,21 @@ describe("getSalonInfoPage", () => {
 
     const result = await getSalonInfoPage("bella-demo");
 
-    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/`);
+    // docs/DECISIONS.md § Frontend › "Site language": always the site
+    // language, there is no URL without it.
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/?lang=uk`);
     expect(result).toEqual({ currency: "UAH" });
   });
 
-  // docs/DECISIONS.md § "Stage 17 sub-step order", 17.3b: the assistant
-  // widget's loader asks for the interface language so the salon name in
-  // the header matches it.
-  it("test_sends_lang_when_given", async () => {
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockResolvedValueOnce(jsonResponse({ currency: "UAH" }) as Response);
-
-    await getSalonInfoPage("bella-demo", "uk");
-
-    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/?lang=uk`);
+  it("test_takes_no_lang_argument", () => {
+    // Type-level contract (docs/DECISIONS.md § Frontend › "Site language"):
+    // the language comes only from internalApiUrl, so no caller can pass
+    // one. The assertion is `npm run typecheck`: if a `lang` parameter came
+    // back, this directive would be unused and typecheck would fail. The
+    // call is wrapped and never run, so no request is made.
+    // @ts-expect-error getSalonInfoPage takes no lang argument
+    const callWithLang = () => getSalonInfoPage("bella-demo", "uk");
+    expect(callWithLang).toBeTypeOf("function");
   });
 
   it("test_returns_name_and_assistant_enabled", async () => {
@@ -53,7 +54,7 @@ describe("getSalonInfoPage", () => {
       }) as Response,
     );
 
-    const result = await getSalonInfoPage("bella-demo", "uk");
+    const result = await getSalonInfoPage("bella-demo");
 
     expect(result.name).toBe("Белла");
     expect(result.assistant_enabled).toBe(true);

@@ -4,6 +4,7 @@
  * api/client.ts — safe to call from a Server Component, unlike apiRequest()
  * which is browser-only.
  */
+import { internalApiUrl } from "@/lib/api/internalApiUrl";
 
 // Must match backend/core/pagination.py's DefaultPagination.page_size (20).
 // The DRF list envelope ({count, next, previous, results}) doesn't carry the
@@ -46,19 +47,15 @@ export async function getServicesPage(
   page = 1,
   category?: string,
 ): Promise<ServicesPage> {
-  const apiBase = process.env.INTERNAL_API_URL;
-  const path = `/api/v1/salons/${slug}/services/`;
-  const params = new URLSearchParams();
+  const params: Record<string, string> = {};
   if (page !== 1) {
-    params.set("page", String(page));
+    params.page = String(page);
   }
   if (category !== undefined) {
-    params.set("category", category);
+    params.category = category;
   }
-  const query = params.toString();
-  const url = query ? `${apiBase}${path}?${query}` : `${apiBase}${path}`;
 
-  const response = await fetch(url);
+  const response = await fetch(internalApiUrl(slug, "/services/", params));
   if (!response.ok) {
     throw new Error(`Failed to fetch services page ${page} for salon ${slug}`);
   }

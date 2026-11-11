@@ -27,7 +27,9 @@ describe("getServiceDetailPage", () => {
 
     const result = await getServiceDetailPage("bella-demo", 5);
 
-    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/services/5/`);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/salons/bella-demo/services/5/?lang=uk`,
+    );
     expect(result).toEqual(service);
   });
 

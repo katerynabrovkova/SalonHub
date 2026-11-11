@@ -12,6 +12,7 @@
  * backend's own grouping/ordering entirely (that ordering — review count
  * desc — serves the grouped endpoint contract, not this page).
  */
+import { internalApiUrl } from "@/lib/api/internalApiUrl";
 
 interface ReviewSpecialist {
   id: number;
@@ -46,10 +47,7 @@ export interface FlatReview {
 }
 
 export async function getReviews(slug: string): Promise<FlatReview[]> {
-  const apiBase = process.env.INTERNAL_API_URL;
-  const url = `${apiBase}/api/v1/salons/${slug}/reviews/`;
-
-  const response = await fetch(url);
+  const response = await fetch(internalApiUrl(slug, "/reviews/"));
   if (!response.ok) {
     throw new Error(`Failed to fetch reviews for salon ${slug}`);
   }

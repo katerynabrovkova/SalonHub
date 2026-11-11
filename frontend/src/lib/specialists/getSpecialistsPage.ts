@@ -5,6 +5,7 @@
  * from a Server Component, unlike apiRequest() which is browser-only. Mirrors
  * catalog/getServicesPage.ts's shape and conventions.
  */
+import { internalApiUrl } from "@/lib/api/internalApiUrl";
 
 // Must match backend/core/pagination.py's DefaultPagination.page_size (20).
 // The DRF list envelope ({count, next, previous, results}) doesn't carry the
@@ -51,19 +52,15 @@ export async function getSpecialistsPage(
   page = 1,
   service?: string,
 ): Promise<SpecialistsPage> {
-  const apiBase = process.env.INTERNAL_API_URL;
-  const path = `/api/v1/salons/${slug}/specialists/`;
-  const params = new URLSearchParams();
+  const params: Record<string, string> = {};
   if (page !== 1) {
-    params.set("page", String(page));
+    params.page = String(page);
   }
   if (service !== undefined) {
-    params.set("service", service);
+    params.service = service;
   }
-  const query = params.toString();
-  const url = query ? `${apiBase}${path}?${query}` : `${apiBase}${path}`;
 
-  const response = await fetch(url);
+  const response = await fetch(internalApiUrl(slug, "/specialists/", params));
   if (!response.ok) {
     throw new Error(`Failed to fetch specialists page ${page} for salon ${slug}`);
   }

@@ -27,7 +27,9 @@ describe("getSpecialistDetailPage", () => {
 
     await getSpecialistDetailPage("bella-demo", 7);
 
-    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/specialists/7/`);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/salons/bella-demo/specialists/7/?lang=uk`,
+    );
   });
 
   it("test_returns_parsed_specialist_on_success", async () => {

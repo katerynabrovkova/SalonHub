@@ -131,6 +131,8 @@ describe("guestApiRequest", () => {
     await guestApiRequest("bella-demo", "/guest/appointments/1/", "tok-abc");
 
     const [url] = fetchMock.mock.calls[0];
-    expect(url).toBe("http://public-base:9999/api/v1/salons/bella-demo/guest/appointments/1/");
+    expect(url).toBe(
+      "http://public-base:9999/api/v1/salons/bella-demo/guest/appointments/1/?lang=uk",
+    );
   });
 });

@@ -135,11 +135,14 @@ describe("AssistantWidgetLoader", () => {
     expect(screen.getByTestId("assistant-widget")).toHaveAttribute("data-starters", "[]");
   });
 
-  it("test_fetches_salon_info_for_the_slug_in_ukrainian", async () => {
+  // The site language is added inside getSalonInfoPage (its own tests and
+  // lib/i18n/siteLanguageServerFetchers.test.ts), so the loader passes only
+  // the slug.
+  it("test_fetches_salon_info_for_the_slug", async () => {
     mockedGetSalonInfoPage.mockResolvedValueOnce(salonInfo());
 
     await renderLoader();
 
-    expect(mockedGetSalonInfoPage).toHaveBeenCalledWith("bella-demo", "uk");
+    expect(mockedGetSalonInfoPage).toHaveBeenCalledWith("bella-demo");
   });
 });

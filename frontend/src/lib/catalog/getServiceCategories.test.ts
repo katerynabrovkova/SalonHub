@@ -29,7 +29,7 @@ describe("getServiceCategories", () => {
     await getServiceCategories("bella-demo");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE}/api/v1/salons/bella-demo/categories/?page_size=100`,
+      `${API_BASE}/api/v1/salons/bella-demo/categories/?page_size=100&lang=uk`,
     );
   });
 

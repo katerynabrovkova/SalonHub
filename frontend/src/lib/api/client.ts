@@ -15,6 +15,9 @@
  * - A 401 outside the excluded auth paths, with the `session_hint` cookie
  *   present, triggers one silent renewal and retry (docs/DECISIONS.md
  *   § "Session renewal and session lifetime", "S2 design details").
+ * - Every URL carries the site language as `lang=`, merged with any query
+ *   string in `path` (`./withSiteLanguage`); the renewal exclusions still
+ *   match the caller's `path` as given.
  *
  * The base URL is built from `window.location.hostname` (the page's OWN
  * host) at call time, not a fixed `NEXT_PUBLIC_API_URL` origin -- a fixed
@@ -35,6 +38,7 @@ import { apiBaseUrl, readCookie } from "./browserContext";
 import { ApiError, apiErrorFromBody, RenewalUnsureError } from "./errors";
 import { renewSession } from "./renewSession";
 import { hasSessionHint } from "./sessionHint";
+import { withSiteLanguage } from "./withSiteLanguage";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -71,7 +75,7 @@ async function sendAndParse<T>(
   options: RequestInit,
 ): Promise<T> {
   const response = await fetch(
-    `${apiBaseUrl()}/api/v1/salons/${slug}${path}`,
+    `${apiBaseUrl()}/api/v1/salons/${slug}${withSiteLanguage(path)}`,
     { ...options, method, headers, credentials: "include" },
   );
 

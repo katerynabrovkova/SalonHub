@@ -14,6 +14,7 @@
  * truncated list — the same "raise on incomplete data, never silently
  * return partial results" principle as TenantScopedManager.
  */
+import { internalApiUrl } from "@/lib/api/internalApiUrl";
 
 const CATEGORIES_PAGE_SIZE = 100;
 
@@ -31,8 +32,7 @@ interface DrfPage<T> {
 }
 
 export async function getServiceCategories(slug: string): Promise<ServiceCategory[]> {
-  const apiBase = process.env.INTERNAL_API_URL;
-  const url = `${apiBase}/api/v1/salons/${slug}/categories/?page_size=${CATEGORIES_PAGE_SIZE}`;
+  const url = internalApiUrl(slug, "/categories/", { page_size: String(CATEGORIES_PAGE_SIZE) });
 
   const response = await fetch(url);
   if (!response.ok) {

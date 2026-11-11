@@ -1,7 +1,8 @@
 /**
  * The site language: the single source of the language the site is shown in
  * (docs/DECISIONS.md § Frontend › "Site language"). It drives `<html lang>`,
- * the assistant API's `?lang=`, the widget loader's salon fetch, and the
+ * the `?lang=` of every backend request (added by `apiRequest`,
+ * `guestApiRequest`, `internalApiUrl` and the assistant API), and the
  * `language` every booking request sends (stored as the customer's email
  * language).
  *

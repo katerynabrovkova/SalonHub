@@ -25,6 +25,33 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // docs/DECISIONS.md § Frontend › "Site language" / "API client": every
+  // server-side backend URL is built by internalApiUrl, which always adds the
+  // site language, so no other file reads INTERNAL_API_URL. Assigning it (a
+  // test setting the env var) is not a read and stays allowed.
+  {
+    ignores: ["src/lib/api/internalApiUrl.ts", "src/lib/api/internalApiUrl.test.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "MemberExpression[object.object.name='process'][object.property.name='env'][property.name='INTERNAL_API_URL']:not(AssignmentExpression > MemberExpression.left)",
+          message: "Build server-side backend URLs with internalApiUrl from @/lib/api/internalApiUrl.",
+        },
+        {
+          selector:
+            "MemberExpression[object.object.name='process'][object.property.name='env'][property.value='INTERNAL_API_URL']:not(AssignmentExpression > MemberExpression.left)",
+          message: "Build server-side backend URLs with internalApiUrl from @/lib/api/internalApiUrl.",
+        },
+        {
+          selector:
+            "VariableDeclarator[init.object.name='process'][init.property.name='env'] > ObjectPattern > Property[key.name='INTERNAL_API_URL']",
+          message: "Build server-side backend URLs with internalApiUrl from @/lib/api/internalApiUrl.",
+        },
+      ],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

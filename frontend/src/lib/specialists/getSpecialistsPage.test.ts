@@ -95,7 +95,7 @@ describe("getSpecialistsPage", () => {
     await getSpecialistsPage("bella-demo", 1, "5");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE}/api/v1/salons/bella-demo/specialists/?service=5`,
+      `${API_BASE}/api/v1/salons/bella-demo/specialists/?service=5&lang=uk`,
     );
   });
 
@@ -107,6 +107,8 @@ describe("getSpecialistsPage", () => {
 
     await getSpecialistsPage("bella-demo", 1);
 
-    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/salons/bella-demo/specialists/`);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/salons/bella-demo/specialists/?lang=uk`,
+    );
   });
 });
