@@ -87,6 +87,15 @@ Every open, deferred and gated item in one place, grouped by where it is
 due. One line each; the topic section named in brackets holds the detail.
 When an item is done, delete its line here and update its topic section.
 
+### In progress: customer email language (decided 11.11.2026)
+
+- (a) Backend: optional `language` on both booking endpoints, validated
+  against `SUPPORTED_LANGUAGES`, written to `Customer.preferred_language`
+  under the overwrite rule. [Booking, Identity]
+- (b) Frontend: the site-language module; both booking forms send it as
+  `language`; `<html lang>`, the assistant API's `?lang=` and the widget
+  loader's salon fetch read it. [Frontend: site language]
+
 ### Before Stage 18
 
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
@@ -94,6 +103,14 @@ When an item is done, delete its line here and update its topic section.
   The design pass does not start until the plan is recorded. Business model
   still open; current leaning (30.10.2026) a recurring subscription per
   salon with the platform hosting and maintaining each site. [Roadmap]
+- Roadmap gap planning also covers the UI language switcher and UI chrome
+  i18n: which languages (e.g. Georgian, English), how the language reaches
+  the URL, translation files for all UI copy. Today there is no translation
+  mechanism for interface labels, and all interface text is hardcoded
+  Ukrainian. Leaning: build the translation mechanism at the very start of
+  the design pass, so reworked copy is written into translation files once.
+  When it exists, the site-language module reads the customer's choice
+  instead of a constant. [Frontend: site language, Localization]
 
 ### Stage 18
 
@@ -110,8 +127,10 @@ on top of it.
 
 - Design system, apex marketing landing page, salon home page (today
   "Сторінка салону в розробці."). [Frontend]
-- UI chrome i18n: no translation mechanism for interface labels; all
-  interface text is hardcoded Ukrainian until then. [Localization]
+- With the language switcher: account emails (verification, password reset,
+  email change, password changed) are hardcoded Ukrainian, and the salon
+  name in them uses `resolve_translation(salon.name, "uk")`; they should
+  follow the customer's language. [Notifications]
 - Site navigation: nothing links to `/specialists` or `/services`. [Frontend]
 - Navigation links ("← Профіль", "← Вхід") reworked into something minimal.
 - Booking step 3: "Далі →" has no upper bound; needs `max_advance_days` in the
@@ -303,9 +322,11 @@ on top of it.
   client pages.
 - Cancel link in the email-change notice to the old address.
 - Shared appointment-email builder refactor.
-- Guest bookings store no `Customer.preferred_language`, so every email to a
-  guest is in English; the booking forms should send the site language.
-  [Notifications]
+- Next after the customer email language step: the catalog, specialists,
+  reviews, availability and guest-appointment fetchers send no `?lang=`, so
+  the backend falls back to English and a Ukrainian site shows English
+  service and specialist names (seen on the guest manage page).
+  [Localization]
 - `BOOKING_CANCELLED` email is static ("Ваш запис було скасовано.") and does
   not say whether the deposit will be refunded; rewrite it in the style of
   the new `BOOKING_CONFIRMED` email. [Notifications]
@@ -451,10 +472,22 @@ on top of it.
 - **Invariant: `email_verified_at` is set only while the Account's current
   email is proven.** Account booking relies on it; any path that changes
   `Account.email` must keep it true.
-- **A guest booking never overwrites a linked Customer's name or phone**
-  (for a registered user the profile is the source of truth); an unlinked
-  Customer's name and phone are overwritten by the latest guest booking. The
-  name and phone typed in such a guest form are not stored anywhere.
+- **A guest booking never overwrites a linked Customer's name, phone or
+  `preferred_language`** (for a registered user the profile is the source of
+  truth, and anyone can type someone else's email into the guest form); an
+  unlinked Customer's name, phone and language are overwritten by the latest
+  guest booking. The values sent in such a guest form for a linked Customer
+  are not stored anywhere.
+- **`Customer.preferred_language` is the site language at booking time**
+  (decided 11.11.2026, in progress, see register), so emails follow the
+  language the customer used on the site. The server must store it because
+  emails are sent later (payment webhook, reminder sweep), when the customer
+  is not on the site. An account booking always writes it to the Account's
+  Customer; a guest booking writes it only to a Customer with no linked
+  Account (rule above). A booking that sends no language leaves the stored
+  value unchanged. Existing empty values are not migrated: the backend
+  cannot know their language, and the only rows today are test data; they
+  get a language on their next booking.
 - **Emails are lowercased and stripped** on register, login, password reset
   and resend-verification. "Address taken" checks are case-insensitive,
   because guest `Customer.email` is still stored as typed (see register).
@@ -676,6 +709,11 @@ functions touch the ORM and need tenant context.
 - **`Appointment.source`:** `direct` (default) or `assistant`, accepted from
   both booking endpoints, any other value 400. Client-supplied and for
   analytics only: it must never affect money, discounts or access.
+- **`language`** (decided 11.11.2026, in progress, see register): optional
+  on both booking endpoints. Allowed values are `SUPPORTED_LANGUAGES`,
+  anything else 400. When missing, the stored `Customer.preferred_language`
+  is left unchanged: a booking is never blocked over it. Which Customer it
+  may overwrite: see Identity.
 
 ### Guest booking (`POST bookings/`)
 
@@ -683,6 +721,8 @@ functions touch the ORM and need tenant context.
   `(salon, email)`. Response 201 includes the raw guest token so the
   frontend can go straight to payment; the `BOOKING_CREATED` email is the
   recovery path.
+- `language` is written only to a Customer with no linked Account, the same
+  rule as name and phone (see Identity).
 
 ### Account booking (`POST appointments/`)
 
@@ -693,6 +733,8 @@ functions touch the ORM and need tenant context.
 - **Customer email always comes from `request.user.email`,** never the body.
   `customer_name` and `customer_phone` are required only when no Customer is
   linked yet; with a linked Customer they are ignored and never overwrite it.
+  `language`, when sent, is always written to the Account's Customer, linked
+  or not.
 - **Inside the transaction the Account row is locked
   (`select_for_update`)**, so two simultaneous first bookings converge on one
   Customer. With no linked Customer: get-or-create by `(salon, account.email)`
@@ -1005,14 +1047,18 @@ functions touch the ORM and need tenant context.
 
   The reminder deliberately does not mention the refund deadline: it arrives
   24-25 hours before the visit, when the deadline is about to pass.
-- **Language:** the recipient Customer's `preferred_language` through
-  `resolve_language_code` (`en` fallback); salon-directed alerts are English.
+- **Language:** the recipient Customer's `preferred_language` (the site
+  language at booking time, see Identity) through `resolve_language_code`
+  (`en` fallback); salon-directed alerts are English.
   `_MESSAGES` is `{trigger: {lang: (subject, body)}}`.
 - **Account emails** (verification, password reset, email change, password
   changed) are Celery tasks in `accounts/tasks.py` that receive only plain
   strings (recipient, link, salon name); they call `send_mail` directly and
   bypass the journal (see register). Links are built with
-  `build_salon_frontend_url`, which gives the salon's subdomain.
+  `build_salon_frontend_url`, which gives the salon's subdomain. Their texts
+  are hardcoded Ukrainian and the salon name in them is resolved with
+  `resolve_translation(salon.name, "uk")`, not the customer's language (see
+  register, design pass).
 
 ---
 
@@ -1076,7 +1122,8 @@ functions touch the ORM and need tenant context.
 - **Ordering:** translatable models order by `ordering, id` or
   `created_at, id`, never by a JSON name.
 - **Email language:** `Customer.preferred_language` (no `choices`, `""` =
-  unset), independent of `?lang=`.
+  unset), independent of `?lang=`; set from the site language at booking
+  time (see Identity).
 - **Out of scope here:** UI-chrome translation (design pass) and staff
   interface language.
 
@@ -1260,6 +1307,18 @@ Next.js App Router, React, TypeScript, Tailwind v4, Vitest with Testing
 Library. No API client library and no generated client (revisit with a
 generated OpenAPI client). Pins: see "Dependency pins".
 
+### Site language
+
+- **One module is the single source of the site language** (decided
+  11.11.2026, in progress, see register); today it returns `"uk"`. Both
+  booking forms send it as `language`. The places that hardcode `"uk"` with
+  the same meaning (`<html lang>`, the assistant API's `?lang=`, the widget
+  loader's salon fetch) read it from that module. When the UI language
+  switcher exists, the module reads the customer's choice instead of a
+  constant.
+- **The `"uk-UA"` formatting locales and `Intl.PluralRules("uk")` in
+  `lib/i18n/reviewCount.ts` stay as they are** until the design pass.
+
 ### Routing and hosts
 
 - **Each salon is its own subdomain:** `<slug>.salonhub.com` in production,
@@ -1349,6 +1408,8 @@ generated OpenAPI client). Pins: see "Dependency pins".
 - **Both forms send `source: "assistant"`** when the tab holds a stored
   assistant session id; otherwise no `source`. The session id itself is
   never sent to the booking API.
+- **Both forms send `language`** from the site-language module (see Site
+  language).
 - **`/booking/pay`** (client component, reads id and token from the hash):
   branches on appointment status: `PENDING_PAYMENT` → "Оплатити";
   `CONFIRMED` → already paid; `EXPIRED`/`CANCELLED` → no longer available;
