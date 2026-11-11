@@ -259,6 +259,10 @@ on top of it.
 - Notification retry loop integration test with a real broker.
   [Notifications]
 - Rename `middleware.ts` to the Next 16 proxy convention. [Frontend]
+- CSP: there is none today. When one is added, the token-moving inline
+  scripts on the manage, pay and reset-password pages need the nonce (or a
+  hash), like Next's own inline scripts (see "Booking > Guest token").
+  [Frontend]
 - Log `assistant_busy` so the ASGI trigger can be seen. [Assistant]
 
 ### After deployment, on a real phone
@@ -766,6 +770,29 @@ functions touch the ORM and need tenant context.
   earlier reason for a path (no client page existed to read a fragment) no
   longer holds. Links in the old path form stop working, accepted because
   there are no real customers yet.
+- **The token leaves the URL before Next.js reads it** (decided 11.11.2026).
+  The manage, pay and reset-password pages each render a small inline script
+  from their Server Component. On a full page load it reads the token from
+  the fragment, stores it in sessionStorage (manage:
+  `guest-manage-token:<id>`; pay: one key per appointment id; reset-password:
+  its own key) and calls `history.replaceState` before hydration; the pay
+  page keeps `#appointment_id=<id>`. The script is the only thing that
+  removes the hash; the components never do. If storage is blocked, the
+  script leaves the hash alone and the component reads it from the hash on
+  every render (accepted edge case: the token stays in the address bar).
+  Without a token in the hash, each component uses the value stored for it.
+  One shared helper builds the script text for all three pages, so they
+  cannot drift. **Ordering constraint:** the script works only if its HTML
+  reaches the browser before Next's first data chunk, because hydration
+  starts on that chunk, not on DOMContentLoaded. Do not add a `loading.tsx`
+  or a Suspense boundary above these three pages without re-checking this in
+  a browser. Reason: the Next.js router copies the URL, hash
+  included, on first load and writes that copy back to the address bar and
+  history on later router updates (e.g. `router.refresh()`), so a
+  `history.replaceState` from a component effect does not keep the token out;
+  `router.replace` does not help either, because the route cache entry from
+  the first load keeps the hash and the replace reuses it. Removing the hash
+  before hydration means the router never holds the token.
 - **Guest detail and cancel responses** (`GET guest/appointments/<id>/`,
   `POST guest/appointments/<id>/cancel/`) carry the same read-only fields as
   the account list (see "Account dashboard data"): `specialist` and
@@ -1273,8 +1300,12 @@ functions touch the ORM and need tenant context.
 - **`/login` notice** for exactly `notice=password_changed` ("Пароль змінено.
   Увійдіть з новим паролем.").
 - **Account pages:** `/register`, `/verify-email`, `/forgot-password`,
-  `/reset-password` (reads `uid` and `token` from the hash, removes the hash
-  from history, checks the link before showing the form),
+  `/reset-password` (an inline script moves `uid` and `token` from the hash
+  into sessionStorage under the page's own key and removes the hash before
+  hydration, the same mechanism as the guest pages, decided 11.11.2026, see
+  "Booking > Guest token"; the form never removes the hash itself and reads
+  it only when the script could not run; checks the link before showing the
+  form),
   `/confirm-email-change`, `/client/profile` with edit pages for name, phone,
   email and password. Fixed Ukrainian error texts; the server's message is
   never shown. `/forgot-password?from=change-password` shows a back link to
@@ -1396,14 +1427,20 @@ generated OpenAPI client). Pins: see "Dependency pins".
   акаунта."); verified client with a linked Customer → email shown, no
   fields; verified client without one → name and phone. Button "Підтвердити
   запис". Account booking success refreshes `me` and goes to `/client`;
-  guest success goes to `/booking/pay`.
+  guest success stores the token in sessionStorage under the pay page's key
+  for that appointment id and goes to `/booking/pay#appointment_id=<id>`, so
+  the token does not enter the URL on that path; if storing fails, it goes to
+  `/booking/pay#appointment_id=<id>&token=<token>` instead, so the guest can
+  still pay (decided 11.11.2026; see "Guest token").
 - **Both forms send `source: "assistant"`** when the tab holds a stored
   assistant session id; otherwise no `source`. The session id itself is
   never sent to the booking API.
 - **Both forms send `language`** from the site-language module (see Site
   language).
-- **`/booking/pay`** (client component, reads id and token from the hash):
-  branches on appointment status: `PENDING_PAYMENT` → "Оплатити";
+- **`/booking/pay`** (client component): the id comes from the hash, the
+  token from the hash when the inline script could not move it, otherwise
+  from sessionStorage for that id (see "Guest token"); branches on
+  appointment status: `PENDING_PAYMENT` → "Оплатити";
   `CONFIRMED` → already paid; `EXPIRED`/`CANCELLED` → no longer available;
   a bad or missing hash → "link invalid or expired". After paying it
   redirects to `provider_data` when present, otherwise shows the pending
@@ -1429,10 +1466,13 @@ generated OpenAPI client). Pins: see "Dependency pins".
 
 Decided 10.11.2026.
 
-- **Token from the fragment** (`#token=...`): the page reads it, removes it
-  from the address bar and history (`history.replaceState`) and keeps it only
-  for the life of the tab. The page sends `Referrer-Policy: no-referrer`. Why
-  the fragment: see "Guest token".
+- **Token from the fragment** (`#token=...`): the page's inline script moves
+  it into sessionStorage (`guest-manage-token:<id>`, this tab only) and
+  removes the hash, path kept, before hydration; the component never removes
+  it. A reload uses the stored token for this id only; with storage blocked
+  the hash stays and the component keeps reading it (decided 11.11.2026). The page sends
+  `Referrer-Policy: no-referrer`. Why the fragment and why before hydration:
+  see "Guest token".
 - **Shows:** service, specialist, salon-local date and time, duration; price,
   deposit paid, amount due at the visit (all amounts from the backend).
 - **"Скасувати запис"**: the confirmation uses exactly the same texts as the

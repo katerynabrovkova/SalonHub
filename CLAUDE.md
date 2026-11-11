@@ -233,6 +233,10 @@ docker compose exec frontend npm run typecheck
 - **After changing code that Celery runs (notifications, sweeps, tasks), restart the worker
   and beat** (`docker compose restart celery_worker celery_beat`): they do not reload code,
   so a manual check would exercise the old code.
+- **Before a manual browser check after frontend edits, restart the frontend container**
+  (`docker compose restart frontend`): the Windows bind mount does not always deliver
+  file-change events, so the dev server can keep serving old code (found 11.11.2026, after a
+  check ran against code two hours old).
 - **Never run `npx <tool>` for a tool the project already has; use its npm script.** Outside
   `/app`, `npx tsc` downloaded an unrelated registry package instead of TypeScript.
 - **Git:** never run commands that change the working tree, index, stash or history, and never
