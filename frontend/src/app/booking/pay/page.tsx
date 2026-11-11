@@ -7,12 +7,15 @@
  * slug-resolution logic is not duplicated or re-derived client-side.
  *
  * `appointment_id`/`token` live in the URL fragment, never sent to the
- * server (§ Stage 3), so reading them and everything that follows —
+ * server (§ Stage 3). The inline script below moves the token to
+ * sessionStorage before hydration; reading it and everything that follows —
  * status branching, the pay action — is delegated to the client component
  * below.
  */
 import { headers } from "next/headers";
 
+import FragmentTokenScript from "@/app/FragmentTokenScript";
+import { PAY_TOKEN_SCRIPT_CONFIG } from "@/lib/security/fragmentTokenScript";
 import { SALON_SLUG_HEADER } from "@/middleware";
 
 import PaymentStatus from "./PaymentStatus";
@@ -29,6 +32,10 @@ export default async function BookingPayPage() {
 
   return (
     <main className="flex flex-col gap-6 p-8">
+      {/* Before the component: moves the token to sessionStorage and keeps
+          only #appointment_id=<id> before Next.js reads the URL
+          (docs/DECISIONS.md "Booking > Guest token"). */}
+      <FragmentTokenScript config={PAY_TOKEN_SCRIPT_CONFIG} />
       <PaymentStatus slug={slug} />
     </main>
   );

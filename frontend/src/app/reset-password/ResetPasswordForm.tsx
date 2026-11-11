@@ -4,13 +4,15 @@
  * Reset-password form for /reset-password (docs/DECISIONS.md § "Item 11
  * decisions (forgot password)", points 10-12).
  *
- * The hash is read through `useSyncExternalStore` (null on the server
- * render and during hydration, so the first client render matches the
- * server HTML). `uid` and `token` are copied into state once, while
- * rendering, the first time the hash is known; an effect then removes the
- * hash with `history.replaceState` so the link does not stay in browser
- * history. Later renders see an empty hash but keep the stored link, so
- * removing the hash never turns the page into the invalid-link state.
+ * The page's inline script (lib/security/fragmentTokenScript.ts,
+ * docs/DECISIONS.md "Booking > Guest token") has already moved `uid` and
+ * `token` into sessionStorage and removed the hash before hydration; this
+ * component never removes the hash itself. The hash is read through
+ * `useSyncExternalStore` (null on the server render and during hydration, so
+ * the first client render matches the server HTML); a link still in it means
+ * the script could not store it (blocked storage). The link, from the hash
+ * or else from storage, is copied into state once, while rendering, the
+ * first time the hash is known.
  *
  * A stored complete link is then checked once ("Early link check, decided
  * 15.10.2026", point 3), so a dead link is reported before the person types
@@ -18,8 +20,7 @@
  * including React strict-mode's mount -> cleanup -> mount, like
  * confirm-email-change; state is set only after the request settles. Only
  * `invalid_or_expired_token` shows the invalid-link state. Any other
- * failure shows the form anyway: the hash is already gone, so a reload
- * could not retry, and confirm validates the link on submit.
+ * failure shows the form anyway: confirm validates the link on submit.
  *
  * The confirmation is checked in the browser only, like registration, and
  * is never sent. A 204 ends the local session through `logout()`, then
@@ -36,6 +37,7 @@ import { useAuth } from "@/app/AuthContext";
 import PasswordField from "@/app/PasswordField";
 import { apiRequest } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
+import { PASSWORD_RESET_LINK_KEY } from "@/lib/security/fragmentTokenScript";
 
 interface ResetPasswordFormProps {
   slug: string;
@@ -72,6 +74,17 @@ function parseLink(hash: string): ResetLink | null {
   return { uid, token };
 }
 
+/** The link the inline script stored (`uid=...&token=...`); null when there
+ * is none or storage is blocked. */
+function readStoredLink(): ResetLink | null {
+  try {
+    const value = window.sessionStorage.getItem(PASSWORD_RESET_LINK_KEY);
+    return value === null ? null : parseLink(value);
+  } catch {
+    return null;
+  }
+}
+
 function isInvalidLink(err: unknown): boolean {
   return err instanceof ApiError && err.code === "invalid_or_expired_token";
 }
@@ -101,20 +114,10 @@ export default function ResetPasswordForm({ slug }: ResetPasswordFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  // Stored once, while rendering: later renders see the hash already
-  // removed and must keep the original link.
+  // Stored once, while rendering, the first time the hash is known.
   if (link === undefined && hash !== null) {
-    setLink(parseLink(hash));
+    setLink(parseLink(hash) ?? readStoredLink());
   }
-
-  useEffect(() => {
-    if (link === undefined || window.location.hash === "") {
-      return;
-    }
-    // Keeps history.state, which the Next.js router uses.
-    const { pathname, search } = window.location;
-    window.history.replaceState(window.history.state, "", `${pathname}${search}`);
-  }, [link]);
 
   useEffect(() => {
     if (link === undefined || link === null || checkFiredRef.current) {

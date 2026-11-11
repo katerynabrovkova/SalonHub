@@ -198,7 +198,9 @@ describe("ResetPasswordForm", () => {
     expect(screen.queryByText(INVALID_LINK_MESSAGE)).not.toBeInTheDocument();
   });
 
-  it("test_removes_the_hash_and_keeps_the_form_and_the_original_link", async () => {
+  it("test_never_removes_the_hash_itself_and_keeps_the_form_and_the_link", async () => {
+    // The inline script is the only thing that removes the hash
+    // (docs/DECISIONS.md "Booking > Guest token", 11.11.2026).
     setUrl(VALID_HASH);
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
     mockConfirm(() => Promise.resolve(undefined));
@@ -206,13 +208,7 @@ describe("ResetPasswordForm", () => {
 
     renderForm();
 
-    await waitFor(() => expect(window.location.hash).toBe(""));
-    expect(replaceStateSpy).toHaveBeenCalled();
-    expect(window.location.href).not.toContain("#");
-    expect(window.location.pathname).toBe("/reset-password");
-
-    // Typing re-renders the form after the hash is gone: it must not turn
-    // into the invalid-link state.
+    // Typing re-renders the form: it must keep the link.
     await user.type(await screen.findByLabelText(NEW_LABEL), NEW_PASSWORD);
     await user.type(screen.getByLabelText(CONFIRM_LABEL), NEW_PASSWORD);
     expect(screen.queryByText(INVALID_LINK_MESSAGE)).not.toBeInTheDocument();
@@ -221,6 +217,8 @@ describe("ResetPasswordForm", () => {
 
     await waitFor(() => expect(callsTo(CONFIRM_PATH)).toHaveLength(1));
     expectRequest(0);
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe(VALID_HASH);
   });
 
   it.each([
@@ -447,15 +445,18 @@ describe("ResetPasswordForm early link check", () => {
     expect(screen.queryByText(CHECKING_MESSAGE)).not.toBeInTheDocument();
   });
 
-  it("test_check_sends_the_original_link_after_the_hash_is_removed", async () => {
+  it("test_check_sends_the_link_from_the_hash_and_leaves_the_hash", async () => {
+    // The inline script is the only thing that removes the hash
+    // (docs/DECISIONS.md "Booking > Guest token", 11.11.2026); a hash still
+    // present here means the script could not run, and it stays.
     const check = deferred();
     mockCheck(() => check.promise);
     setUrl(VALID_HASH);
 
     renderForm();
 
-    await waitFor(() => expect(window.location.hash).toBe(""));
     await waitFor(() => expect(callsTo(CHECK_PATH)).toHaveLength(1));
     expectCheckRequest();
+    expect(window.location.hash).toBe(VALID_HASH);
   });
 });

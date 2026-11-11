@@ -4,14 +4,15 @@
  * Guest manage page, client half (docs/DECISIONS.md "Frontend > Guest manage
  * page", "Booking > Guest token").
  *
- * Token: read from `#token=...` through `useSyncExternalStore` (null on the
- * server render), like booking/pay/PaymentStatus.tsx. Once read, it is kept in
- * sessionStorage under `guest-manage-token:<id>` (this tab only) and the hash
- * is removed from the address bar and the history entry with
- * `history.replaceState`, path kept. A reload without a hash uses the stored
- * token for this appointment id only. Every storage access is wrapped in
- * try/catch: storage can be blocked, and the page must still work for the
- * current view.
+ * Token: the page's inline script (lib/security/fragmentTokenScript.ts) has
+ * already moved it from `#token=...` into sessionStorage under
+ * `guest-manage-token:<id>` and removed the hash before hydration; this
+ * component never removes the hash itself. The hash is read through
+ * `useSyncExternalStore` (null on the server render), like
+ * booking/pay/PaymentStatus.tsx: a token still there means the script could
+ * not store it (blocked storage), and it is read on every render. Otherwise
+ * the stored token for this appointment id only is used. The storage read is
+ * wrapped in try/catch: storage can be blocked.
  *
  * Data: every value shown comes from the guest detail/cancel response; the
  * duration is end minus start, times are read from the salon-offset strings.
@@ -35,6 +36,7 @@ import { INVALID_GUEST_LINK_MESSAGE } from "@/lib/booking/guestLinkTexts";
 import { formatAppointmentDuration } from "@/lib/datetime/formatDuration";
 import { formatSalonDateTime } from "@/lib/datetime/formatSalonDateTime";
 import { formatPrice } from "@/lib/pricing/formatPrice";
+import { guestManageTokenKey } from "@/lib/security/fragmentTokenScript";
 
 interface ManageAppointmentProps {
   slug: string;
@@ -65,36 +67,13 @@ const CANCELLABLE_STATUSES = new Set(["confirmed", "pending_payment"]);
 const PAST_STATUSES = new Set(["no_show", "expired"]);
 const CANCEL_ERROR_MESSAGE = "Не вдалося скасувати запис. Перевірте інтернет і спробуйте ще раз.";
 
-function storageKey(appointmentId: number): string {
-  return `guest-manage-token:${appointmentId}`;
-}
-
 function readStoredToken(appointmentId: number): string | null {
   try {
-    const value = window.sessionStorage.getItem(storageKey(appointmentId));
+    const value = window.sessionStorage.getItem(guestManageTokenKey(appointmentId));
     return value === null || value === "" ? null : value;
   } catch {
     return null;
   }
-}
-
-function storeToken(appointmentId: number, token: string): void {
-  try {
-    window.sessionStorage.setItem(storageKey(appointmentId), token);
-  } catch {
-    // Blocked storage: the page still works for this view, not after a reload.
-  }
-}
-
-function removeHashFromAddressBar(): void {
-  if (window.location.hash === "") {
-    return;
-  }
-  window.history.replaceState(
-    window.history.state,
-    "",
-    window.location.pathname + window.location.search,
-  );
 }
 
 function tokenFromHash(hash: string): string | null {
@@ -167,10 +146,6 @@ function ManageFlow({ slug, appointmentId, token }: ManageFlowProps) {
   }
 
   useEffect(() => {
-    // Keep the token for this tab, then drop it from the address bar and the
-    // history entry, before anything else can read the URL.
-    storeToken(appointmentId, token);
-    removeHashFromAddressBar();
     void loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

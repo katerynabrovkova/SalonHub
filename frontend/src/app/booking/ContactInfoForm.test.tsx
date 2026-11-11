@@ -108,7 +108,10 @@ describe("ContactInfoForm", () => {
     });
   });
 
-  it("test_success_redirects_to_booking_pay_with_appointment_id_and_token_fragment", async () => {
+  // The token goes to sessionStorage, only the id into the URL
+  // (docs/DECISIONS.md "Frontend > Booking flow", 11.11.2026); the storage
+  // and fallback cases are in ContactInfoForm.payToken.test.tsx.
+  it("test_success_redirects_to_booking_pay_with_only_the_appointment_id_fragment", async () => {
     const user = userEvent.setup();
     createGuestBookingMock.mockResolvedValueOnce(SUCCESS_RESULT);
 
@@ -122,7 +125,7 @@ describe("ContactInfoForm", () => {
     await user.click(screen.getByRole("button", { name: "Підтвердити запис" }));
 
     await waitFor(() =>
-      expect(pushMock).toHaveBeenCalledWith("/booking/pay#appointment_id=42&token=tok-abc"),
+      expect(pushMock).toHaveBeenCalledWith("/booking/pay#appointment_id=42"),
     );
   });
 

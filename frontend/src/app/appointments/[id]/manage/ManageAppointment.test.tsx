@@ -106,8 +106,12 @@ afterEach(() => {
 describe("ManageAppointment", () => {
   // --- token -----------------------------------------------------------------
 
-  it("test_reads_the_token_from_the_hash_calls_the_detail_endpoint_and_removes_the_hash", async () => {
+  it("test_reads_the_token_from_the_hash_calls_the_detail_endpoint_and_leaves_the_hash", async () => {
+    // The inline script is the only thing that removes the hash
+    // (docs/DECISIONS.md "Booking > Guest token", 11.11.2026); a hash still
+    // present here means the script could not run, and it stays.
     setUrl(`${PATH}#token=tok-abc`);
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
     guestApiRequestMock.mockResolvedValueOnce(detail());
 
     await renderPage();
@@ -118,9 +122,8 @@ describe("ManageAppointment", () => {
       "/guest/appointments/42/",
       "tok-abc",
     );
-    expect(window.location.hash).toBe("");
-    expect(window.location.pathname).toBe(PATH);
-    expect(window.sessionStorage.getItem(STORAGE_KEY)).toBe("tok-abc");
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.pathname + window.location.hash).toBe(`${PATH}#token=tok-abc`);
   });
 
   it("test_without_a_hash_uses_the_token_stored_for_this_id_only", async () => {

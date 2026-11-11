@@ -4,7 +4,8 @@
  * `/appointments/<id>/manage#token=...`. Stays a Server Component and resolves
  * `slug` the same way `/booking/pay` does (headers() -> SALON_SLUG_HEADER ->
  * null-slug fallback). The token is in the URL fragment, never sent to the
- * server, so reading it and everything after is the client component's job.
+ * server; the inline script moves it to sessionStorage before hydration, and
+ * reading it and everything after is the client component's job.
  *
  * `referrer: "no-referrer"`: the page must not leak its URL to anything it
  * loads or links to.
@@ -12,6 +13,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 
+import FragmentTokenScript from "@/app/FragmentTokenScript";
+import { manageTokenScriptConfig } from "@/lib/security/fragmentTokenScript";
 import { SALON_SLUG_HEADER } from "@/middleware";
 
 import ManageAppointment from "./ManageAppointment";
@@ -35,10 +38,17 @@ export default async function ManageAppointmentPage({ params }: ManageAppointmen
   }
 
   const { id } = await params;
+  const appointmentId = Number(id);
 
   return (
     <main className="flex flex-col gap-6 p-8">
-      <ManageAppointment slug={slug} appointmentId={Number(id)} />
+      {/* Before the component, so the token is out of the URL before Next.js
+          reads it (docs/DECISIONS.md "Booking > Guest token"). Only for a
+          real id: the key is built from it. */}
+      {Number.isInteger(appointmentId) ? (
+        <FragmentTokenScript config={manageTokenScriptConfig(appointmentId)} />
+      ) : null}
+      <ManageAppointment slug={slug} appointmentId={appointmentId} />
     </main>
   );
 }

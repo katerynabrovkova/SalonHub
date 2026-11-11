@@ -11,11 +11,13 @@
  * they survive the "return to step 3 on slot conflict, then forward to
  * step 4 again" round trip (BookingContactInfoContext.tsx).
  *
- * On success, redirects to `/booking/pay` with `appointment_id`/`token` in
- * the URL fragment — the same format the backend's BOOKING_CREATED email
- * link uses (`build_salon_frontend_url(...) + "#appointment_id=...&token=..."`,
- * `backend/notifications/services.py`), which `PaymentStatus.tsx` reads on
- * mount (docs/DECISIONS.md § Stage 14 step 5).
+ * On success, stores the token in sessionStorage under the pay page's key
+ * and redirects to `/booking/pay#appointment_id=<id>`, so the token never
+ * enters the URL; if storing fails, the fragment also carries the token, the
+ * same format as the backend's BOOKING_CREATED email link
+ * (`backend/notifications/services.py`). `PaymentStatus.tsx` reads either on
+ * mount (docs/DECISIONS.md "Frontend > Booking flow", "Booking > Guest
+ * token").
  */
 import { useNavigatingRouter } from "@/lib/navigation/useNavigatingRouter";
 import { useState, type FormEvent } from "react";
@@ -24,6 +26,7 @@ import { readSessionId } from "@/lib/assistant/sessionId";
 import { createGuestBooking } from "@/lib/booking/createGuestBooking";
 import { isSlotGoneError } from "@/lib/booking/isSlotGoneError";
 import { isSpecialistNotOfferingError } from "@/lib/booking/step3Errors";
+import { guestPayTokenKey } from "@/lib/security/fragmentTokenScript";
 
 import { useBookingContactInfo } from "./BookingContactInfoContext";
 import SpecialistNotOfferingNotice from "./SpecialistNotOfferingNotice";
@@ -67,6 +70,18 @@ export function buildSlotTakenUrl(
   return `${buildStep3Url(entry, service, specialist, startDatetime)}&notice=slot_taken`;
 }
 
+/** Stores the token under the pay page's key and returns the URL with only
+ * the id; if storing fails, the token goes in the fragment as before, so the
+ * guest can still pay (docs/DECISIONS.md "Frontend > Booking flow"). */
+function payPageUrl(appointmentId: number, token: string): string {
+  try {
+    window.sessionStorage.setItem(guestPayTokenKey(appointmentId), token);
+    return `/booking/pay#appointment_id=${appointmentId}`;
+  } catch {
+    return `/booking/pay#appointment_id=${appointmentId}&token=${token}`;
+  }
+}
+
 export default function ContactInfoForm({
   slug,
   entry,
@@ -105,7 +120,7 @@ export default function ContactInfoForm({
         // 17.6b: read at submit time; the id itself is never sent.
         ...(readSessionId() !== null ? { source: "assistant" as const } : {}),
       });
-      router.push(`/booking/pay#appointment_id=${result.appointment.id}&token=${result.guestToken}`);
+      router.push(payPageUrl(result.appointment.id, result.guestToken));
       return;
     } catch (err) {
       if (isSlotGoneError(err)) {

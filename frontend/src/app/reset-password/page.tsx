@@ -6,11 +6,14 @@
  * null-slug "still in development" fallback).
  *
  * `uid` and `token` live in the URL fragment, never sent to the server on
- * the initial request, so reading them and everything that follows is
- * delegated to the client component below.
+ * the initial request. The inline script below moves them to sessionStorage
+ * before hydration; reading them and everything that follows is delegated to
+ * the client component below.
  */
 import { headers } from "next/headers";
 
+import FragmentTokenScript from "@/app/FragmentTokenScript";
+import { RESET_LINK_SCRIPT_CONFIG } from "@/lib/security/fragmentTokenScript";
 import { SALON_SLUG_HEADER } from "@/middleware";
 
 import ResetPasswordForm from "./ResetPasswordForm";
@@ -27,6 +30,9 @@ export default async function ResetPasswordPage() {
 
   return (
     <main className="flex flex-col gap-8 p-8">
+      {/* Before the form: moves uid and token to sessionStorage before
+          Next.js reads the URL (docs/DECISIONS.md "Booking > Guest token"). */}
+      <FragmentTokenScript config={RESET_LINK_SCRIPT_CONFIG} />
       <ResetPasswordForm slug={slug} />
     </main>
   );

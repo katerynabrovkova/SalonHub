@@ -2,10 +2,13 @@
 
 /**
  * Booking step 5 client half (docs/DECISIONS.md § Stage 14 step 5:
- * `/booking/pay` architecture). Reads `appointment_id`/`token` from
- * `window.location.hash` — unavailable during any server render, hence a
- * "use client" component receiving only `slug` as a prop, with the server
- * component above it doing no fragment handling of its own.
+ * `/booking/pay` architecture; "Booking > Guest token"). Reads
+ * `appointment_id` from `window.location.hash` — unavailable during any
+ * server render, hence a "use client" component receiving only `slug` as a
+ * prop. The token is read from the hash when it is still there (the page's
+ * inline script could not store it), otherwise from sessionStorage under
+ * `guest-pay-token:<id>` for that id only, where the inline script or booking
+ * step 4 put it. This component never changes the URL.
  *
  * The hash is read through `useSyncExternalStore` (null on the server
  * render), so a missing/malformed fragment is derived during render instead
@@ -34,6 +37,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { guestApiRequest } from "@/lib/api/guestClient";
 import { INVALID_GUEST_LINK_MESSAGE } from "@/lib/booking/guestLinkTexts";
+import { guestPayTokenKey } from "@/lib/security/fragmentTokenScript";
 
 interface PaymentStatusProps {
   slug: string;
@@ -65,8 +69,7 @@ function parseFragment(hash: string): { appointmentId: number; token: string } |
 
   const params = new URLSearchParams(raw);
   const appointmentIdRaw = params.get("appointment_id");
-  const token = params.get("token");
-  if (appointmentIdRaw === null || token === null || token === "") {
+  if (appointmentIdRaw === null) {
     return null;
   }
 
@@ -75,7 +78,23 @@ function parseFragment(hash: string): { appointmentId: number; token: string } |
     return null;
   }
 
+  const hashToken = params.get("token");
+  const token =
+    hashToken !== null && hashToken !== "" ? hashToken : readStoredToken(appointmentId);
+  if (token === null) {
+    return null;
+  }
+
   return { appointmentId, token };
+}
+
+function readStoredToken(appointmentId: number): string | null {
+  try {
+    const value = window.sessionStorage.getItem(guestPayTokenKey(appointmentId));
+    return value === null || value === "" ? null : value;
+  } catch {
+    return null;
+  }
 }
 
 function subscribeNever(): () => void {
