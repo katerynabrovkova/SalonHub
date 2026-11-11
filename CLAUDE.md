@@ -160,6 +160,9 @@ independent salons without rework.
   rows in the same salon and act on the one with the higher pk.
 - Frontend: never import `useRouter` from `next/navigation` directly (lint-enforced); use
   `lib/navigation/useNavigatingRouter.ts` so the navigation progress bar sees every navigation.
+- Frontend: build server-side backend URLs only through `lib/api/internalApiUrl.ts` (reading
+  `process.env.INTERNAL_API_URL` anywhere else is lint-enforced); every backend request carries
+  the site language from `lib/i18n/siteLanguage.ts` as `lang=`.
 
 ## Running the project
 

@@ -317,11 +317,6 @@ on top of it.
   client pages.
 - Cancel link in the email-change notice to the old address.
 - Shared appointment-email builder refactor.
-- Next after the customer email language step: the catalog, specialists,
-  reviews, availability and guest-appointment fetchers send no `?lang=`, so
-  the backend falls back to English and a Ukrainian site shows English
-  service and specialist names (seen on the guest manage page).
-  [Localization]
 - `BOOKING_CANCELLED` email is static ("Ваш запис було скасовано.") and does
   not say whether the deposit will be refunded; rewrite it in the style of
   the new `BOOKING_CONFIRMED` email. [Notifications]
@@ -1335,10 +1330,18 @@ generated OpenAPI client). Pins: see "Dependency pins".
   11.11.2026): `lib/i18n/siteLanguage.ts`, whose `getSiteLanguage()` today
   returns `"uk"`. The two booking request helpers (`createGuestBooking`,
   `createAccountBooking`) add it as `language`, so every booking sends it.
-  `<html lang>`, the assistant API's `?lang=` and the widget loader's salon
-  fetch read it from that module, never their own `"uk"` literal. When the
-  UI language switcher exists, the module reads the customer's choice
-  instead of a constant.
+  `<html lang>` and the assistant API's `?lang=` read it from that module,
+  never their own `"uk"` literal. When the UI language switcher exists, the
+  module reads the customer's choice instead of a constant.
+- **Every backend request carries `?lang=<site language>`, added in the
+  shared request layer, not per call site** (decided 11.11.2026). Reason: a
+  new page must not be able to forget the language; before this most
+  fetchers sent none and a Ukrainian site showed English names. Where it is
+  added: see "API client". Endpoints that ignore `?lang=` (auth,
+  availability, payments, assistant history) receive it anyway; no
+  exceptions are coded. `getSalonInfoPage` takes no `lang` argument and
+  always sends the site language, replacing its earlier "bare URL unless a
+  `lang` is given" contract.
 - **The `"uk-UA"` formatting locales and `Intl.PluralRules("uk")` in
   `lib/i18n/reviewCount.ts` stay as they are** until the design pass.
 
@@ -1370,6 +1373,17 @@ generated OpenAPI client). Pins: see "Dependency pins".
   `{error: {code, message, details}}`. Network failures propagate as-is.
   Module-level state: only the per-slug renewal map. Browser-only (reads the
   CSRF cookie from `document.cookie`): never call it from Server Components.
+- **The site language is appended to the request URL in the shared layer**
+  (decided 11.11.2026, see "Site language"): `apiRequest` and
+  `guestApiRequest` add `lang=<getSiteLanguage()>` to every URL, merged with
+  any query string already in `path`, so callers and their path-level mocks
+  stay unchanged. Server-side fetchers that call the backend through
+  `INTERNAL_API_URL` build their URLs through one shared helper,
+  `internalApiUrl` (`lib/api/internalApiUrl.ts`), that always adds `lang`
+  from the same module. An ESLint `no-restricted-syntax` rule forbids reading
+  `process.env.INTERNAL_API_URL` anywhere except that file and its test
+  (assigning it in a test stays allowed), the same kind of guard as the
+  `useRouter` rule.
 - Frontend never computes money: it formats backend amounts with
   `formatPrice(price, currency)` (`Intl.NumberFormat`, locale `uk-UA`).
 
