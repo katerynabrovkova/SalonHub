@@ -87,19 +87,6 @@ Every open, deferred and gated item in one place, grouped by where it is
 due. One line each; the topic section named in brackets holds the detail.
 When an item is done, delete its line here and update its topic section.
 
-### In progress: booking emails
-
-Decided 11.11.2026. Built in this order, each step its own red/green and
-commit; (a), the new texts of `BOOKING_CREATED`, `BOOKING_CANCELLED`,
-`BOOKING_EXPIRED` and `PAYMENT_FAILED` and no more `PAYMENT_SUCCEEDED`, is
-done.
-
-- (b) Late-payment refund email, the new trigger `LATE_PAYMENT_REFUNDED`.
-  Its migration may only
-  add a choice to `Notification.trigger_type` (approved 11.11.2026); if it
-  needs anything else (`RemoveField`, `DeleteModel`, a constraint change),
-  stop and report. [Notifications]
-
 ### Before Stage 18
 
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
@@ -951,8 +938,7 @@ functions touch the ORM and need tenant context.
 - **Triggers in use:** `BOOKING_CREATED` (on creation, with a payment link),
   `BOOKING_CONFIRMED` (only from the payment webhook, so the appointment is
   always `CONFIRMED` then), `BOOKING_CANCELLED`, `BOOKING_EXPIRED`,
-  `PAYMENT_FAILED`, `APPOINTMENT_REMINDER`, and `LATE_PAYMENT_REFUNDED`
-  (being built, see register "In progress: booking emails").
+  `PAYMENT_FAILED`, `APPOINTMENT_REMINDER`, and `LATE_PAYMENT_REFUNDED`.
   `REVIEW_REQUEST` has message text but is never dispatched (see register).
 - **`PAYMENT_SUCCEEDED` is not sent** (decided 11.11.2026):
   `BOOKING_CONFIRMED` already says the deposit is paid, and two emails in the
@@ -965,8 +951,13 @@ functions touch the ORM and need tenant context.
   11.11.2026): when the payment webhook receives a succeeded payment for an
   appointment that is already `EXPIRED` or `CANCELLED` and refunds it, the
   customer gets a refund email; before this the money was charged and
-  refunded with no message. Dedup is per Payment: one email for each
-  refunded late payment. It is sent for that refund decision, not when the
+  refunded with no message. It is recorded in the same transaction that
+  sets `Payment.refund_due`, so it commits with the refund decision or not
+  at all. Dedup is per Payment: one email for each refunded late payment,
+  dedup key `late_payment_refunded:payment:<payment pk>` (12.11.2026).
+  `Payment.appointment` is one-to-one, so per Payment is the same as per
+  appointment today; the key carries the payment id so it stays per Payment
+  if that ever changes. It is sent for that refund decision, not when the
   refund completes: no email when a bank later completes a refund (see
   register).
 - **The link in a booking email depends on how the booking was made,** never
@@ -1108,14 +1099,15 @@ functions touch the ORM and need tenant context.
   entered, the full date, whole amounts without ".00", the contact-line and
   last-line rules. `<salon footer>` below is the salon name line plus the
   `<phone> · <address>` line under those rules. Which emails have a last line
-  (decided 11.11.2026, after the manual check), with or without a phone: the
-  "Якщо ви не записувалися..." / "If you did not book..." line appears in
-  emails that start or confirm something in force (`BOOKING_CREATED`,
-  `BOOKING_CONFIRMED`, `APPOINTMENT_REMINDER`, `LATE_PAYMENT_REFUNDED`);
+  (decided 11.11.2026 and 12.11.2026, after the manual checks), with or
+  without a phone: the "Якщо ви не записувалися..." / "If you did not
+  book..." line appears only in emails that start or confirm something in
+  force (`BOOKING_CREATED`, `BOOKING_CONFIRMED`, `APPOINTMENT_REMINDER`);
   `BOOKING_CANCELLED` has its own "Якщо ви не скасовували..." / "If you did
-  not cancel..." line; emails saying nothing came of the booking
-  (`BOOKING_EXPIRED`, `PAYMENT_FAILED`) have none, because the customer has
-  nothing to report and `BOOKING_CREATED` already carried the line. Money
+  not cancel..." line; emails saying nothing came of the booking or that it
+  no longer exists (`BOOKING_EXPIRED`, `PAYMENT_FAILED`,
+  `LATE_PAYMENT_REFUNDED`) have none, because the customer has nothing to
+  report and `BOOKING_CREATED` already carried the line. Money
   comes from `booking.amounts`. The "Оплата при візиті" / "Pay at the visit"
   line of `BOOKING_CREATED` is the amount due once the deposit is paid, from
   a `booking.amounts` function computed from the same breakdown as
@@ -1265,8 +1257,7 @@ functions touch the ORM and need tenant context.
   Щоб записатися знову, перейдіть на сайт салону:
   <link to /services>
   <salon footer>
-  Якщо ви не записувалися в <salon>, будь ласка, повідомте салон за номером вище.
-  (no phone: Якщо ви не записувалися в <salon>, будь ласка, повідомте салон.)
+  (no last line)
 
   Subject: Deposit refund from <salon>
   Hello, <name>!
@@ -1278,8 +1269,7 @@ functions touch the ORM and need tenant context.
   To book again, go to the salon's website:
   <link to /services>
   <salon footer>
-  If you did not book at <salon>, please let the salon know at the number above.
-  (no phone: If you did not book at <salon>, please let the salon know.)
+  (no last line)
   ```
 - **Language:** the recipient Customer's `preferred_language` (the site
   language at booking time, see Identity) through `resolve_language_code`

@@ -437,7 +437,9 @@ method, one adapter per channel.
 
 **Trigger points:** booking created, confirmed (payment received), cancelled and
 expired; appointment reminder (scheduled, § 12); payment failed, while the
-booking still waits for payment. A payment-succeeded trigger type exists for
+booking still waits for payment; late payment refunded, when a payment
+succeeds for a booking that has already expired or been cancelled and is
+refunded in full. A payment-succeeded trigger type exists for
 old rows but is no longer sent: the confirmation says the deposit is paid. A
 review-request message exists but is not dispatched yet. **Account emails**
 (verification, password reset, email change, password changed) do not go through this
