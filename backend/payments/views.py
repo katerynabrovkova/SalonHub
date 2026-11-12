@@ -225,6 +225,16 @@ class PaymentWebhookView(PublicEndpointMixin, APIView):
                             payment_row.refund_due = True
                             payment_row.save(update_fields=["refund_due"])
                             should_initiate_refund = True
+                            # The refund email is recorded in this same
+                            # transaction, so it commits with the refund
+                            # decision or not at all. Dedup is per Payment
+                            # (docs/DECISIONS.md "Notifications").
+                            record_and_dispatch_notification(
+                                salon=salon,
+                                trigger_type=NotificationTrigger.LATE_PAYMENT_REFUNDED,
+                                appointment=appointment_row,
+                                dedup_key=f"late_payment_refunded:payment:{payment_row.pk}",
+                            )
                     else:
                         # Not PENDING: either an expected duplicate/race
                         # (already SUCCEEDED or further along) or a desync

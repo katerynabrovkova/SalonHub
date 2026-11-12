@@ -19,6 +19,7 @@ class NotificationTrigger(models.TextChoices):
     PAYMENT_SUCCEEDED = "payment_succeeded", "Payment succeeded"
     PAYMENT_FAILED = "payment_failed", "Payment failed"
     REVIEW_REQUEST = "review_request", "Review request"
+    LATE_PAYMENT_REFUNDED = "late_payment_refunded", "Late payment refunded"
     # Not appointment-scoped (docs/ARCHITECTURE.md § 3, § 9) — guest->User
     # linking's verification email, sent to the `user` recipient slot.
     EMAIL_VERIFICATION = "email_verification", "Email verification"

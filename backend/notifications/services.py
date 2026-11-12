@@ -112,8 +112,8 @@ def _build_message(notification: Notification, *, now: dt.datetime) -> tuple[str
     the recipient's language — the one place the wording lives.
 
     Every booking email (BOOKING_CREATED, BOOKING_CONFIRMED,
-    BOOKING_CANCELLED, BOOKING_EXPIRED, PAYMENT_FAILED, APPOINTMENT_REMINDER)
-    is built from the notification's appointment, with the literal fragments
+    BOOKING_CANCELLED, BOOKING_EXPIRED, PAYMENT_FAILED, APPOINTMENT_REMINDER,
+    LATE_PAYMENT_REFUNDED) is built from the notification's appointment, with the literal fragments
     per-language-keyed in _BOOKING_EMAIL_TEXTS and the interpolated values
     resolved in the same language (docs/DECISIONS.md "Notifications"). Any
     other trigger is a per-language lookup in _MESSAGES. A trigger_type with
@@ -216,6 +216,16 @@ _BOOKING_EMAIL_TEXTS: dict[str, dict[str, str]] = {
         "failed_subject": "Оплата в {salon} не пройшла",
         "failed_intro": "Не вдалося провести передоплату за запис:",
         "failed_hold": "Ми ще тримаємо цей час для вас до {time}. Спробувати оплатити ще раз:",
+        "late_subject": "Повернення передоплати в {salon}",
+        "late_intro": (
+            "Ваша оплата надійшла, коли запис уже був недійсний (час на оплату минув або "
+            "запис скасовано), тому ми повертаємо передоплату повністю:"
+        ),
+        "refund_amount": "Сума повернення: {value}",
+        "late_refund_info": (
+            "Гроші повернуться на картку, з якої ви платили. Термін залежить від вашого банку."
+        ),
+        "late_book_again": "Щоб записатися знову, перейдіть на сайт салону:",
     },
     "en": {
         "confirmed_subject": "Your booking at {salon} is confirmed",
@@ -277,6 +287,18 @@ _BOOKING_EMAIL_TEXTS: dict[str, dict[str, str]] = {
         "failed_subject": "Your payment at {salon} did not go through",
         "failed_intro": "We could not process the deposit payment for your booking:",
         "failed_hold": "We are still holding this time for you until {time}. Try to pay again:",
+        "late_subject": "Deposit refund from {salon}",
+        "late_intro": (
+            "Your payment arrived when the booking was no longer valid (the time to pay had "
+            "run out or the booking had been cancelled), so we are refunding the deposit in "
+            "full:"
+        ),
+        "refund_amount": "Refund amount: {value}",
+        "late_refund_info": (
+            "The money will return to the card you paid with. How long it takes depends on "
+            "your bank."
+        ),
+        "late_book_again": "To book again, go to the salon's website:",
     },
 }
 
@@ -290,6 +312,7 @@ _APPOINTMENT_TRIGGERS = frozenset(
         NotificationTrigger.BOOKING_EXPIRED,
         NotificationTrigger.PAYMENT_FAILED,
         NotificationTrigger.APPOINTMENT_REMINDER,
+        NotificationTrigger.LATE_PAYMENT_REFUNDED,
     )
 )
 
@@ -362,10 +385,10 @@ def _footer_lines(
     """The salon name, the `<phone> · <address>` line (an empty contact left
     out, the line omitted when both are empty) and the last line, whose "at
     the number above" variant needs a phone. `last_prefix` picks the last
-    line's pair of texts; None leaves the last line out (BOOKING_EXPIRED and
-    PAYMENT_FAILED say nothing came of the booking, so there is nothing to
-    report, and BOOKING_CREATED already carried the line; docs/DECISIONS.md
-    "Notifications")."""
+    line's pair of texts; None leaves the last line out (BOOKING_EXPIRED,
+    PAYMENT_FAILED and LATE_PAYMENT_REFUNDED say nothing came of the booking,
+    so there is nothing to report, and BOOKING_CREATED already carried the
+    line; docs/DECISIONS.md "Notifications")."""
     lines = [salon_name]
     contacts = " · ".join(value for value in (salon.phone, salon.address) if value)
     if contacts:
@@ -384,8 +407,8 @@ def _build_status_email(
     preferred: str | None,
 ) -> tuple[str, str]:
     """
-    BOOKING_CREATED, BOOKING_CANCELLED, BOOKING_EXPIRED and PAYMENT_FAILED
-    texts, as recorded in docs/DECISIONS.md "Notifications" ("Texts of the
+    BOOKING_CREATED, BOOKING_CANCELLED, BOOKING_EXPIRED, PAYMENT_FAILED and
+    LATE_PAYMENT_REFUNDED texts, as recorded in docs/DECISIONS.md "Notifications" ("Texts of the
     other booking emails"). Money values come from booking.amounts. The hold
     time is `hold_expires_at` in the salon's time zone. The cancellation
     money line is decided from `Payment.refund_due`, never from the Payment
@@ -487,6 +510,33 @@ def _build_status_email(
             lines.append(_pay_link(appointment))
         else:
             lines.append(build_salon_frontend_url(salon.slug, "/client"))
+
+    elif trigger == NotificationTrigger.LATE_PAYMENT_REFUNDED:
+        # The refund is the Payment's own amount in its own currency, never
+        # recomputed from the appointment snapshots: the full deposit that was
+        # actually charged is what goes back. Recorded only by the webhook's
+        # late-payment branch, which has just settled that Payment, so a
+        # missing one is a bug, not a blank line.
+        payment = amounts.payment_of(appointment)
+        if payment is None:
+            raise ValueError(
+                f"LATE_PAYMENT_REFUNDED notification {notification.pk!r} has no payment "
+                "to take the refund amount from"
+            )
+        subject_key = "late_subject"
+        last_prefix = None
+        lines.append(texts["late_intro"])
+        lines.extend(
+            _detail_lines(
+                appointment, texts, lang_code=lang_code, preferred=preferred, specialist=False
+            )
+        )
+        lines.append(
+            texts["refund_amount"].format(value=format_amount(payment.amount, payment.currency))
+        )
+        lines.append(texts["late_refund_info"])
+        lines.append(texts["late_book_again"])
+        lines.append(build_salon_frontend_url(salon.slug, "/services"))
 
     else:
         raise ValueError(f"no status-email builder for trigger_type {trigger!r}")

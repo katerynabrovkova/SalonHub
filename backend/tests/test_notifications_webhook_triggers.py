@@ -1,8 +1,11 @@
 """
-The webhook-fired notification triggers, `BOOKING_CONFIRMED` and
-`PAYMENT_FAILED` (docs/DECISIONS.md "Notifications": `PAYMENT_SUCCEEDED` is
-not sent; no confirmation email on the EXPIRED/CANCELLED late-payment
-branch). Real-DB integration tests over PaymentWebhookView.
+The webhook-fired notification triggers, `BOOKING_CONFIRMED`,
+`PAYMENT_FAILED` and `LATE_PAYMENT_REFUNDED` (docs/DECISIONS.md
+"Notifications": `PAYMENT_SUCCEEDED` is not sent; the EXPIRED/CANCELLED
+late-payment branch sends no confirmation email, only the late-payment
+refund email; its texts and dedup are covered in
+test_notifications_late_payment_refund.py). Real-DB integration tests over
+PaymentWebhookView.
 
 CELERY_TASK_ALWAYS_EAGER is True in tests (conftest._celery_eager), so a
 dispatched send_notification_task runs inline. The dispatch itself is
@@ -249,15 +252,16 @@ def test_booking_confirmed_dedup_unique_constraint_is_tolerated(
     assert mail.outbox == []
 
 
-# --- 4. EXPIRED-appointment suppression ---------------------------------
+# --- 4. late payment on an EXPIRED or CANCELLED appointment -------------
 
 
-def test_payment_succeeded_on_expired_appointment_emits_no_notification(
+def test_payment_succeeded_on_expired_appointment_records_only_the_refund_email(
     client, salon, specialist, service, customer, monkeypatch, django_capture_on_commit_callbacks
 ):
-    """Covers the EXPIRED-suppression decision. A successful payment landing
-    on an already-EXPIRED appointment creates NO PAYMENT_SUCCEEDED and NO
-    BOOKING_CONFIRMED row; the existing refund behaviour is unchanged."""
+    """A successful payment landing on an already-EXPIRED appointment
+    records NO BOOKING_CONFIRMED (and no PAYMENT_SUCCEEDED) row, only one
+    LATE_PAYMENT_REFUNDED email; the existing refund behaviour is
+    unchanged."""
     monkeypatch.setattr(PaymentWebhookView, "provider_class", _FakeProvider)
     appt = _appt(salon, specialist, service, customer, status=AppointmentStatus.EXPIRED)
     payment = _make_payment(
@@ -268,28 +272,30 @@ def test_payment_succeeded_on_expired_appointment_emits_no_notification(
         response = _post(client, "evt_4", "payment_succeeded", "ref_4")
 
     assert response.status_code == 200
-    assert callbacks == []
-    assert _notifications(salon) == []
+    assert len(callbacks) == 1
+    assert [row.trigger_type for row in _notifications(salon)] == [
+        NotificationTrigger.LATE_PAYMENT_REFUNDED
+    ]
     with tenant_context(salon.id):
         payment_row = Payment.objects.get(pk=payment.pk)
         appt_row = Appointment.objects.get(pk=appt.pk)
     # initiate_refund genuinely ran: it stamps REFUND_PENDING *before*
     # calling provider.refund (Stage 8.F asymmetric-risk order), and the
-    # fake recorded the call — so this is "refund happened + no
-    # notification", not "refund skipped".
+    # fake recorded the call — so this is "refund happened + refund email",
+    # not "refund skipped".
     assert payment_row.status == PaymentStatus.REFUND_PENDING
     assert _FakeProvider.refund_calls == [("ref_4", str(appt.id))]
     assert appt_row.status == AppointmentStatus.EXPIRED  # not resurrected
-    assert mail.outbox == []
+    assert [m.to for m in mail.outbox] == [[customer.email]]
 
 
-def test_payment_succeeded_on_cancelled_appointment_emits_no_notification(
+def test_payment_succeeded_on_cancelled_appointment_records_only_the_refund_email(
     client, salon, specialist, service, customer, monkeypatch, django_capture_on_commit_callbacks
 ):
-    """Same suppression as the EXPIRED test above, for a CANCELLED
-    appointment (docs/DECISIONS.md § Stage 15 planning, item 14 design
-    details): the payment is refunded, never confirmed, so NO
-    PAYMENT_SUCCEEDED and NO BOOKING_CONFIRMED row."""
+    """Same as the EXPIRED test above, for a CANCELLED appointment
+    (docs/DECISIONS.md § Stage 15 planning, item 14 design details): the
+    payment is refunded, never confirmed, so NO BOOKING_CONFIRMED (and no
+    PAYMENT_SUCCEEDED) row, only one LATE_PAYMENT_REFUNDED email."""
     monkeypatch.setattr(PaymentWebhookView, "provider_class", _FakeProvider)
     appt = _appt(salon, specialist, service, customer, status=AppointmentStatus.CANCELLED)
     payment = _make_payment(
@@ -300,16 +306,18 @@ def test_payment_succeeded_on_cancelled_appointment_emits_no_notification(
         response = _post(client, "evt_4c", "payment_succeeded", "ref_4c")
 
     assert response.status_code == 200
-    assert callbacks == []
-    assert _notifications(salon) == []
+    assert len(callbacks) == 1
+    assert [row.trigger_type for row in _notifications(salon)] == [
+        NotificationTrigger.LATE_PAYMENT_REFUNDED
+    ]
     with tenant_context(salon.id):
         payment_row = Payment.objects.get(pk=payment.pk)
         appt_row = Appointment.objects.get(pk=appt.pk)
-    # Same "refund happened + no notification" proof as the EXPIRED test.
+    # Same "refund happened + refund email" proof as the EXPIRED test.
     assert payment_row.status == PaymentStatus.REFUND_PENDING
     assert _FakeProvider.refund_calls == [("ref_4c", str(appt.id))]
     assert appt_row.status == AppointmentStatus.CANCELLED  # not confirmed
-    assert mail.outbox == []
+    assert [m.to for m in mail.outbox] == [[customer.email]]
 
 
 # --- 5. payment_failed -------------------------------------------------
