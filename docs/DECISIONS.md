@@ -91,17 +91,27 @@ When an item is done, delete its line here and update its topic section.
 
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
   marketing site with pricing, salon onboarding, subscriptions and billing.
-  The design pass does not start until the plan is recorded. Business model
-  still open; current leaning (30.10.2026) a recurring subscription per
-  salon with the platform hosting and maintaining each site. [Roadmap]
+  The design pass does not start until the plan is recorded. The business
+  model itself is decided. [Roadmap, Business model]
 - Roadmap gap planning also covers the UI language switcher and UI chrome
-  i18n: which languages (e.g. Georgian, English), how the language reaches
-  the URL, translation files for all UI copy. Today there is no translation
-  mechanism for interface labels, and all interface text is hardcoded
+  i18n: which languages (Georgian is required for the pilot; e.g. English),
+  how the language reaches the URL, translation files for all UI copy.
+  Today there is no translation mechanism for interface labels, and all
+  interface text is hardcoded
   Ukrainian. Leaning: build the translation mechanism at the very start of
   the design pass, so reworked copy is written into translation files once.
   When it exists, the site-language module reads the customer's choice
-  instead of a constant. [Frontend: site language, Localization]
+  instead of a constant. [Frontend: site language, Localization, Business
+  model]
+- Actual subscription prices per country, set after talking to salon
+  owners. [Business model]
+- How long the founding price stays fixed (decided after talking to salons),
+  and whether future paid add-ons are included in it. [Business model]
+- Data retention after a salon leaves or stays paused (period before
+  deletion). [Business model]
+- Before the first paid salon: check with a Georgian accountant how the
+  platform receives payments (Georgian individual entrepreneur, Ukrainian
+  salons paying abroad). [Business model]
 
 ### Stage 18
 
@@ -109,6 +119,8 @@ When an item is done, delete its line here and update its topic section.
   (`name` is already exposed). [Salon]
 - `/login` for an already authenticated user renders the form, which looks
   like a logout; consider redirecting (option E). [Auth: session]
+- Customer-base CSV export for the salon owner: only the salon's own owner,
+  only that salon's data, two-salon isolation tests. [Business model]
 
 ### Design pass (Stages 18-21)
 
@@ -209,6 +221,14 @@ on top of it.
   since the form was opened. [Salon]
 - Idea, not decided: the assistant's grammatical gender per salon. [Assistant]
 
+### Gate: before the first pilot salon
+
+- 0% deposit flow (decided: no payment step, booking confirmed at once, no
+  slot hold). Building it means revisiting the "Передоплата: X (сплачено)"
+  line of the `BOOKING_CONFIRMED` email and the payment lines of
+  `BOOKING_CREATED`. [Business model, Notifications]
+- Manual salon pause flag (late payment, see Business model).
+
 ### Gate: before a real payment provider is enabled (Stage 22 by default)
 
 - Refuse to start with `MockPaymentProvider` in production (its webhook
@@ -227,10 +247,9 @@ on top of it.
   connection.
 - Resume payment after lost frontend state; check first how much the
   "Оплатити" endpoint already covers.
-- 0% deposit flow, and what WayForPay does with a 0.00 amount. When it is
-  decided, revisit the "Передоплата: X (сплачено)" line of the
-  `BOOKING_CONFIRMED` email and the payment lines of `BOOKING_CREATED`.
-  [Notifications]
+- Payment provider and its credentials per salon (today one global set of
+  WayForPay env vars): deposits go to each salon's own merchant account.
+  [Business model]
 
 ### Stage 22 (productionization)
 
@@ -507,10 +526,11 @@ on top of it.
 
 `docs/ARCHITECTURE.md` describes the mechanisms; the numbers live here, once.
 
-- **Deposit: 20% of the service price, paid online at booking**
-  (`Salon.deposit_percentage`, salon-wide, no per-service override in v1).
-  Rounded half-up to whole currency units. The remaining amount is paid in
-  person and not tracked by the platform.
+- **Deposit: a per-salon percentage of the service price, paid online at
+  booking** (`Salon.deposit_percentage`, default 20%, salon-wide, no
+  per-service override in v1); 0% means no payment step (see "Business
+  model"). Rounded half-up to whole currency units. The remaining amount is
+  paid in person and not tracked by the platform.
 - **Price and deposit percentage are snapshotted on the appointment**
   (`service_price_at_booking`, `deposit_percentage_at_booking`) together
   with `blocked_until`; later catalog or salon changes never alter what an
@@ -568,6 +588,61 @@ When bumping any pin, re-check these constraints.
   is ever required).
 - Frontend type-check: `npm run typecheck` (`tsc --noEmit --incremental
   false`); see `CLAUDE.md` for why and for corrupt `.next/` types.
+
+---
+
+## Business model and billing
+
+### Business model
+
+Decided 12-13.11.2026.
+
+- **Subscription, no commission on bookings.** The salon pays the platform a
+  subscription. Customer money (deposits) goes directly to the salon's own
+  merchant account, never through the platform, so the payment provider and
+  its credentials are per salon.
+- **One plan, no feature tiers.** Billing periods of 1, 3, 6 and 12 months;
+  the longer the period, the lower the monthly price. The first month is a
+  free trial with no card required. Prices are set per country in local
+  currency; amounts not decided yet.
+- **Pilot market: Georgia (Batumi), 3-5 salons;** Ukraine is the second
+  wave. A Georgian UI is required for the pilot.
+- **Founding (pilot) salons:** the same free first month, then monthly
+  payment at a founding price, a discount from the regular price (about 50%,
+  exact amount set with the prices). In return the salon gives regular
+  feedback, a review, and permission to be shown on the platform's marketing
+  site.
+- **Deposit percentage is a per-salon setting; 0% means no payment step:**
+  the booking is confirmed immediately, with no slot hold and no "deposit
+  withheld under 24h" rule. Pilot salons work without online deposits. A
+  Georgian payment provider (TBC, Bank of Georgia or Flitt) is added later,
+  only when a pilot salon asks for it.
+- **Limits that may differ between salons are stored per salon,** not as
+  global constants (e.g. the assistant's daily message limit, today a global
+  1000). Not built now; changed when a different value is first needed.
+- **The salon owner can export the salon's customer base (CSV) at any
+  time** (a product promise). Built with the salon owner's dashboard; only
+  for that salon's own owner and only that salon's data (two-salon isolation
+  tests required).
+- **Late payment:** reminders to the owner 3 days before the due date and on
+  the due date, then a 7-day grace period: everything works, the owner's
+  dashboard shows a clear "payment overdue" notice, reminders continue.
+  After 7 days the salon is paused, not deleted: new online bookings are off
+  (customers see a neutral "Online booking is temporarily unavailable,
+  please contact the salon" with the salon's contacts, never a word about
+  payment), the assistant is off, existing appointments stay valid and links
+  in emails keep working, and the owner can still log in to pay or export
+  the data. Paying restores everything at once. Data is deleted only after a
+  long absence, with a warning first (period decided with data retention).
+  For the pilot all of this is manual (personal contact, a pause flag set in
+  admin); automation comes when there are many salons. The pause is a
+  separate salon state, not `Salon.is_active`: an inactive salon returns 404
+  everywhere, which would break the links in emails and the owner's login.
+- **Subscription refunds:** none when a salon leaves early; the paid period
+  runs to its end. Exceptions, unused time refunded in full: within 14 days
+  after the first payment for a multi-month period (the salon changed its
+  mind), and when the platform is at fault (long outage, the platform stops
+  the service).
 
 ---
 
