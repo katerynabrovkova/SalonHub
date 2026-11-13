@@ -106,7 +106,9 @@ When an item is done, delete its line here and update its topic section.
   salons paying abroad). [Business model]
 - Rewrite the stage order 18-23 at the end of the roadmap gap planning:
   place the design pass, the pilot gate and the first pilot salon
-  explicitly. [Roadmap]
+  explicitly. The Stage 22 items the assistant depends on (`NUM_PROXIES`,
+  streaming-capable server, Redis persistence, hosting layout) stay in
+  Stage 22 until then and are placed before the pilot. [Roadmap]
 
 ### Stage 18
 
@@ -242,8 +244,29 @@ on top of it.
   onboarding, Salon look]
 - Gallery of works (operator adds photos through the import command).
   [Salon look]
-- BellaBeauty demo content in Georgian and every language the marketing
-  site offers. [Marketing site]
+- BellaBeauty as a Batumi salon: `Asia/Tbilisi`, GEL prices, a fictional
+  Batumi address, a +995 placeholder phone, content in Georgian and every
+  language the marketing site offers. [Marketing site, Demo salon]
+- Demo mode: the last booking step creates nothing in a demo salon,
+  customer accounts are off (no email sent); the assistant's daily limit per
+  salon (small for the demo); a safe way to run `seed_bella_demo` and
+  `reset_bella_demo` on the production server for the demo salon only.
+  [Demo salon, Business model]
+- Privacy policy page; must mention the `safety_identifier` sent to OpenAI.
+  The widget's AI notice already links to `/privacy` (404 until then).
+  The assistant is not enabled for real customers without it. [Assistant]
+- Whether legal texts (privacy policy) need a professional translator.
+  [Localization]
+- Gate "Assistant quality before launch": model and reasoning effort (today
+  `gpt-6-luna`, `low`; try `medium`), budget per salon, and whether to give
+  the model a whole-salon snapshot instead of tools only (size, cost with
+  caching, latency, cap for large salons, two-salon test). Recheck the live
+  issues: narrow reading of data ("майстрині не працюють" when only one
+  specialist is off, missed nail design in a bio), overall tone, "any" with
+  one specialist, "Ви працюєте в неділю?", "after 17". Includes the manual
+  review of 10-15 real questions in each of the four languages (Georgian,
+  Russian, English, Ukrainian) required before the assistant is enabled for
+  real customers. [Assistant]
 - Django admin safety fixes: tenant-owned dropdowns limited to the current
   salon, salon time zone validated on save. [Salon onboarding]
 - Photo file storage and the upload pipeline (operator upload through the
@@ -276,20 +299,6 @@ on top of it.
 
 ### Stage 22 (productionization)
 
-- Privacy policy page; must mention the `safety_identifier` sent to OpenAI.
-  The widget's AI notice already links to `/privacy` (404 until then).
-  The assistant is not enabled for real customers without it. [Assistant]
-- Whether legal texts (privacy policy) need a professional translator;
-  decided closer to launch. [Localization]
-- Gate "Assistant quality before launch": model and reasoning effort (today
-  `gpt-6-luna`, `low`; try `medium`), budget per salon, and whether to give
-  the model a whole-salon snapshot instead of tools only (size, cost with
-  caching, latency, cap for large salons, two-salon test). Recheck the live
-  issues: narrow reading of data ("майстрині не працюють" when only one
-  specialist is off, missed nail design in a bio), overall tone, "any" with
-  one specialist, "Ви працюєте в неділю?", "after 17". Includes the manual
-  review of 10-15 real Ukrainian questions required before the assistant is
-  enabled for real customers. [Assistant]
 - `NUM_PROXIES` / `X-Forwarded-For`: spoofable while unset; affects every
   IP-keyed throttle and the assistant's `safety_identifier`. [Security]
 - `auth/refresh` has no throttle. [Auth: session]
@@ -321,6 +330,9 @@ on top of it.
 - Full marketing site with prices, sign-up and subscription payment.
   [Marketing site]
 - Testimonials from founding salons on the marketing site. [Marketing site]
+- Assistant on the marketing site answering salon owners' questions about
+  SalonHub, built with the full marketing site. [Marketing site]
+- Ukrainian demo salon, for the Ukrainian wave. [Demo salon]
 
 ### After deployment, on a real phone
 
@@ -659,7 +671,9 @@ Decided 12-13.11.2026.
   only when a pilot salon asks for it.
 - **Limits that may differ between salons are stored per salon,** not as
   global constants (e.g. the assistant's daily message limit, today a global
-  1000). Not built now; changed when a different value is first needed.
+  1000). Built before the pilot for the assistant's daily limit (the demo
+  salon needs a small one); other limits move when a different value is
+  first needed.
 - **The salon owner can export the salon's customer base (CSV) at any
   time** (a product promise). Built with the salon owner's dashboard; only
   for that salon's own owner and only that salon's data (two-salon isolation
@@ -788,6 +802,12 @@ Decided 13.11.2026.
   terms, no amounts); a short FAQ for owners (setup time, leaving at any
   time, phone bookings, languages); footer with contacts and the privacy
   policy link.
+- **The FAQ answer about leaving matches the refund rule:** the salon can
+  leave at any time, the paid period runs to its end, and the salon can
+  export its customer base.
+- **Language:** the visitor's browser language if it is one of the four
+  platform languages, otherwise English. The salon main-language rule does
+  not apply (the apex site has no salon).
 - **Contact channels:** WhatsApp, Telegram, Viber, a Georgian phone number
   and email. The main "Write to us" button leads to one primary channel; the
   full list is in the contacts block.
@@ -934,6 +954,8 @@ functions touch the ORM and need tenant context.
   anything else 400. When missing, the stored `Customer.preferred_language`
   is left unchanged: a booking is never blocked over it. Which Customer it
   may overwrite: see Identity.
+- **In a demo salon the booking endpoints create nothing** (see "Demo
+  salon").
 
 ### Guest booking (`POST bookings/`)
 
@@ -1983,7 +2005,9 @@ Decided 10.11.2026.
 ## AI assistant: backend
 
 Disabled for real customers until the privacy page exists and the gate
-"Assistant quality before launch" is passed (see register).
+"Assistant quality before launch" is passed; both are required before the
+first pilot salon, where the assistant works for real customers (see
+register).
 
 ### Scope
 
@@ -2257,11 +2281,24 @@ money is a string with the salon currency.
   bookings, payments, tokens, notifications, reviews, customers and client
   accounts, keeping the catalogue, admin accounts, platform users, counters
   and the test account `item8-new@example.com`. Both act only on
-  `bella-demo`, inside its tenant context, in one transaction, and refuse to
-  run when `DEBUG` is off.
+  `bella-demo`, inside its tenant context, in one transaction. Today they
+  refuse to run when `DEBUG` is off; they need an explicit, safe way to run
+  on the production server for the demo salon only (decided 13.11.2026).
 - Demo reviews come from "Демо-клієнтка NN" (`demo-review-NN@example.com`)
   and look real on public pages, so `bella-demo` must only ever be shown as a
   demo salon.
+- **Demo mode** (decided 13.11.2026): a salon can be marked as a demo.
+  Everything works (services, specialists, choosing a time, the assistant),
+  but the last booking step creates nothing: no appointment, no hold, no
+  email; instead the customer sees that this is a demo salon and the booking
+  was not created. Customer accounts are off too: login, registration,
+  password reset and email change show a "this is a demo salon" message
+  instead and send no email. The assistant is enabled in the demo with a
+  small daily limit (per salon, see "Business model").
+- **BellaBeauty is a Batumi salon** (decided 13.11.2026): time zone
+  `Asia/Tbilisi`, prices in GEL, a fictional Batumi address, a +995
+  placeholder phone, content in Georgian and the other marketing site
+  languages. A Ukrainian demo is made later, for the Ukrainian wave.
 
 ---
 
