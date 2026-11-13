@@ -62,11 +62,11 @@ pass does not start until that plan is recorded here.
 **Design pass (clarification 20.09.2026):** Stage 18 begins with the design
 system (colour tokens, type scale, shared components); the admin UI of
 Stages 18-21 is built on top of it. The design pass over the client-facing
-pages (`/services`, `/specialists`, `/booking`, `/client`), the apex
-marketing landing page and UI-chrome i18n also belong to Stages 18-21. Its
-exact scope is decided when Stage 18 starts, using the salon-site visual
-references. Until then pages use plain Tailwind; new UI copy is written in
-Ukrainian.
+pages (`/services`, `/specialists`, `/booking`, `/client`), the one-page
+marketing site on the apex domain (see "Marketing site") and UI-chrome i18n
+also belong to Stages 18-21. Its exact scope is decided when Stage 18
+starts, using the salon-site visual references. Until then pages use plain
+Tailwind; new UI copy is written in Ukrainian.
 
 **Later features** (after the product is complete, not in a numbered stage):
 
@@ -92,8 +92,9 @@ When an item is done, delete its line here and update its topic section.
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
   marketing site with pricing, salon onboarding, subscriptions and billing.
   The design pass does not start until the plan is recorded. The business
-  model, salon onboarding and salon look are decided. [Roadmap, Business
-  model, Salon onboarding, Salon look]
+  model, salon onboarding, salon look and the pilot marketing site are
+  decided. [Roadmap, Business model, Salon onboarding, Salon look, Marketing
+  site]
 - Actual subscription prices per country, set after talking to salon
   owners. [Business model]
 - How long the founding price stays fixed (decided after talking to salons),
@@ -122,8 +123,10 @@ Its exact scope is decided when Stage 18 starts. It begins with the design
 system (colour tokens, type scale, shared components); the admin UI is built
 on top of it.
 
-- Design system, apex marketing landing page, salon home page (today
-  "Сторінка салону в розробці."). [Frontend]
+- Design system, salon home page (today "Сторінка салону в розробці.").
+  [Frontend]
+- One-page marketing site on the apex domain, content and contact channels
+  as decided (no prices, sign-up or payment). [Marketing site]
 - The one pilot template with per-salon settings (main colour, logo, cover,
   category and specialist photos, light or dark background, heading font
   from a curated set, button shape, shown sections, home page headline),
@@ -239,6 +242,8 @@ on top of it.
   onboarding, Salon look]
 - Gallery of works (operator adds photos through the import command).
   [Salon look]
+- BellaBeauty demo content in Georgian and every language the marketing
+  site offers. [Marketing site]
 - Django admin safety fixes: tenant-owned dropdowns limited to the current
   salon, salon time zone validated on save. [Salon onboarding]
 - Photo file storage and the upload pipeline (operator upload through the
@@ -313,6 +318,9 @@ on top of it.
 - Owner look editor in the dashboard. [Salon look]
 - Paid design-adaptation service: price and scope. [Salon look]
 - Full salon-created appointments (with a customer). [Salon onboarding]
+- Full marketing site with prices, sign-up and subscription payment.
+  [Marketing site]
+- Testimonials from founding salons on the marketing site. [Marketing site]
 
 ### After deployment, on a real phone
 
@@ -758,6 +766,35 @@ Decided 13.11.2026.
 - **After the pilot:** templates 2 and 3, the order of blocks on the home
   page, a look editor in the owner's dashboard, and the paid
   design-adaptation service.
+
+### Marketing site
+
+Decided 13.11.2026.
+
+- **Before the pilot: a simple one-page site on the apex domain** (a business
+  card). No prices, no sign-up, no subscription payment (self-signup comes
+  after the pilot).
+- **Content, top to bottom:** header with the SalonHub logo, language
+  switcher (the same four languages) and a contact button; hero with a short
+  headline, one line of explanation, "See the demo" (opens the BellaBeauty
+  demo salon) and "Write to us"; 5-6 benefits (online booking 24/7 only into
+  free time; an AI assistant answering customers in their language; a site
+  in four languages; the salon's own look with colours, logo, photos and a
+  gallery of works; an owner dashboard with bookings, notifications and time
+  blocks; no commissions, and the customers belong to the salon); "How it
+  works" in 3 steps (the salon sends its data, the operator sets up the
+  site, customers book); phone screenshots of the demo (home, booking,
+  assistant); the offer for first salons (free first month, founding salon
+  terms, no amounts); a short FAQ for owners (setup time, leaving at any
+  time, phone bookings, languages); footer with contacts and the privacy
+  policy link.
+- **Contact channels:** WhatsApp, Telegram, Viber, a Georgian phone number
+  and email. The main "Write to us" button leads to one primary channel; the
+  full list is in the contacts block.
+- **No testimonials before the pilot;** they are added after it, from
+  founding salons.
+- **The BellaBeauty demo salon is filled in Georgian** (and every language
+  the marketing site offers) before it is shown to Georgian owners.
 
 ---
 
