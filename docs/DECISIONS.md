@@ -92,7 +92,8 @@ When an item is done, delete its line here and update its topic section.
 - Plan the roadmap gap: per-salon themes and appearance, the platform's own
   marketing site with pricing, salon onboarding, subscriptions and billing.
   The design pass does not start until the plan is recorded. The business
-  model itself is decided. [Roadmap, Business model]
+  model, salon onboarding and salon look are decided. [Roadmap, Business
+  model, Salon onboarding, Salon look]
 - Actual subscription prices per country, set after talking to salon
   owners. [Business model]
 - How long the founding price stays fixed (decided after talking to salons),
@@ -123,6 +124,12 @@ on top of it.
 
 - Design system, apex marketing landing page, salon home page (today
   "Сторінка салону в розробці."). [Frontend]
+- The one pilot template with per-salon settings (main colour, logo, cover,
+  category and specialist photos, light or dark background, heading font
+  from a curated set, button shape, shown sections, home page headline),
+  built on the design system variables. [Salon look]
+- Gallery of works: photo grid, large view on tap, optional category and
+  specialist tags shown on their pages. [Salon look]
 - Languages as decided: translation files for all platform texts (today
   there is no mechanism and all interface text is hardcoded Ukrainian),
   `ka` and `ru` in `SUPPORTED_LANGUAGES` with their per-language
@@ -228,7 +235,10 @@ on top of it.
   line of the `BOOKING_CONFIRMED` email and the payment lines of
   `BOOKING_CREATED`. [Business model, Notifications]
 - Manual salon pause flag (late payment, see Business model).
-- Salon import management command. [Salon onboarding]
+- Salon import management command, including the look settings. [Salon
+  onboarding, Salon look]
+- Gallery of works (operator adds photos through the import command).
+  [Salon look]
 - Django admin safety fixes: tenant-owned dropdowns limited to the current
   salon, salon time zone validated on save. [Salon onboarding]
 - Photo file storage and the upload pipeline (operator upload through the
@@ -296,6 +306,13 @@ on top of it.
   hash), like Next's own inline scripts (see "Booking > Guest token").
   [Frontend]
 - Log `assistant_busy` so the ASGI trigger can be seen. [Assistant]
+
+### After the pilot (stage set when the stage order is rewritten)
+
+- Templates 2 and 3; order of blocks on the home page. [Salon look]
+- Owner look editor in the dashboard. [Salon look]
+- Paid design-adaptation service: price and scope. [Salon look]
+- Full salon-created appointments (with a customer). [Salon onboarding]
 
 ### After deployment, on a real phone
 
@@ -674,7 +691,8 @@ Decided 13.11.2026.
   transaction; is idempotent (a re-run updates instead of duplicating); and
   works on one salon per run. It reuses the create-or-update helpers of
   `seed_bella_demo` where they fit. The file template doubles as the
-  questionnaire for the salon owner. Salon data files contain personal data
+  questionnaire for the salon owner; it asks for the logo as PNG (the upload
+  pipeline does not accept SVG). Salon data files contain personal data
   and are kept outside the repository.
 - **Django admin stays the fallback, with two safety fixes:** dropdowns of
   tenant-owned rows show only the current salon's rows, and the salon time
@@ -701,6 +719,45 @@ Decided 13.11.2026.
   metadata such as GPS); limits on file size and pixel count; a random file
   name, never the uploaded one; files stored per salon; a photo can be
   attached only to the salon's own objects.
+
+### Salon look
+
+Decided 13.11.2026.
+
+- **Long-term goal: three ready-made templates** with different page
+  structure. After subscribing, the salon owner chooses a template and
+  customizes the look in the dashboard. A paid extra service: when no
+  template fits, the operator adapts the design for the salon within
+  reasonable limits, never a fully unique design (price and scope decided
+  later). It is a one-off service, not a feature tier (see "One plan, no
+  feature tiers").
+- **Pilot: one template,** customized per salon with settings: main colour,
+  logo, photos (cover, categories, specialists), light or dark background,
+  heading font from a small curated set, button shape (square, slightly
+  rounded or round), and which site sections are shown (reviews, gallery,
+  team). The home page headline and the salon description are salon content,
+  so they must be filled in every enabled language (see Localization). Not
+  settings: text size (tuned for readability on phones), the booking button
+  text (platform text, translated by the platform) and the order of blocks
+  on the home page. For the pilot the operator sets these through the import
+  command; owners do not edit them yet.
+- **Photos on the site:** category photos (replacing today's grey circle with
+  a letter), specialist photos (replacing the grey placeholder) and the salon
+  cover. Services have no photos: a list where only some services have a
+  photo looks uneven, so the service list stays consistent without images.
+- **Gallery of works, a new site section required before the pilot:** a grid
+  of photos of finished work (nails, hair, brows), each opening large on
+  tap. Each photo can optionally be tagged with a category and a specialist;
+  a specialist's page shows the works tagged with that specialist, and a
+  category page shows the works of that category. Gallery photos go through
+  the same upload pipeline as all photos; for the pilot the operator adds
+  them through the import command.
+- **The design system is built on variables** (colour, font, light/dark,
+  button shape), so the per-salon settings plug into every page and further
+  templates can be added later without reworking the pages.
+- **After the pilot:** templates 2 and 3, the order of blocks on the home
+  page, a look editor in the owner's dashboard, and the paid
+  design-adaptation service.
 
 ---
 
@@ -1458,10 +1515,10 @@ Language decisions dated 13.11.2026 unless marked otherwise.
   texts); nothing may assume a fixed number.
 - **Each salon chooses which of the four its site shows (at least one) and
   one main language.** A language can be enabled for a salon only when all of
-  the salon's texts in it are filled: salon name and `about`, category and
-  service names, service descriptions, specialist names and bios, assistant
-  starters. The import command rejects a file with missing translations for
-  enabled languages.
+  the salon's texts in it are filled: salon name, `about`, home page
+  headline, category and service names, service descriptions, specialist
+  names and bios, assistant starters. The import command rejects a file
+  with missing translations for enabled languages.
 - **The fallback is the salon's main language everywhere** (read API and
   emails), only as a safety net against bugs, never as a way of working.
   There is no global `en` fallback.
