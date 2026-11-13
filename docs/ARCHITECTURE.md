@@ -83,7 +83,7 @@ Domain entities, all modeled in code (field-level detail lives in the models):
   `is_active`, never a `DELETE` of a row an `Appointment` might reference.
   Deactivating a `Specialist` is additionally refused outright (409) while
   they still have a future non-cancelled `Appointment`, until the conflict
-  resolution flow exists (Stage 19; `docs/DECISIONS.md` § "Specialists").
+  resolution flow exists (after the pilot; `docs/DECISIONS.md` § "Specialists").
 - **Specialist ↔ Service** — many-to-many via an explicit `SpecialistService`
   through model, not a bare `ManyToManyField` (not every specialist performs
   every service) — the explicit through model is needed so the pairing
@@ -343,7 +343,7 @@ those writes, not a change in what the source of truth is.
   the existing conflict. Detection and resolution (rebook with another specialist,
   rebook the same specialist later, or a fully-refunded salon-initiated
   cancellation) is a recorded requirement (`docs/DECISIONS.md` § "Business rules"),
-  with the resolution UI landing in the admin calendar (Stage 19).
+  with the resolution UI landing in the admin calendar (after the pilot).
 - A service duration longer than any single open window never produces a slot —
   correct behavior, not a bug.
 - Specialists working across midnight — assumed not to happen (salons close
@@ -445,7 +445,7 @@ review-request message exists but is not dispatched yet. **Account emails**
 (verification, password reset, email change, password changed) do not go through this
 abstraction: they are standalone Celery tasks in `accounts/tasks.py` (plain
 `send_mail`) without the dedup machinery below; routing them through `Notification` is
-planned (Stage 21).
+planned (after the pilot).
 
 **Duplicate-send prevention** uses the same idempotency shape as § 8: a `Notification`
 row is created in `PENDING` status *before* any send is attempted. `Notification.

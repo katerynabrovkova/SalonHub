@@ -49,24 +49,63 @@ current stage.
 15. Frontend customer account and guest token management ✓ (20.10.2026)
 16. AI assistant backend ✓ (27.10.2026)
 17. AI assistant frontend widget ✓ (10.11.2026)
-18. Admin shell, dashboard, appointments list
-19. Admin calendar, appointment create and edit
-20. Admin services, specialists, working hours, days off
-21. Admin clients, reviews, notifications, statistics
-22. Productionization: Docker, CI/CD, README
-23. Production-readiness audit (fresh session)
+18. Languages and design foundation: design system on variables (colours,
+    fonts, button shape, light/dark); translation mechanism for the four
+    languages, language prefix in the address, switcher and browser
+    detection; all existing UI text and account emails moved into
+    translation files; price and currency formatting per language; backend:
+    per-salon enabled languages, main language, main-language fallback,
+    translatable `Service.description`.
+19. Salon content backend: safe photo upload pipeline and file storage;
+    category and specialist photos, cover, logo, gallery of works with
+    optional category/specialist tags; per-salon look settings fields; salon
+    import command (incl. look settings, PNG logo, refusing hour changes that
+    leave bookings outside working time); Django admin safety fixes.
+20. Salon site in the new design: salon home page and navigation; redesign
+    of services, specialists, reviews, gallery, booking, customer cabinet and
+    assistant widget; per-salon look settings applied everywhere; page-level
+    items deferred to the design pass.
+21. Owner dashboard, pilot minimum: staff login and dashboard shell, per-user
+    dashboard language, appointments list, in-app notifications, time blocks
+    with note, customer CSV export.
+22. Pilot readiness: 0% deposit flow with booking rate limiting, manual salon
+    pause, demo mode with per-salon assistant limit, BellaBeauty moved to
+    Batumi (FAQ in English), `REVIEW_REQUEST` dispatch, privacy policy page
+    with the data retention period (and the translator question), one-page
+    marketing site, "Assistant quality before launch" gate; at the end, the
+    Georgian native-speaker review of platform texts, before the marketing
+    site and the demo are shown to owners.
+23. Productionization: server, domain and salon subdomains, email, photo
+    storage in production, backups, payments off without a real provider,
+    `NUM_PROXIES`, streaming-capable server, Redis persistence, hosting
+    layout, safe demo commands in production, CI/CD, README.
+24. Production-readiness audit (fresh session).
+25. Pilot launch: accountant check, prices, onboarding the first salon
+    through the import command, feedback loop with founding salons.
 
-**Before Stage 18:** plan the roadmap gap (see the register). The design
-pass does not start until that plan is recorded here.
+**After the pilot** (numbered later, order set by pilot feedback): calendar
+and salon-created appointments; services, specialists and working hours in
+the dashboard; customers, reviews, statistics; look editor, templates 2 and
+3, block order, paid design adaptation; full marketing site with prices,
+sign-up, subscription billing and the owners' sales assistant; Georgian
+payment provider and the "before a real payment provider" gate; external
+notification channel for salons; Ukrainian wave (Ukrainian demo salon,
+per-salon WayForPay).
 
-**Design pass (clarification 20.09.2026):** Stage 18 begins with the design
-system (colour tokens, type scale, shared components); the admin UI of
-Stages 18-21 is built on top of it. The design pass over the client-facing
-pages (`/services`, `/specialists`, `/booking`, `/client`), the one-page
-marketing site on the apex domain (see "Marketing site") and UI-chrome i18n
-also belong to Stages 18-21. Its exact scope is decided when Stage 18
-starts, using the salon-site visual references. Until then pages use plain
-Tailwind; new UI copy is written in Ukrainian.
+**Roadmap gap planning completed 13.11.2026:** business model, salon
+onboarding, salon look, languages, marketing site and demo mode are recorded
+in their topic sections, and the stage order above is the result.
+
+**Design pass (13.11.2026):** Stage 18 builds the design system on variables
+and the translation mechanism, so every later page is built on them and
+reworked copy is written into translation files once. Stage 20 redesigns the
+client-facing salon site (home page, `/services`, `/specialists`, reviews,
+gallery, `/booking`, `/client`, the assistant widget) with the per-salon look
+settings; the owner dashboard (Stage 21) and the one-page marketing site
+(Stage 22) are built on the same design system. The page-level scope of
+Stage 20 is decided when it starts, using the salon-site visual references.
+Until Stage 18, pages use plain Tailwind; new UI copy is written in
+Ukrainian.
 
 **Later features** (after the product is complete, not in a numbered stage):
 
@@ -87,78 +126,78 @@ Every open, deferred and gated item in one place, grouped by where it is
 due. One line each; the topic section named in brackets holds the detail.
 When an item is done, delete its line here and update its topic section.
 
-### Before Stage 18
+### Stage 18 (languages and design foundation)
 
-- Plan the roadmap gap: per-salon themes and appearance, the platform's own
-  marketing site with pricing, salon onboarding, subscriptions and billing.
-  The design pass does not start until the plan is recorded. The business
-  model, salon onboarding, salon look and the pilot marketing site are
-  decided. [Roadmap, Business model, Salon onboarding, Salon look, Marketing
-  site]
-- Actual subscription prices per country, set after talking to salon
-  owners. [Business model]
-- How long the founding price stays fixed (decided after talking to salons),
-  and whether future paid add-ons are included in it. [Business model]
-- Data retention after a salon leaves or stays paused (period before
-  deletion). [Business model]
-- Before the first paid salon: check with a Georgian accountant how the
-  platform receives payments (Georgian individual entrepreneur, Ukrainian
-  salons paying abroad). [Business model]
-- Rewrite the stage order 18-23 at the end of the roadmap gap planning:
-  place the design pass, the pilot gate and the first pilot salon
-  explicitly. The Stage 22 items the assistant depends on (`NUM_PROXIES`,
-  streaming-capable server, Redis persistence, hosting layout) stay in
-  Stage 22 until then and are placed before the pilot. [Roadmap]
-
-### Stage 18
-
-- Salon profile API: `Salon.about` and the other salon-identity fields
-  (`name` is already exposed). [Salon]
-- `/login` for an already authenticated user renders the form, which looks
-  like a logout; consider redirecting (option E). [Auth: session]
-- Customer-base CSV export for the salon owner: only the salon's own owner,
-  only that salon's data, two-salon isolation tests. [Business model]
-
-### Design pass (Stages 18-21)
-
-Its exact scope is decided when Stage 18 starts. It begins with the design
-system (colour tokens, type scale, shared components); the admin UI is built
-on top of it.
-
-- Design system, salon home page (today "Сторінка салону в розробці.").
-  [Frontend]
-- One-page marketing site on the apex domain, content and contact channels
-  as decided (no prices, sign-up or payment). [Marketing site]
-- The one pilot template with per-salon settings (main colour, logo, cover,
-  category and specialist photos, light or dark background, heading font
-  from a curated set, button shape, shown sections, home page headline),
-  built on the design system variables. [Salon look]
-- Gallery of works: photo grid, large view on tap, optional category and
-  specialist tags shown on their pages. [Salon look]
+- Design system on variables (colours, fonts, button shape, light/dark).
+  [Frontend, Salon look]
 - Languages as decided: translation files for all platform texts (today
   there is no mechanism and all interface text is hardcoded Ukrainian),
   `ka` and `ru` in `SUPPORTED_LANGUAGES` with their per-language
   constraints, the address prefix and switcher, per-salon enabled and main
-  languages, the main-language fallback, staff dashboard language,
-  translatable `Service.description` (a model change, approval first).
-  Leaning: build the translation mechanism at the very start of the design
-  pass, so reworked copy is written into translation files once.
-  [Localization, Frontend: site language]
-- With the language switcher: account emails (verification, password reset,
-  email change, password changed) are hardcoded Ukrainian, and the salon
-  name in them uses `resolve_translation(salon.name, "uk")`; they should
-  follow the customer's language. [Notifications]
+  languages, the main-language fallback, translatable `Service.description`
+  (a model change, approval first). [Localization, Frontend: site language]
+- Account emails (verification, password reset, email change, password
+  changed) are hardcoded Ukrainian, and the salon name in them uses
+  `resolve_translation(salon.name, "uk")`; they should follow the customer's
+  language. [Notifications]
+- `formatPrice`: ISO codes for USD/EUR but "₴" for UAH, always ",00" for whole
+  amounts; decide symbols and whole-amount format per language. The
+  assistant must write currency the same way (today "109 UAH"). [Money
+  display]
+- Rename `middleware.ts` to the Next 16 proxy convention (the language prefix
+  rework rewrites it anyway). [Frontend]
+
+### Stage 19 (salon content backend)
+
+- Photo file storage and the upload pipeline (operator upload through the
+  import command). [Salon onboarding]
+- Gallery of works backend: photos with optional category and specialist
+  tags, added by the operator through the import command. [Salon look]
+- Per-salon look settings fields for the pilot template (main colour, logo,
+  cover, category and specialist photos, light or dark background, heading
+  font from a curated set, button shape, shown sections, home page
+  headline). [Salon look]
+- Salon profile API: `Salon.about` and the other salon-identity fields
+  (`name` is already exposed). [Salon]
+- Salon import management command, including the look settings and the PNG
+  logo. Its completeness check for enabled languages also covers assistant
+  starters (no starter saved until it is filled in for every site language).
+  [Salon onboarding, Salon look, Localization]
+- The import refuses a change of working hours or days off that would leave
+  existing bookings outside working time, and reports which bookings are
+  affected (decided 13.11.2026; the full resolution flow comes after the
+  pilot). [Salon onboarding, Business rules]
+- Lower bounds on `Salon.slot_granularity_minutes` (none anywhere) and
+  `Service.duration_minutes` (serializer only) at the source, starting with
+  the import. [Scheduling]
+- `WorkingHours` overlap validation in the import (the dashboard write API
+  checks it too, after the pilot). [Scheduling]
+- Django admin safety fixes: tenant-owned dropdowns limited to the current
+  salon, `Salon.timezone` validated on save (a bad value is a 500 today).
+  [Salon onboarding, Scheduling]
+- Admin can create mismatched Account/Customer links (link any Customer,
+  change a linked Customer's email, deleted Account leaves a claimable
+  Customer): validation in the admin forms and Django admin here, in the
+  salon admin UI when it exists. [Identity]
+
+### Stage 20 (salon site in the new design)
+
+- Salon home page (today "Сторінка салону в розробці."). [Frontend]
 - Site navigation: nothing links to `/specialists` or `/services`. [Frontend]
+- Per-salon look settings applied on every page of the pilot template.
+  [Salon look]
+- Gallery of works page: photo grid, large view on tap, tagged works shown on
+  specialist and category pages. [Salon look]
 - Navigation links ("← Профіль", "← Вхід") reworked into something minimal.
 - Booking step 3: "Далі →" has no upper bound; needs `max_advance_days` in the
   salon info endpoint (a contract change with its own test). Also revisit the
   full-page reload when paging windows. [Booking UI]
 - Booking step 4 shows price and deposit before "Підтвердити запис"; the
   deposit comes from the backend, same code as booking creation, never
-  computed in the frontend. [Booking UI]
-- `formatPrice`: ISO codes for USD/EUR but "₴" for UAH, always ",00" for whole
-  amounts; decide symbols and whole-amount format. The assistant must write
-  currency the same way (today "109 UAH"). [Money display]
+  computed in the frontend. Built with the Stage 22 0% flow in mind.
+  [Booking UI]
+- `/login` for an already authenticated user renders the form, which looks
+  like a logout; consider redirecting (option E). [Auth: session]
 - Where logout goes (today plain `/login`). [Auth: session]
 - Login notice ("Пароль змінено...") pops in after hydration; consider reading
   it server-side together with option E. [Auth: session]
@@ -168,90 +207,51 @@ on top of it.
 - Assistant widget visual design: built neutral; amber failure-block colours
   borrowed from `VerificationBanner`; styled tooltip for desktop header
   buttons if wanted; final look of the "↓" button. [Assistant widget]
-- Owner analytics dashboard for assistant counters; decide which appointment
-  statuses count as "bookings after a conversation". [Assistant]
-- Opt-in sharing of a conversation with the salon (explicit consent,
-  retention, deletion), with the salon admin UI. [Assistant]
-- Starter FAQ template (health, payment, cancellation, preparation) that a
-  new salon owner edits. [Assistant]
 - Guest manage page: a banner "create an account with this email to see all
   your bookings in one place" (verifying that email links the old guest
   bookings automatically). [Frontend: guest manage page]
+- `todayIsoDate()` in booking step 3 uses the UTC date, not the salon's (in
+  Batumi, UTC+4, it shows yesterday between 00:00 and 04:00).
+- Review dates (`ReviewsList`) have no `timeZone`, so they can shift a day.
+- `apiRequest` throws a raw `SyntaxError` on an empty or non-JSON error body.
 
-### Stage 19
+### Stage 21 (owner dashboard, pilot minimum)
 
-- Staff `TimeOff`/`WorkingHours` changes that conflict with a booked slot:
-  detection and resolution flow (rebook another specialist, rebook later, or
-  cancel with full refund). Also revisit the Stage 5 rule that refuses to
-  deactivate a specialist with future appointments (409). [Business rules]
-- Salon closure/holiday model (needed before 19/20); then the buffer rule
-  becomes "fits before the earlier of shift end and salon close". [Scheduling]
+- Salon owner dashboard: staff login and shell, appointments list, in-app
+  notifications, time blocks with note. [Salon onboarding]
+- Staff dashboard language, chosen per user. [Localization]
+- Customer-base CSV export, a download in the owner dashboard: only the
+  salon's own owner, only that salon's data, two-salon isolation tests.
+  [Business model]
 - May a salon admin book or pay as a customer? If "no", the role check goes
   into both `POST appointments/` and `POST appointments/<id>/pay/`. [Booking]
-- `no_show` cards: no badge, no money line today. [Client dashboard]
-- Local-time presentation across a DST transition (spring-forward gap in the
-  slot list). [Scheduling]
-- Lower bounds on `Salon.slot_granularity_minutes` (none anywhere) and
-  `Service.duration_minutes` (serializer only) at the source (19/20).
-  [Scheduling]
-- Blocker provenance: the engine flattens all blocking sources, so a calendar
-  that must explain why a slot is unavailable reads the rows directly.
-  [Scheduling]
+- The `/client` layout does not check the role, so an admin Account can reach
+  client pages.
 
-### Stage 20
-
-- `WorkingHours` overlap validation when it gets a write API. [Scheduling]
-- Specialist experience as a structured field; lean toward a career-start
-  date over a stored number of years. [Specialists]
-
-### Stage 21
-
-- Guest `Customer.email` is stored as typed (case-sensitive uniqueness):
-  normalize at write time plus a data migration that checks collisions first;
-  any constraint change needs approval. [Identity]
-- Verification and password-reset emails bypass the `Notification` journal
-  (`accounts/tasks.py` uses `send_mail`); route them through it so the admin
-  notifications screen is complete. [Notifications]
-- Admin can create mismatched Account/Customer links (link any Customer,
-  change a linked Customer's email, deleted Account leaves a claimable
-  Customer); add validation to the admin forms, Django admin and the salon
-  admin UI alike. [Identity]
-- After a password and email change by someone else, staff have no tool to
-  restore the account. [Auth]
-- Merging two Customers when an email change hits an address already used.
-  [Identity]
-
-### Salon settings stage (first stage where a salon edits its own settings; at the latest Stage 22)
-
-- `Salon.deposit_percentage` 0-100 `CheckConstraint` (a `Meta` change, needs
-  approval first). [Money]
-- `Salon.timezone` write-time validation (a bad value is a 500 today).
-  [Scheduling]
-- Refuse to save assistant starters until each is filled in for every site
-  language. [Assistant]
-- Lost update: saving salon settings must detect that the record changed
-  since the form was opened. [Salon]
-- Idea, not decided: the assistant's grammatical gender per salon. [Assistant]
-
-### Gate: before the first pilot salon
+### Stage 22 (pilot readiness)
 
 - 0% deposit flow (decided: no payment step, booking confirmed at once, no
   slot hold). Building it means revisiting the "Передоплата: X (сплачено)"
   line of the `BOOKING_CONFIRMED` email and the payment lines of
   `BOOKING_CREATED`. [Business model, Notifications]
+- `Salon.deposit_percentage` 0-100 `CheckConstraint` (a `Meta` change, needs
+  approval first). [Money]
+- Rate limiting on booking creation (guest and account): with 0% a booking is
+  confirmed at once with no hold, so without a limit a bot can fill a
+  salon's calendar. [Booking]
 - Manual salon pause flag (late payment, see Business model).
-- Salon import management command, including the look settings. [Salon
-  onboarding, Salon look]
-- Gallery of works (operator adds photos through the import command).
-  [Salon look]
+- Demo mode: the last booking step creates nothing in a demo salon,
+  customer accounts are off (no email sent); the assistant's daily limit per
+  salon (small for the demo). [Demo salon, Business model]
 - BellaBeauty as a Batumi salon: `Asia/Tbilisi`, GEL prices, a fictional
   Batumi address, a +995 placeholder phone, content in Georgian and every
   language the marketing site offers. [Marketing site, Demo salon]
-- Demo mode: the last booking step creates nothing in a demo salon,
-  customer accounts are off (no email sent); the assistant's daily limit per
-  salon (small for the demo); a safe way to run `seed_bella_demo` and
-  `reset_bella_demo` on the production server for the demo salon only.
-  [Demo salon, Business model]
+- BellaBeauty FAQ in English (FAQ is English-only), with more items (salon
+  content, not code). [Demo salon, Localization]
+- `REVIEW_REQUEST` is never dispatched: the message text exists, but the
+  `CONFIRMED -> COMPLETED` sweep sends nothing. [Notifications]
+- Data retention after a salon leaves or stays paused (period before
+  deletion); the privacy policy states it. [Business model]
 - Privacy policy page; must mention the `safety_identifier` sent to OpenAI.
   The widget's AI notice already links to `/privacy` (404 until then).
   The assistant is not enabled for real customers without it. [Assistant]
@@ -267,38 +267,21 @@ on top of it.
   review of 10-15 real questions in each of the four languages (Georgian,
   Russian, English, Ukrainian) required before the assistant is enabled for
   real customers. [Assistant]
-- Django admin safety fixes: tenant-owned dropdowns limited to the current
-  salon, salon time zone validated on save. [Salon onboarding]
-- Photo file storage and the upload pipeline (operator upload through the
-  import command). [Salon onboarding]
-- Salon owner dashboard: appointments list, in-app notifications, time
-  blocks (Stage 18). [Salon onboarding]
-- Georgian platform texts reviewed by a native speaker. [Localization]
+- One-page marketing site on the apex domain, content and contact channels
+  as decided (no prices, sign-up or payment). [Marketing site]
+- At the end of the stage, before the marketing site and the demo are shown
+  to owners: Georgian platform texts reviewed by a native speaker.
+  [Localization]
 
-### Gate: before a real payment provider is enabled (Stage 22 by default)
+### Stage 23 (productionization)
 
-- Refuse to start with `MockPaymentProvider` in production (its webhook
-  accepts any signature).
-- Switch the views to `get_payment_provider()` (today they use
-  `provider_class = MockPaymentProvider`; only the retry sweep uses the
-  factory), so payments and refunds never go through different providers.
-- `PaymentWebhookView` calls `initiate_refund` without a try: a provider
-  failure gives a 502, which only triggers the provider's own webhook retry
-  (safe, the event ledger makes it a no-op). Not urgent.
-- `initiate_payment` writes the Payment outside its lock (two concurrent
-  "pay" requests); it also does not check `hold_expires_at`.
-- `WayForPayProvider` cleanup: remove the "TEMPORARY" response-body logging,
-  review `refund()` logging, reconcile who wraps provider errors.
-- The `flag_stuck_refunds` race test uses a savepoint, not a second
-  connection.
-- Resume payment after lost frontend state; check first how much the
-  "Оплатити" endpoint already covers.
-- Payment provider and its credentials per salon (today one global set of
-  WayForPay env vars): deposits go to each salon's own merchant account.
-  [Business model]
-
-### Stage 22 (productionization)
-
+- Security requirement (decided 13.11.2026): in production without a real
+  payment provider, the payment endpoints and the payment webhook are off,
+  and the server refuses to start with `MockPaymentProvider` (its webhook
+  accepts any signature). [Payments]
+- A safe way to run `seed_bella_demo` and `reset_bella_demo` on the
+  production server for the demo salon only. [Demo salon]
+- Photo storage in production. [Salon onboarding]
 - `NUM_PROXIES` / `X-Forwarded-For`: spoofable while unset; affects every
   IP-keyed throttle and the assistant's `safety_identifier`. [Security]
 - `auth/refresh` has no throttle. [Auth: session]
@@ -314,27 +297,99 @@ on top of it.
   [Notifications]
 - Notification retry loop integration test with a real broker.
   [Notifications]
-- Rename `middleware.ts` to the Next 16 proxy convention. [Frontend]
 - CSP: there is none today. When one is added, the token-moving inline
   scripts on the manage, pay and reset-password pages need the nonce (or a
   hash), like Next's own inline scripts (see "Booking > Guest token").
   [Frontend]
 - Log `assistant_busy` so the ASGI trigger can be seen. [Assistant]
 
-### After the pilot (stage set when the stage order is rewritten)
+### Stage 25 (pilot launch)
 
+- Before the first paid salon: check with a Georgian accountant how the
+  platform receives payments (Georgian individual entrepreneur, Ukrainian
+  salons paying abroad). [Business model]
+- Actual subscription prices per country, set after talking to salon
+  owners. [Business model]
+- How long the founding price stays fixed (decided after talking to salons),
+  and whether future paid add-ons are included in it. [Business model]
+
+### After the pilot (numbered later, order set by pilot feedback)
+
+- Full salon-created appointments (with a customer). [Salon onboarding]
+- Staff `TimeOff`/`WorkingHours` changes that conflict with a booked slot:
+  detection and resolution flow (rebook another specialist, rebook later, or
+  cancel with full refund). Also revisit the Stage 5 rule that refuses to
+  deactivate a specialist with future appointments (409). [Business rules]
+- Salon closure/holiday model (until then, time blocks per specialist stand
+  in); then the buffer rule becomes "fits before the earlier of shift end and
+  salon close". [Scheduling]
+- `no_show` cards: no badge, no money line today. [Client dashboard]
+- Blocker provenance: the engine flattens all blocking sources, so a calendar
+  that must explain why a slot is unavailable reads the rows directly.
+  [Scheduling]
+- Specialist experience as a structured field; lean toward a career-start
+  date over a stored number of years. [Specialists]
+- Lost update: saving salon settings must detect that the record changed
+  since the form was opened. [Salon]
+- Guest `Customer.email` is stored as typed (case-sensitive uniqueness):
+  normalize at write time plus a data migration that checks collisions first;
+  any constraint change needs approval. [Identity]
+- Verification and password-reset emails bypass the `Notification` journal
+  (`accounts/tasks.py` uses `send_mail`); route them through it so the admin
+  notifications screen is complete. [Notifications]
+- After a password and email change by someone else, staff have no tool to
+  restore the account. [Auth]
+- Merging two Customers when an email change hits an address already used.
+  [Identity]
+- Owner analytics dashboard for assistant counters; decide which appointment
+  statuses count as "bookings after a conversation". [Assistant]
+- Opt-in sharing of a conversation with the salon (explicit consent,
+  retention, deletion), with the salon admin UI. [Assistant]
+- Starter FAQ template (health, payment, cancellation, preparation) that a
+  new salon owner edits. [Assistant]
+- Hold countdown on the client dashboard (no hold at 0%).
+- Idea, not decided: the assistant's grammatical gender per salon. [Assistant]
 - Templates 2 and 3; order of blocks on the home page. [Salon look]
 - Owner look editor in the dashboard. [Salon look]
 - Paid design-adaptation service: price and scope. [Salon look]
-- Full salon-created appointments (with a customer). [Salon onboarding]
 - Full marketing site with prices, sign-up and subscription payment.
   [Marketing site]
 - Testimonials from founding salons on the marketing site. [Marketing site]
 - Assistant on the marketing site answering salon owners' questions about
   SalonHub, built with the full marketing site. [Marketing site]
-- Ukrainian demo salon, for the Ukrainian wave. [Demo salon]
+- External notification channel for salons (today the salon gets no email
+  about bookings, cancellations, expiries or late refunds): decided after
+  the pilot conversations. [Salon onboarding, Notifications]
+- Ukrainian wave: Ukrainian demo salon. [Demo salon]
+- Ukrainian wave: local-time presentation across a DST transition
+  (spring-forward gap in the slot list); Georgia has no DST. [Scheduling]
 
-### After deployment, on a real phone
+### Gate: before a real payment provider is enabled (after the pilot)
+
+Passed together with the Georgian payment provider.
+
+- Switch the views to `get_payment_provider()` (today they use
+  `provider_class = MockPaymentProvider`; only the retry sweep uses the
+  factory), so payments and refunds never go through different providers.
+- `PaymentWebhookView` calls `initiate_refund` without a try: a provider
+  failure gives a 502, which only triggers the provider's own webhook retry
+  (safe, the event ledger makes it a no-op). Not urgent.
+- `initiate_payment` writes the Payment outside its lock (two concurrent
+  "pay" requests); it also does not check `hold_expires_at`.
+- `WayForPayProvider` cleanup: remove the "TEMPORARY" response-body logging,
+  review `refund()` logging, reconcile who wraps provider errors.
+- The `flag_stuck_refunds` race test uses a savepoint, not a second
+  connection.
+- Resume payment after lost frontend state; check first how much the
+  "Оплатити" endpoint already covers.
+- Payment provider and its credentials per salon (today one global set of
+  WayForPay env vars): deposits go to each salon's own merchant account
+  (also needed for per-salon WayForPay in the Ukrainian wave). [Business
+  model]
+
+### After deployment, on a real phone (Stages 23-24)
+
+Re-check each item after the Stage 20 widget redesign.
 
 - Keyboard closes after sending (checked only in DevTools).
 - AI notice against the iPhone home indicator (`safe-area-inset-bottom` is 0
@@ -367,32 +422,20 @@ on top of it.
 - A restored desktop side panel shifts the page after load: revisit if it
   proves annoying.
 - Collapse older chat parts or lengthen the 30-minute session: if wanted.
-- External notification channel for salons (today the salon gets no email
-  about bookings, cancellations, expiries or late refunds): decided after
-  the pilot conversations. [Salon onboarding, Notifications]
 - FAQ in English only: revisit when salon owners start editing FAQ in the
   dashboard. [Localization]
 
 ### No target yet
 
-- No rate limiting on booking creation (guest or account); a 15-minute hold
-  can be created without limit.
-- `todayIsoDate()` in booking step 3 uses the UTC date, not the salon's.
-- Review dates (`ReviewsList`) have no `timeZone`, so they can shift a day.
-- `apiRequest` throws a raw `SyntaxError` on an empty or non-JSON error body.
 - Throttles of register, reset and resend key on IP even for a logged-in
   caller.
 - Sliding session with no absolute maximum length.
 - Access token carries no salon claim (relies on the tenant-scoped lookup).
-- Hold countdown on the client dashboard.
 - A user with a valid session but no `csrftoken` cookie is not renewed and
   ends up at `/login` (known limitation).
-- The `/client` layout does not check the role, so an admin Account can reach
-  client pages.
 - Cancel link in the email-change notice to the old address.
 - Shared appointment-email builder refactor.
 - No email when a refund completes at the bank. [Notifications]
-- More BellaBeauty FAQ items (salon content, not code).
 
 ### Deliberately not scheduled
 
@@ -400,7 +443,8 @@ on top of it.
 - Human handoff and a knowledge base from staff answers (needs a second
   channel and a privacy decision).
 - Anthropic fallback model.
-- `Specialist.languages` (bio is enough; revisit in Stage 20 if asked).
+- `Specialist.languages` (bio is enough; revisit with services and
+  specialists in the dashboard, after the pilot, if asked).
 - Zero data retention with OpenAI.
 - `OutstandingToken.user` holds the wrong row (no security effect; matters
   only for "log out everywhere").
@@ -413,12 +457,6 @@ on top of it.
 - Specialists working across midnight (assumed not to happen).
 - Voice input in the assistant widget: a later feature after the product is
   complete; decisions kept in [Later features].
-
-### Found 10.11.2026 in the docs-cleanup code check, target to decide
-
-- `REVIEW_REQUEST` is never dispatched: the message text exists, but the
-  `CONFIRMED -> COMPLETED` sweep sends nothing. Docs claimed the email fires on
-  completion (`ARCHITECTURE.md` § 12); corrected in the cleanup.
 
 ---
 
@@ -482,7 +520,8 @@ on top of it.
 ### Django admin (platform operators only)
 
 - **`core.admin.SalonScopedAdmin` is a cross-tenant tool for platform
-  operators,** not a salon back office (that is Stages 18-21, on the JWT API).
+  operators,** not a salon back office (that is the owner dashboard, Stage 21
+  and after the pilot, on the JWT API).
   It reads through `unscoped_objects`. `formfield_for_foreignkey` binds a
   throwaway `tenant_context(-1)` around Django's eager default-manager
   evaluation, otherwise forms with an FK to another tenant-scoped model 500.
@@ -594,7 +633,8 @@ on top of it.
 - **Staff changes to `TimeOff`/`WorkingHours` that conflict with a booked
   appointment must be detected and explicitly resolved, never silently
   orphaned:** rebook with another specialist, rebook later with the same
-  one, or cancel with a full refund (resolution flow: Stage 19).
+  one, or cancel with a full refund (resolution flow: after the pilot; until
+  then the import refuses such changes, see register Stage 19).
 - **Reviews require a `COMPLETED` appointment, one per appointment,**
   immutable, no public salon reply in v1.
 - **Completion is automatic** (`CONFIRMED → COMPLETED` once `end_datetime`
@@ -720,7 +760,7 @@ Decided 13.11.2026.
   tenant-owned rows show only the current salon's rows, and the salon time
   zone is validated on save. Salon owners never get Django admin (it shows
   every salon's data).
-- **Before the pilot, the salon owner's dashboard (Stage 18) provides** the
+- **Before the pilot, the salon owner's dashboard (Stage 21) provides** the
   appointments list and in-app notifications for new bookings and
   cancellations, which stay unread until seen. No email or Telegram
   notifications to the salon for now; an external channel is decided after
@@ -730,8 +770,7 @@ Decided 13.11.2026.
   from the booking form and from the assistant's availability (same
   scheduling engine), can be deleted, and cannot overlap an existing
   appointment. Full salon-created appointments (with a customer) come after
-  the pilot; their stage is set when the stage order is rewritten at the end
-  of the roadmap gap planning.
+  the pilot (see "Stage order").
 - **Photos are uploaded files in file storage, not URL fields.** For the
   pilot the operator adds them through the import command; owner upload
   through the dashboard comes later. Both use the same upload pipeline, with
@@ -865,7 +904,8 @@ Decided 13.11.2026.
 - **Deactivating a specialist with future non-cancelled appointments is
   refused (409)** with `{future_appointment_count, future_appointment_ids}`.
   "Future" means `end_datetime > now()`; "still expected" reuses booking's
-  `ACTIVE_APPOINTMENT_STATUSES`. Revisit at Stage 19 with the conflict flow.
+  `ACTIVE_APPOINTMENT_STATUSES`. Revisit with the conflict flow (after the
+  pilot).
 - **`?service=<id>`** filters specialists to those who perform the service
   (server-side, so it works past page 1).
 - **Read serializer:** `photo`; `services` as nested `{id, name}`;
@@ -1091,6 +1131,10 @@ functions touch the ORM and need tenant context.
 - **`PaymentProvider` interface, `MockPaymentProvider` as the default
   everywhere.** Tests never need network. Stripe is unavailable for
   Ukraine/Georgia; `WayForPayProvider` exists (sandbox, not wired).
+- **In production without a real payment provider, payments are off**
+  (security requirement, decided 13.11.2026): the payment endpoints and the
+  payment webhook are disabled, and the server refuses to start with
+  `MockPaymentProvider`, whose webhook accepts any signature.
 - **`get_payment_provider()`** is the one factory; the refund retry sweep
   uses it. Views still use a `provider_class` attribute; switching them to
   the factory is part of the real-provider gate.
