@@ -97,9 +97,9 @@ When an item is done, delete its line here and update its topic section.
   i18n: which languages (Georgian is required for the pilot; e.g. English),
   how the language reaches the URL, translation files for all UI copy.
   Today there is no translation mechanism for interface labels, and all
-  interface text is hardcoded
-  Ukrainian. Leaning: build the translation mechanism at the very start of
-  the design pass, so reworked copy is written into translation files once.
+  interface text is hardcoded Ukrainian. Leaning: build the translation
+  mechanism at the very start of the design pass, so reworked copy is
+  written into translation files once.
   When it exists, the site-language module reads the customer's choice
   instead of a constant. [Frontend: site language, Localization, Business
   model]
@@ -112,6 +112,9 @@ When an item is done, delete its line here and update its topic section.
 - Before the first paid salon: check with a Georgian accountant how the
   platform receives payments (Georgian individual entrepreneur, Ukrainian
   salons paying abroad). [Business model]
+- Rewrite the stage order 18-23 at the end of the roadmap gap planning:
+  place the design pass, the pilot gate and the first pilot salon
+  explicitly. [Roadmap]
 
 ### Stage 18
 
@@ -206,8 +209,6 @@ on top of it.
   restore the account. [Auth]
 - Merging two Customers when an email change hits an address already used.
   [Identity]
-- The salon receives no email about bookings, cancellations, expiries or late
-  refunds. [Notifications]
 
 ### Salon settings stage (first stage where a salon edits its own settings; at the latest Stage 22)
 
@@ -228,6 +229,13 @@ on top of it.
   line of the `BOOKING_CONFIRMED` email and the payment lines of
   `BOOKING_CREATED`. [Business model, Notifications]
 - Manual salon pause flag (late payment, see Business model).
+- Salon import management command. [Salon onboarding]
+- Django admin safety fixes: tenant-owned dropdowns limited to the current
+  salon, salon time zone validated on save. [Salon onboarding]
+- Photo file storage and the upload pipeline (operator upload through the
+  import command). [Salon onboarding]
+- Salon owner dashboard: appointments list, in-app notifications, time
+  blocks (Stage 18). [Salon onboarding]
 
 ### Gate: before a real payment provider is enabled (Stage 22 by default)
 
@@ -320,6 +328,9 @@ on top of it.
 - A restored desktop side panel shifts the page after load: revisit if it
   proves annoying.
 - Collapse older chat parts or lengthen the 30-minute session: if wanted.
+- External notification channel for salons (today the salon gets no email
+  about bookings, cancellations, expiries or late refunds): decided after
+  the pilot conversations. [Salon onboarding, Notifications]
 
 ### No target yet
 
@@ -644,6 +655,49 @@ Decided 12-13.11.2026.
   mind), and when the platform is at fault (long outage, the platform stops
   the service).
 
+### Salon onboarding
+
+Decided 13.11.2026.
+
+- **For the pilot the platform operator onboards each salon by hand.**
+  Self-signup comes later, when there are too many salons to onboard
+  personally.
+- **An import management command, one data file per salon:** salon settings,
+  categories, services with translations, specialists, their services and
+  weekly hours, FAQ, photos. It validates the whole file before writing
+  anything (time zone, required languages, references between rows, prices)
+  and reports errors by location in the file; writes everything in one
+  transaction; is idempotent (a re-run updates instead of duplicating); and
+  works on one salon per run. It reuses the create-or-update helpers of
+  `seed_bella_demo` where they fit. The file template doubles as the
+  questionnaire for the salon owner. Salon data files contain personal data
+  and are kept outside the repository.
+- **Django admin stays the fallback, with two safety fixes:** dropdowns of
+  tenant-owned rows show only the current salon's rows, and the salon time
+  zone is validated on save. Salon owners never get Django admin (it shows
+  every salon's data).
+- **Before the pilot, the salon owner's dashboard (Stage 18) provides** the
+  appointments list and in-app notifications for new bookings and
+  cancellations, which stay unread until seen. No email or Telegram
+  notifications to the salon for now; an external channel is decided after
+  talking to pilot salons.
+- **Before the pilot, staff can block time for phone/Instagram bookings:**
+  specialist, start and end, optional short note. A block hides that time
+  from the booking form and from the assistant's availability (same
+  scheduling engine), can be deleted, and cannot overlap an existing
+  appointment. Full salon-created appointments (with a customer) come after
+  the pilot; their stage is set when the stage order is rewritten at the end
+  of the roadmap gap planning.
+- **Photos are uploaded files in file storage, not URL fields.** For the
+  pilot the operator adds them through the import command; owner upload
+  through the dashboard comes later. Both use the same upload pipeline, with
+  these rules from the start: only JPEG, PNG and WebP (no SVG); the file is
+  opened and checked with Pillow, never trusted by name or extension; the
+  image is re-encoded and the original is never stored (this also strips
+  metadata such as GPS); limits on file size and pixel count; a random file
+  name, never the uploaded one; files stored per salon; a photo can be
+  attached only to the salon's own objects.
+
 ---
 
 ## Catalog and specialists
@@ -680,7 +734,8 @@ Decided 12-13.11.2026.
   with this name already exists."), not naming the language.
 - `Service.description`: optional plain text, not translatable.
   `ServiceCategory.photo`: a URL field like `Specialist.photo` (no upload
-  infrastructure; real photo upload is deferred).
+  infrastructure yet). Real photo upload: operator upload through the import
+  command for the pilot, owner upload later (see "Salon onboarding").
 
 ### Specialists
 
