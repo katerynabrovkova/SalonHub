@@ -93,16 +93,6 @@ When an item is done, delete its line here and update its topic section.
   marketing site with pricing, salon onboarding, subscriptions and billing.
   The design pass does not start until the plan is recorded. The business
   model itself is decided. [Roadmap, Business model]
-- Roadmap gap planning also covers the UI language switcher and UI chrome
-  i18n: which languages (Georgian is required for the pilot; e.g. English),
-  how the language reaches the URL, translation files for all UI copy.
-  Today there is no translation mechanism for interface labels, and all
-  interface text is hardcoded Ukrainian. Leaning: build the translation
-  mechanism at the very start of the design pass, so reworked copy is
-  written into translation files once.
-  When it exists, the site-language module reads the customer's choice
-  instead of a constant. [Frontend: site language, Localization, Business
-  model]
 - Actual subscription prices per country, set after talking to salon
   owners. [Business model]
 - How long the founding price stays fixed (decided after talking to salons),
@@ -133,6 +123,15 @@ on top of it.
 
 - Design system, apex marketing landing page, salon home page (today
   "Сторінка салону в розробці."). [Frontend]
+- Languages as decided: translation files for all platform texts (today
+  there is no mechanism and all interface text is hardcoded Ukrainian),
+  `ka` and `ru` in `SUPPORTED_LANGUAGES` with their per-language
+  constraints, the address prefix and switcher, per-salon enabled and main
+  languages, the main-language fallback, staff dashboard language,
+  translatable `Service.description` (a model change, approval first).
+  Leaning: build the translation mechanism at the very start of the design
+  pass, so reworked copy is written into translation files once.
+  [Localization, Frontend: site language]
 - With the language switcher: account emails (verification, password reset,
   email change, password changed) are hardcoded Ukrainian, and the salon
   name in them uses `resolve_translation(salon.name, "uk")`; they should
@@ -236,6 +235,7 @@ on top of it.
   import command). [Salon onboarding]
 - Salon owner dashboard: appointments list, in-app notifications, time
   blocks (Stage 18). [Salon onboarding]
+- Georgian platform texts reviewed by a native speaker. [Localization]
 
 ### Gate: before a real payment provider is enabled (Stage 22 by default)
 
@@ -264,6 +264,8 @@ on top of it.
 - Privacy policy page; must mention the `safety_identifier` sent to OpenAI.
   The widget's AI notice already links to `/privacy` (404 until then).
   The assistant is not enabled for real customers without it. [Assistant]
+- Whether legal texts (privacy policy) need a professional translator;
+  decided closer to launch. [Localization]
 - Gate "Assistant quality before launch": model and reasoning effort (today
   `gpt-6-luna`, `low`; try `medium`), budget per salon, and whether to give
   the model a whole-salon snapshot instead of tools only (size, cost with
@@ -331,6 +333,8 @@ on top of it.
 - External notification channel for salons (today the salon gets no email
   about bookings, cancellations, expiries or late refunds): decided after
   the pilot conversations. [Salon onboarding, Notifications]
+- FAQ in English only: revisit when salon owners start editing FAQ in the
+  dashboard. [Localization]
 
 ### No target yet
 
@@ -732,7 +736,8 @@ Decided 13.11.2026.
   Python-side `UniqueConstraint.validate()` fails on admin saves). Untranslated
   languages never collide. The serializer error stays generic ("A category
   with this name already exists."), not naming the language.
-- `Service.description`: optional plain text, not translatable.
+- `Service.description`: optional plain text; becomes translatable (see
+  Localization).
   `ServiceCategory.photo`: a URL field like `Specialist.photo` (no upload
   infrastructure yet). Real photo upload: operator upload through the import
   command for the pilot, owner upload later (see "Salon onboarding").
@@ -1403,7 +1408,8 @@ functions touch the ORM and need tenant context.
   ```
 - **Language:** the recipient Customer's `preferred_language` (the site
   language at booking time, see Identity) through `resolve_language_code`
-  (`en` fallback); salon-directed alerts are English.
+  (the salon's main language as fallback, see Localization); salon-directed
+  alerts use the salon's main language.
   `_MESSAGES` is `{trigger: {lang: (subject, body)}}`.
 - **Account emails** (verification, password reset, email change, password
   changed) are Celery tasks in `accounts/tasks.py` that receive only plain
@@ -1445,8 +1451,20 @@ functions touch the ORM and need tenant context.
 
 ## Localization (content)
 
-- **Languages `en` and `uk`;** nothing may assume exactly two. **`en` is the
-  single global fallback;** no per-salon default language.
+Language decisions dated 13.11.2026 unless marked otherwise.
+
+- **Four platform languages: Georgian `ka`, English `en`, Russian `ru`,
+  Ukrainian `uk`,** for all platform texts (UI, emails, assistant widget
+  texts); nothing may assume a fixed number.
+- **Each salon chooses which of the four its site shows (at least one) and
+  one main language.** A language can be enabled for a salon only when all of
+  the salon's texts in it are filled: salon name and `about`, category and
+  service names, service descriptions, specialist names and bios, assistant
+  starters. The import command rejects a file with missing translations for
+  enabled languages.
+- **The fallback is the salon's main language everywhere** (read API and
+  emails), only as a safety net against bugs, never as a way of working.
+  There is no global `en` fallback.
 - **Storage:** each translatable field is a `JSONField` dict
   `{lang: string}`, so a new language needs no new columns; it still needs a
   migration that adds its per-language constraints (name uniqueness in
@@ -1455,13 +1473,18 @@ functions touch the ORM and need tenant context.
 - **Translatable:** `ServiceCategory.name`, `Service.name`, `Salon.name`,
   `Salon.about` (max 2000 per language, DB `CheckConstraint`; an absent key
   passes), `Salon.assistant_starters` (a list of dicts), `Specialist.name`,
-  `Specialist.bio`, notification templates. **Not translatable:**
-  `Review.text`, `TimeOff.reason`, `Appointment.cancellation_reason`,
-  `Service.description`, `FAQItem`, salon `address`.
+  `Specialist.bio`, `Service.description` (decided; the model change needs
+  approval before any code), notification templates. **Not translatable:**
+  `Review.text`, `TimeOff.reason`, `Appointment.cancellation_reason`, salon
+  `address`.
+- **`FAQItem` is one language, English:** only the assistant reads it, models
+  understand English best, and the assistant translates the answer into the
+  customer's language. Revisited when salon owners edit FAQ in the
+  dashboard (see register).
 - **Read API:** `?lang=` returns the resolved plain string, never the dict.
-  Fallback chain: requested → `en` → first non-empty in the supported-language
-  order → `""`. A missing or unsupported `lang` silently falls back (it is a
-  frontend display parameter, not user data). Nested and non-generic
+  Fallback chain: requested → the salon's main language → first non-empty in
+  the supported-language order → `""`. A missing or unsupported `lang`
+  silently falls back (it is a frontend display parameter, not user data). Nested and non-generic
   serializers resolve too; a hand-built serializer must get
   `context={"request": request}`.
 - **Write API:** a separate serializer that takes the full dict; unknown
@@ -1478,8 +1501,13 @@ functions touch the ORM and need tenant context.
 - **Email language:** `Customer.preferred_language` (no `choices`, `""` =
   unset), independent of `?lang=`; set from the site language at booking
   time (see Identity).
-- **Out of scope here:** UI-chrome translation (design pass) and staff
-  interface language.
+- **Staff dashboard language:** each staff member chooses their own from the
+  four languages, independent of the salon site's languages.
+- **Platform text translations are AI-drafted;** Ukrainian, Russian and
+  English are checked by the operator, Georgian is reviewed by a native
+  speaker before the first pilot salon. Whether legal texts (privacy policy)
+  need a professional translator is decided closer to launch.
+- The language in the page address: see "Frontend > Site language".
 
 ---
 
@@ -1672,8 +1700,19 @@ generated OpenAPI client). Pins: see "Dependency pins".
   returns `"uk"`. The two booking request helpers (`createGuestBooking`,
   `createAccountBooking`) add it as `language`, so every booking sends it.
   `<html lang>` and the assistant API's `?lang=` read it from that module,
-  never their own `"uk"` literal. When the UI language switcher exists, the
-  module reads the customer's choice instead of a constant.
+  never their own `"uk"` literal. Once language prefixes exist, the module
+  reads the language from the page address instead of a constant.
+- **The language is a prefix of the page address** (decided 13.11.2026):
+  `/ka/...`, `/en/...`, `/ru/...`, `/uk/...`. The prefix always wins; a
+  prefix for a language the salon has not enabled redirects to the same page
+  in the salon's main language (no 404). An address without a prefix
+  redirects to the visitor's browser language if the salon has it enabled,
+  otherwise to the salon's main language. A manual choice in the switcher is
+  remembered and used for later visits. Old addresses without a prefix
+  (including links in emails already sent) keep working through the
+  redirect. **Requirement when building the redirects:** check in a real
+  browser that the manage, pay and reset-password pages still read and
+  remove the token in the `#` part (see "Booking > Guest token").
 - **Every backend request carries `?lang=<site language>`, added in the
   shared request layer, not per call site** (decided 11.11.2026). Reason: a
   new page must not be able to forget the language; before this most
@@ -1881,9 +1920,9 @@ Disabled for real customers until the privacy page exists and the gate
   endpoint returns exactly `currency`, `name`, `assistant_enabled`,
   `assistant_starters`.
 - **`FAQItem`** (in `tenants`: it describes the salon): `question` (200),
-  `answer` (1000), `ordering`, `is_active`; one language; at most 50 active
-  per salon, checked in `clean()` (the cross-row race is accepted, the only
-  writer is the operator). Why 50: `get_faq` sends the whole active list on
+  `answer` (1000), `ordering`, `is_active`; one language, English (see
+  Localization); at most 50 active per salon, checked in `clean()` (the
+  cross-row race is accepted, the only writer is the operator). Why 50: `get_faq` sends the whole active list on
   every call. Hard delete allowed. No deposit or cancellation items: those
   rules reach the model from the instructions and `get_salon_info`, and a
   copy would go stale.
