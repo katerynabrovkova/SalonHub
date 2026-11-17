@@ -215,6 +215,24 @@ When an item is done, delete its line here and update its topic section.
 - Review dates (`ReviewsList`) have no `timeZone`, so they can shift a day.
 - `apiRequest` throws a raw `SyntaxError` on an empty or non-JSON error body.
 
+#### Frontend error handling (found 17.11.2026, fix with the Stage 20 redesign at the latest)
+
+- `/register` can show raw English backend messages ("Request failed.", "An
+  unexpected error occurred.", the `unique_violation` text) for a 400 without
+  field details and for a 500. [Frontend]
+- Messages that blame the user's internet for server failures: guest manage
+  cancel shows "Перевірте інтернет..." for 5xx; dashboard Pay shows "Сервіс
+  оплати тимчасово не відповідає" for 401/403/500. [Frontend]
+- `/verify-email` shows "Посилання недійсне або застаріле." for any failure,
+  including network, 429 and 500. [Frontend]
+- `/reset-password` link check treats 429, 500 and network errors as a valid
+  link; the problem only appears on submit. [Frontend]
+- `/booking/pay` shows "Посилання недійсне або застаріле." for any detail-load
+  failure, including 5xx and network. [Frontend]
+- No app-level `error.tsx` or root `not-found.tsx`: a failed server-rendered
+  fetch shows the default English Next.js error page, and `notFound()` outside
+  `/specialists/[id]` shows the default English 404. [Frontend]
+
 ### Stage 21 (owner dashboard, pilot minimum)
 
 - Salon owner dashboard: staff login and shell, appointments list, in-app
